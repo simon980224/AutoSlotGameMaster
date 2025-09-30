@@ -5,7 +5,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.service import Service
 import time
-import os
+import os, pyautogui
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
@@ -15,6 +15,7 @@ from selenium.webdriver.common.by import By
 chrome_service = Service("/Users/ayuan/Desktop/helpblack/chromedriver")
 chrome_options = webdriver.ChromeOptions()
 chrome_options.add_argument("--window-size=400,600")
+chrome_options.add_argument("--window-position=100,100")
 driver = webdriver.Chrome(service=chrome_service, options=chrome_options)
 
 driver.get("https://cyf888.com/#/login")
@@ -35,7 +36,24 @@ driver.find_element(By.XPATH, captcha_xpath).send_keys(captcha)
 
 login_button_xpath = "/html/body/div/div/div[3]/div[2]/form/button"
 driver.find_element(By.XPATH, login_button_xpath).click()
-time.sleep(5)  # 等待登入完成
+
+# 用 WebDriverWait 最多等 10 秒，若有公告遮罩才執行隱藏
+try:
+    WebDriverWait(driver, 10).until(
+        lambda d: d.execute_script("return document.querySelectorAll('div.fixed.top-0.left-0.w-full.h-full.flex').length > 0;")
+    )
+    driver.execute_script("""
+      document.querySelectorAll('div.fixed.top-0.left-0.w-full.h-full.flex')
+        .forEach(n => {
+          if ((n.className||'').includes('z-[90]')) {
+            n.style.setProperty('display','none','important');
+            n.style.pointerEvents = 'none';
+          }
+        });
+    """)
+    time.sleep(1)
+except Exception:
+    pass
 
 notice_xpath = "/html/body/div/div/div[3]/div[1]/div[1]/div/button[1]"
 driver.find_element(By.XPATH, notice_xpath).click()
@@ -56,10 +74,33 @@ driver.switch_to.window(driver.window_handles[-1])
 try:
     atg_xpath = "/html/body/div/div/div[3]/div[2]/div/div[1]/div[2]/button"
     driver.find_element(By.XPATH, atg_xpath).click()
-    time.sleep(10)  # 等待新分頁載入
+    time.sleep(20)  # 等待新分頁載入
 
 except Exception as e:
     print("找不到遊戲內容")
+
+# === 找到 canvas ===
+canvas = driver.find_element(By.ID, "GameCanvas")
+
+# 你自己量到的螢幕絕對座標
+TARGET1_X, TARGET1_Y = 346, 588   # ← 換成你實測的值
+time.sleep(2)  # 給你 2 秒把視窗切到遊戲
+pyautogui.click(TARGET1_X, TARGET1_Y)
+
+TARGET2_X, TARGET2_Y = 495, 569   # ← 換成你實測的值
+time.sleep(2)  # 給你 2 秒把視窗切到遊戲
+pyautogui.click(TARGET2_X, TARGET2_Y)
+
+TARGET3_X, TARGET3_Y = 562, 561   # ← 換成你實測的值
+
+time.sleep(2)  # 給你 2 秒把視窗切到遊戲
+
+# 持續按住空白鍵，每 100 秒釋放再重新按住
+while True:
+    pyautogui.keyDown('space')
+    time.sleep(0.5)
+    pyautogui.keyUp('space')
+    time.sleep(0.5)  # 可微調，避免太快重複
 
 input("請操作完畢後按 Enter 結束...")
 driver.quit()
