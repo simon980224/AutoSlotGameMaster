@@ -205,6 +205,28 @@ def navigate_to_JFW(driver, browser_number, credentials):
                 print(f"瀏覽器 {username} 點擊遊玩按鈕失敗: {play_button_error}")
             
             print(f"瀏覽器 {username} 成功導向賽特")
+
+            # 更新瀏覽器大小並進行排版
+            # 獲取螢幕大小
+            screen_width, screen_height = pyautogui.size()
+            
+            # 計算每個瀏覽器的寬度和高度（5列4行）
+            browser_width = screen_width // 5
+            browser_height = screen_height // 4
+            
+            # 計算當前瀏覽器的位置（browser_number從1開始）
+            # 位置計算：第1個在(0,0)，第2個在(1,0)...第6個在(0,1)
+            col = (browser_number - 1) % 5  # 列位置 (0-4)
+            row = (browser_number - 1) // 5  # 行位置 (0-3)
+            
+            x_position = col * browser_width
+            y_position = row * browser_height
+            
+            # 設置瀏覽器窗口位置和大小
+            driver.set_window_position(x_position, y_position)
+            driver.set_window_size(browser_width, browser_height)
+            
+            print(f"瀏覽器 {username} 已排版至位置({x_position}, {y_position})，大小({browser_width}x{browser_height})")
             
             return  # 成功後退出函數
         
@@ -233,14 +255,10 @@ def close_browser(browser_number, driver):
             print(f"關閉瀏覽器 {browser_number} 時發生錯誤: {e}")
 
 
-def main():
+if __name__ == "__main__":
     """主程式函數"""
     # 獲取 ChromeDriver 路徑
     driver_path = get_chromedriver_path()
-    
-    # 獲取螢幕大小
-    screen_width, screen_height = pyautogui.size()
-    print(f"螢幕大小: {screen_width} x {screen_height}")
 
     # 讀取用戶帳密資料
     user_credentials = load_user_credentials()
@@ -248,35 +266,21 @@ def main():
         print("無法讀取用戶資料，程式終止")
         exit(1)
 
-    # 計算每個瀏覽器的寬度（平均分配4個）和高度（螢幕上方1/3）
-    browser_width = screen_width // 4
-    browser_height = screen_height // 3  # 改為螢幕高度的1/3
-
-    # 建立4個瀏覽器實例（依序啟動以避免衝突）
     drivers = []
     base_port = 9222  # 起始端口
 
     # TODO: 依序啟動瀏覽器以避免衝突
-    for i in range(1):
-        x_position = i * browser_width
-        y_position = 0
+    for i in range(12):
         port_number = base_port + i  # 依序端口：9222, 9223, 9224, 9225
         
-        print(f"建立瀏覽器 {i+1}: 位置({x_position}, {y_position}), 大小({browser_width} x {browser_height}), 端口({port_number})")
+        print(f"建立瀏覽器 {i+1}: 端口({port_number})")
         
         try:
             driver = create_browser(driver_path ,port_number)
             drivers.append(driver)
-            print(f"瀏覽器 {i+1} 建立完成")
             time.sleep(1)  # 添加小延遲避免衝突
         except Exception as e:
-            print(f"瀏覽器 {i+1} 建立失敗: {e}")
             drivers.append(None)  # 即使失敗也要添加佔位符
-
-    print("所有瀏覽器已建立完成")
-
-    # 讓所有瀏覽器同時導向目標網站
-    print("正在同時導向目標網站...")
 
     # 建立線程列表
     threads = []
@@ -291,7 +295,6 @@ def main():
     for thread in threads:
         thread.join()
 
-    print("所有瀏覽器已導向目標網站")
     input("按 Enter 鍵關閉所有瀏覽器...")
 
     # 建立線程列表用於關閉瀏覽器
@@ -308,7 +311,3 @@ def main():
         thread.join()
 
     print("所有瀏覽器已關閉")
-
-
-if __name__ == "__main__":
-    main()
