@@ -54,28 +54,19 @@ def load_user_credentials():
         print(f"找不到用戶資料文件: {userinfo_path}")
         return []
 
-def get_screen_size():
-    """使用 pyautogui 獲取螢幕大小"""
-    screen_width, screen_height = pyautogui.size()
-    return screen_width, screen_height
-
-def create_browser(x_position, y_position, width, height, port_number):
+def create_browser(driver_path, port_number):
     """建立瀏覽器並設定位置、大小和依序端口"""
+    service = Service(driver_path)  # 創建獨立的 Service 實例避免衝突
+
     chrome_options = Options()
-    chrome_options.add_argument(f"--window-position={x_position},{y_position}")  # 設定瀏覽器視窗在螢幕上的初始位置 (x, y 座標)
-    # chrome_options.add_argument(f"--window-size={width},{height}")  # 設定瀏覽器視窗的初始大小 (寬度, 高度) - 註解以保持原始大小
-    # 添加穩定性選項
-    chrome_options.add_argument("--no-sandbox")  # 禁用沙盒模式，避免在某些環境下的權限問題
+    chrome_options.add_argument("--no-sandbox") # 禁用沙盒模式，避免在某些環境下的權限問題
     chrome_options.add_argument("--disable-dev-shm-usage")  # 禁用 /dev/shm 使用，解決共享記憶體不足的問題
     chrome_options.add_argument("--disable-gpu")  # 禁用 GPU 硬體加速，提高在虛擬環境或無顯示環境中的穩定性
     chrome_options.add_argument("--disable-extensions")  # 禁用所有瀏覽器擴充功能，減少干擾和提高啟動速度
     chrome_options.add_argument("--disable-plugins")  # 禁用所有插件 (如 Flash)，減少潜在衝突
     chrome_options.add_argument("--disable-images")  # 禁用圖片加載，減少網路流量和記憶體使用，提高頁面載入速度
     chrome_options.add_argument(f"--remote-debugging-port={port_number}")  # 設定遠端調試端口，允許外部工具連接並控制瀏覽器
-    
-    # 創建獨立的 Service 實例避免衝突
-    service = Service(driver_path)
-    
+
     driver = webdriver.Chrome(service=service, options=chrome_options)
     # 設置更長的超時時間
     driver.set_page_load_timeout(300)  # 5分鐘超時
