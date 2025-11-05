@@ -4,18 +4,49 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from webdriver_manager.chrome import ChromeDriverManager
 import time
 import threading
 import pyautogui
 import os
+import platform
 
-# 設定 ChromeDriver 路徑 (使用絕對路徑確保能找到文件)
-current_dir = os.path.dirname(os.path.abspath(__file__))  # 獲取當前腳本所在目錄
-project_root = os.path.dirname(current_dir)  # 獲取專案根目錄
-driver_path = os.path.join(project_root, "chromedriver")  # 組合 chromedriver 絕對路徑
+# 自動檢測並設定 ChromeDriver 路徑
+def get_chromedriver_path():
+    """自動獲取 ChromeDriver 路徑，優先使用 webdriver-manager"""
+    try:
+        # 優先使用 webdriver-manager 自動下載和管理 ChromeDriver
+        print("正在使用 webdriver-manager 自動設定 ChromeDriver...")
+        return ChromeDriverManager().install()
+    except Exception as e:
+        print(f"webdriver-manager 失敗，嘗試使用本地 ChromeDriver: {e}")
+        
+        # 如果 webdriver-manager 失敗，嘗試使用專案中的 chromedriver
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.dirname(current_dir)
+        
+        # 根據作業系統選擇正確的檔案名稱
+        system = platform.system().lower()
+        if system == "windows":
+            driver_filename = "chromedriver.exe"
+        else:
+            driver_filename = "chromedriver"
+        
+        driver_path = os.path.join(project_root, driver_filename)
+        
+        if os.path.exists(driver_path):
+            print(f"使用本地 ChromeDriver: {driver_path}")
+            return driver_path
+        else:
+            raise FileNotFoundError(f"找不到 ChromeDriver 檔案: {driver_path}")
+
+# 獲取 ChromeDriver 路徑
+driver_path = get_chromedriver_path()
 
 def load_user_credentials():
     """從 userinfo.txt 讀取用戶帳號密碼"""
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(current_dir)
     userinfo_path = os.path.join(project_root, "userinfo.txt")
     credentials = []
     
