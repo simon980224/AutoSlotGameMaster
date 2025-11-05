@@ -11,37 +11,20 @@ import pyautogui
 import os
 import platform
 
-# 自動檢測並設定 ChromeDriver 路徑
 def get_chromedriver_path():
-    """自動獲取 ChromeDriver 路徑，優先使用 webdriver-manager"""
-    try:
-        # 優先使用 webdriver-manager 自動下載和管理 ChromeDriver
-        print("正在使用 webdriver-manager 自動設定 ChromeDriver...")
-        return ChromeDriverManager().install()
-    except Exception as e:
-        print(f"webdriver-manager 失敗，嘗試使用本地 ChromeDriver: {e}")
-        
-        # 如果 webdriver-manager 失敗，嘗試使用專案中的 chromedriver
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        project_root = os.path.dirname(current_dir)
-        
-        # 根據作業系統選擇正確的檔案名稱
-        system = platform.system().lower()
-        if system == "windows":
-            driver_filename = "chromedriver.exe"
-        else:
-            driver_filename = "chromedriver"
-        
-        driver_path = os.path.join(project_root, driver_filename)
-        
-        if os.path.exists(driver_path):
-            print(f"使用本地 ChromeDriver: {driver_path}")
-            return driver_path
-        else:
-            raise FileNotFoundError(f"找不到 ChromeDriver 檔案: {driver_path}")
-
-# 獲取 ChromeDriver 路徑
-driver_path = get_chromedriver_path()
+    """自動獲取 ChromeDriver 路徑，優先使用本地驅動檔案"""
+    # 獲取專案根目錄路徑
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(current_dir)
+    
+    # 根據作業系統選擇正確的檔案名稱
+    system = platform.system().lower()
+    if system == "windows":
+        driver_filename = "chromedriver.exe"
+    else :  # macOS
+        driver_filename = "chromedriver"
+    
+    return os.path.join(project_root, driver_filename)
 
 def load_user_credentials():
     """從 userinfo.txt 讀取用戶帳號密碼"""
@@ -54,8 +37,10 @@ def load_user_credentials():
         with open(userinfo_path, 'r', encoding='utf-8') as file:
             lines = file.readlines()
             for line_num, line in enumerate(lines):
+                if line_num == 0:  # 直接跳過第一行
+                    continue
                 line = line.strip()
-                if line and ':' in line and not line.startswith('帳號:'):  # 跳過標題行
+                if line and ':' in line:
                     username, password = line.split(':', 1)  # 只分割第一個冒號
                     credentials.append({
                         'username': username.strip(),
@@ -65,11 +50,8 @@ def load_user_credentials():
         print(f"成功讀取 {len(credentials)} 組用戶帳密")
         return credentials
     
-    except FileNotFoundError:
+    except:
         print(f"找不到用戶資料文件: {userinfo_path}")
-        return []
-    except Exception as e:
-        print(f"讀取用戶資料時發生錯誤: {e}")
         return []
 
 def get_screen_size():
