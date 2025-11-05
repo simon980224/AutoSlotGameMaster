@@ -46,7 +46,7 @@ time.sleep(10)
 # === 處理公告遮罩 ===
 try:
     # 等待任何遮罩出現（最多 10 秒）
-    WebDriverWait(driver, 10).until(
+    WebDriverWait(driver, 5).until(
         lambda d: d.execute_script("""
             return document.querySelector('div.box, div.close, div.activewrapper') !== null;
         """)
@@ -111,7 +111,6 @@ time.sleep(1)
 start_xpath = "/html/body/div[2]/div[3]/div/section/div/main/div[3]/div[2]/div/div/div[1]/div[2]/div[3]/div[3]"
 driver.find_element(By.XPATH, start_xpath).click()
 time.sleep(30)
-input("請確認遊戲已經載入完成後按 Enter 繼續...")
 
 # === 在 Canvas 中點擊遊戲畫面 ===
 # === 列出所有帶 id 的元素（確認 GameCanvas 是否動態載入）===
@@ -121,7 +120,6 @@ try:
         EC.presence_of_element_located((By.ID, "gameFrame-0"))
     )
     driver.switch_to.frame(iframe)
-    print("✅ 已切入 iframe: gameFrame-0")
 
     # 取得 Canvas 實際位置與大小
     rect = driver.execute_script("""
@@ -129,7 +127,6 @@ try:
         const r = canvas.getBoundingClientRect();
         return {x: r.left, y: r.top, w: r.width, h: r.height};
     """)
-    input("請確認 Canvas 位置與大小：" + str(rect) + "，按 Enter 繼續...")
     # === 1️⃣ 點擊贏分區 ===
     win_x = rect["x"] + rect["w"] * 0.5
     win_y = rect["y"] + rect["h"] * 0.93
@@ -145,10 +142,10 @@ try:
     print(f"✅ 已在贏分區點擊 ({win_x:.1f}, {win_y:.1f})")
 
     # 暫停 1 秒等待動畫或彈窗出現
-    input("請確認已經完成點擊動作後按 Enter 繼續...")
+    time.sleep(3)
     # === 2️⃣ 點擊確定按鈕區 ===
     confirm_x = rect["x"] + rect["w"] * 0.748
-    confirm_y = rect["y"] + rect["h"] * 0.6
+    confirm_y = rect["y"] + rect["h"] * 0.92
 
     for ev in ["mousePressed", "mouseReleased"]:
         driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
@@ -163,61 +160,27 @@ try:
 except Exception as e:
     print("❌ 無法切入或操作 iframe：", e)
 
-input("請確認已經完成點擊動作後按 Enter 繼續...")
+time.sleep(1)
 
+# === 自動按空白鍵 ===
+print("🟢 開始自動按空白鍵，每 0.5 秒一次...")
+print("⚠️ 按下 Enter 鍵可暫停程式...")
 
-# # 1️⃣ 切換到最新開啟的視窗
-# if len(driver.window_handles) > 1:
-#     driver.switch_to.window(driver.window_handles[-1])
-#     print("🪟 已切換至最新遊戲視窗")
-# else:
-#     print("ℹ️ 目前僅有一個視窗")
-
-# # 2️⃣ 嘗試切入 iframe（有些遊戲包在 iframe 裡）
-# try:
-#     iframe = WebDriverWait(driver, 5).until(
-#         EC.presence_of_element_located((By.TAG_NAME, "iframe"))
-#     )
-#     driver.switch_to.frame(iframe)
-#     print("✅ 已切入遊戲 iframe")
-# except:
-#     print("ℹ️ 沒有偵測到 iframe，繼續在目前頁面")
-
-# # 3️⃣ 檢查 Canvas 是否出現
-# exists = driver.execute_script("return !!document.getElementById('GameCanvas');")
-# print("Canvas 是否存在於目前頁面：", exists)
-
-# # 4️⃣ 若存在 → JS 點擊 Canvas
-# if exists:
-#     driver.execute_script("""
-#         const canvas = document.getElementById('GameCanvas');
-#         const rect = canvas.getBoundingClientRect();
-#         const x = rect.left + rect.width / 2;
-#         const y = rect.top + rect.height / 2;
-#         const opts = {bubbles:true, cancelable:true, view:window, clientX:x, clientY:y};
-#         ['mousedown','mouseup','click'].forEach(ev => canvas.dispatchEvent(new MouseEvent(ev, opts)));
-#         console.log('✅ 已在 Canvas 點擊中心');
-#     """)
-# else:
-#     print("❌ 仍未找到 Canvas，可能在另一層 iframe 或尚未載入完成")
-
-
-# TARGET1_X, TARGET1_Y = 346, 588
-# time.sleep(2)  
-# pyautogui.click(TARGET1_X, TARGET1_Y)
-
-# TARGET2_X, TARGET2_Y = 495, 569
-# time.sleep(2)
-# pyautogui.click(TARGET2_X, TARGET2_Y)
-
-# TARGET3_X, TARGET3_Y = 562, 561
-# time.sleep(2)
-# pyautogui.click(TARGET3_X, TARGET3_Y)
-
-# # === 自動按空白鍵 ===
-# print("🟢 開始自動按空白鍵，每 0.5 秒一次...")
-# while True:
-#     pyautogui.keyDown('space')
-#     time.sleep(0.5)
-#     pyautogui.keyUp('space')
-#     time.sleep(0.5)
+try:
+    while True:
+        print("按下 Enter 繼續...")
+        input()  # 等待使用者按下 Enter
+        print("▶️ 開始執行自動按空白鍵...")
+        
+        # 持續按空白鍵直到使用者再次按下 Enter
+        while True:
+            try:
+                pyautogui.keyDown('space')
+                time.sleep(0.5)
+                pyautogui.keyUp('space')
+                time.sleep(0.5)
+            except KeyboardInterrupt:  # 當使用者按下 Enter 時會觸發 KeyboardInterrupt
+                print("⏸️ 程式已暫停")
+                break  # 跳出內層迴圈，回到等待 Enter 的狀態
+except KeyboardInterrupt:
+    print("\n⚠️ 程式已終止")
