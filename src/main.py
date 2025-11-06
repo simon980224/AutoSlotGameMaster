@@ -7,7 +7,7 @@ from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-import time, os, pyautogui
+import time, os, pyautogui, threading
 
 # === ✅ 自動匹配 ChromeDriver ===
 chrome_options = webdriver.ChromeOptions()
@@ -164,24 +164,59 @@ except Exception as e:
 time.sleep(1)
 
 # === 自動按空白鍵 ===
-print("🟢 開始自動按空白鍵，每 0.5 秒一次...")
-print("⚠️ 按下 Enter 鍵可暫停程式...")
+running = False  # 控制是否執行
+stop_program = False  # 結束程式用
 
-try:
-    while True:
-        print("按下 Enter 繼續...")
-        input()  # 等待使用者按下 Enter
-        print("▶️ 開始執行自動按空白鍵...")
-        
-        # 持續按空白鍵直到使用者再次按下 Enter
+def press_space():
+    """持續自動按空白鍵的執行緒"""
+    global running, stop_program
+    while not stop_program:
+        if running:
+            pyautogui.press('space')
+            time.sleep(0.5)
+        else:
+            time.sleep(0.1)
+
+def main():
+    global running, stop_program
+    print("🟢 程式啟動成功！")
+    print("輸入指令控制：")
+    print("  c = Continue（開始）")
+    print("  p = Pause（暫停）")
+    print("  q = Quit（結束）")
+    print("────────────────────────────")
+
+    # 啟動自動按鍵的背景執行緒
+    t = threading.Thread(target=press_space)
+    t.daemon = True
+    t.start()
+
+    # 主迴圈：等待使用者輸入
+    try:
         while True:
-            try:
-                pyautogui.keyDown('space')
-                time.sleep(0.5)
-                pyautogui.keyUp('space')
-                time.sleep(0.5)
-            except KeyboardInterrupt:  # 當使用者按下 Enter 時會觸發 KeyboardInterrupt
-                print("⏸️ 程式已暫停")
-                break  # 跳出內層迴圈，回到等待 Enter 的狀態
-except KeyboardInterrupt:
-    print("\n⚠️ 程式已終止")
+            cmd = input("👉 請輸入指令 (c/p/q)：").strip().lower()
+            if cmd == 'c':
+                if not running:
+                    running = True
+                    print("▶️ 開始自動按空白鍵...")
+                else:
+                    print("⚠️ 已在運作中。")
+            elif cmd == 'p':
+                if running:
+                    running = False
+                    print("⏸️ 已暫停。")
+                else:
+                    print("⚠️ 目前已經是暫停狀態。")
+            elif cmd == 'q':
+                stop_program = True
+                running = False
+                print("🛑 程式即將結束...")
+                break
+            else:
+                print("❓ 無效指令，請輸入 c/p/q。")
+    except KeyboardInterrupt:
+        stop_program = True
+        print("\n⚠️ 使用者中斷程式。")
+
+if __name__ == "__main__":
+    main()
