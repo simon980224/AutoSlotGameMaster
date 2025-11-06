@@ -81,8 +81,9 @@ except Exception as e:
 
 time.sleep(3)
 
-atg_xpath = "//*[@id='stickyElement']/div/div[1]/div/div[9]"
+atg_xpath = "/html/body/div[2]/div[3]/div/section/div/main/div[3]/div[1]/div/div[1]/div/div[8]"
 # 用 JavaScript 執行 click()
+input("請確認視窗已經打開並且登入完畢後按 Enter 繼續...")
 driver.execute_script("""
     const el = document.evaluate(arguments[0], document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
     if (el) {
