@@ -265,8 +265,6 @@ def navigate_to_JFW(driver, browser_number, credentials):
             except Exception as e:
                 print(f"[錯誤] 瀏覽器 {browser_number} 無法點擊遊玩按鈕: {e}")
             
-            print(f"[瀏覽器 {browser_number}] ✓ 成功進入賽特遊戲")
-
             # 更新瀏覽器大小並進行排版
             # 獲取螢幕大小
             screen_width, screen_height = pyautogui.size()
@@ -286,8 +284,8 @@ def navigate_to_JFW(driver, browser_number, credentials):
             # 設置瀏覽器窗口位置和大小
             driver.set_window_position(x_position, y_position)
             driver.set_window_size(browser_width, browser_height)
-            
-            print(f"[瀏覽器 {browser_number}] ✓ 視窗排版完成 - 位置({x_position}, {y_position}) 大小({browser_width}x{browser_height})")
+
+            print(f"[瀏覽器 {browser_number}] ✓ 成功進入賽特遊戲")
             
             return
         
