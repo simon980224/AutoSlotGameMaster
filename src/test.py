@@ -58,7 +58,14 @@ def load_user_credentials():
                     'password': password.strip()
                 })
     
-    print(f"[系統] 成功讀取 {len(credentials)} 組用戶帳密")
+    # 檢查帳號數量並進行限制
+    total_count = len(credentials)
+    if total_count > 20:
+        print(f"[系統] 偵測到 {total_count} 個帳號，超過 20 個上限，只取前 20 個帳號")
+        credentials = credentials[:20]
+    else:
+        print(f"[系統] 成功讀取 {total_count} 組用戶帳密")
+    
     return credentials
 
 def create_browser(driver_path, port_number):
@@ -84,6 +91,12 @@ def create_browser(driver_path, port_number):
     chrome_options.add_argument("--disable-plugins")  # 禁用插件
     chrome_options.add_argument("--disable-images")  # 禁用圖片載入以加速
     chrome_options.add_argument(f"--remote-debugging-port={port_number}")  # 設定調試端口
+    chrome_options.add_experimental_option("prefs", {
+        "credentials_enable_service": False,  # 禁用密碼儲存服務
+        "profile.password_manager_enabled": False  # 禁用密碼管理器
+    })
+    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])  # 隱藏自動化控制提示
+    chrome_options.add_experimental_option('useAutomationExtension', False)  # 禁用自動化擴充
 
     # 建立瀏覽器實例
     driver = webdriver.Chrome(service=service, options=chrome_options)
@@ -157,6 +170,8 @@ def navigate_to_JFW(driver, browser_number, credentials):
             login_button.click()
             time.sleep(3)
             
+            # === 步驟 5: 關閉登入公告 ===
+            print(f"[瀏覽器 {browser_number}] 步驟 5: 處理登入公告")
             try:
                 # 尋找第一個公告關閉按鈕
                 login_announcement_close_xpath = "/html/body/div[2]/main/div/div[2]/div/div[3]/div[6]/div/div[3]/div[2]/div[1]"
@@ -166,12 +181,13 @@ def navigate_to_JFW(driver, browser_number, credentials):
             except Exception as login_announcement_error:
                 pass    # 沒有找到公告，繼續下一步
 
-            # 5. 等待登入驗證
+            # === 步驟 6: 等待登入驗證 ===
+            print(f"[瀏覽器 {browser_number}] 步驟 6: 等待登入驗證")
             time.sleep(5)  # 等待5秒讓第二個公告出現
 
             # ----------登入----------登入----------登入----------登入----------登入----------
             
-            # 6. 處理大廳公告（可能出現多次）
+            # 處理大廳公告（可能出現多次）
             lobby_announcement_xpath = "/html/body/div[2]/div[3]/div/section/div/main/div[6]/div[2]/img"
             announcement_count = 0
             max_announcements = 10  # 設定最大處理次數避免無限迴圈
@@ -265,6 +281,17 @@ def navigate_to_JFW(driver, browser_number, credentials):
                 time.sleep(2)
             else:
                 print(f"[錯誤] 帳號 {username} 操作失敗（已重試 {max_retries} 次）: {e}")
+
+
+def operate_sett_game(driver, browser_number):
+    """
+    操作 sett 遊戲
+    
+    Args:
+        driver (webdriver.Chrome): 瀏覽器實例
+        browser_number (int): 瀏覽器編號（從 1 開始）
+    """
+    return
 
 
 def close_browser(browser_number, driver):
