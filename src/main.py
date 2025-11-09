@@ -7,9 +7,17 @@ from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-import time, os, pyautogui, threading
+import time, os, pyautogui, threading , platform
 
-# === ✅ 自動匹配 ChromeDriver ===
+# === ✅ 自動偵測 chromedriver 路徑（支援 Mac / Windows） ===
+base_dir = os.path.dirname(os.path.abspath(__file__))  # 取得目前 main.py 所在資料夾
+if platform.system() == "Windows":
+    driver_name = "chromedriver.exe"
+else:
+    driver_name = "chromedriver"
+
+driver_path = os.path.join(base_dir, "..", driver_name)  # 專案根目錄的 chromedriver
+
 chrome_options = webdriver.ChromeOptions()
 chrome_options.add_argument("--window-size=500,600")
 chrome_options.add_argument("--window-position=100,100")
@@ -17,14 +25,15 @@ chrome_options.add_argument("--disable-blink-features=AutomationControlled")
 chrome_options.add_argument("--no-sandbox")
 chrome_options.add_argument("--disable-dev-shm-usage")
 
-driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
+# ✅ 使用專案內的 chromedriver 啟動
+driver = webdriver.Chrome(service=Service(driver_path), options=chrome_options)
 
 # === 開啟登入頁 ===
 driver.get("https://m.jfw-win.com/#/login?redirect=%2Fhome%2Fpage")
 # input("請確認視窗已經打開並且登入完畢後按 Enter 繼續...")
 time.sleep(5)  # 等待頁面載入
 
-account = "xxpp12"
+account = "g73ac9e"
 password = "aaaa1111"
 
 # === 登入流程 ===
@@ -163,17 +172,34 @@ except Exception as e:
 
 time.sleep(1)
 
-# === 自動按空白鍵 ===
-running = False  # 控制是否執行
-stop_program = False  # 結束程式用
+# === 自動空白鍵模組（只限瀏覽器內部） ===
+running = False
+stop_program = False
 
 def press_space():
-    """持續自動按空白鍵的執行緒"""
+    """只在瀏覽器中發送空白鍵事件"""
     global running, stop_program
     while not stop_program:
         if running:
-            pyautogui.press('space')
-            time.sleep(0.5)
+            try:
+                driver.execute_cdp_cmd("Input.dispatchKeyEvent", {
+                    "type": "keyDown",
+                    "key": " ",
+                    "code": "Space",
+                    "windowsVirtualKeyCode": 32,
+                    "nativeVirtualKeyCode": 32
+                })
+                driver.execute_cdp_cmd("Input.dispatchKeyEvent", {
+                    "type": "keyUp",
+                    "key": " ",
+                    "code": "Space",
+                    "windowsVirtualKeyCode": 32,
+                    "nativeVirtualKeyCode": 32
+                })
+                time.sleep(0.5)
+            except Exception as e:
+                print("⚠️ 無法在瀏覽器中模擬空白鍵：", e)
+                time.sleep(1)
         else:
             time.sleep(0.1)
 
@@ -186,19 +212,17 @@ def main():
     print("  q = Quit（結束）")
     print("────────────────────────────")
 
-    # 啟動自動按鍵的背景執行緒
     t = threading.Thread(target=press_space)
     t.daemon = True
     t.start()
 
-    # 主迴圈：等待使用者輸入
     try:
         while True:
             cmd = input("👉 請輸入指令 (c/p/q)：").strip().lower()
             if cmd == 'c':
                 if not running:
                     running = True
-                    print("▶️ 開始自動按空白鍵...")
+                    print("▶️ 開始自動按空白鍵（僅在瀏覽器內）...")
                 else:
                     print("⚠️ 已在運作中。")
             elif cmd == 'p':
@@ -206,7 +230,7 @@ def main():
                     running = False
                     print("⏸️ 已暫停。")
                 else:
-                    print("⚠️ 目前已經是暫停狀態。")
+                    print("⚠️ 已是暫停狀態。")
             elif cmd == 'q':
                 stop_program = True
                 running = False
