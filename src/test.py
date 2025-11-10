@@ -78,7 +78,7 @@ def load_user_credentials():
     return credentials
 
 
-def create_browser(browser_number, driver_path):
+def create_browser(driver_path):
     """
     建立並配置 Chrome 瀏覽器實例。
     
@@ -103,7 +103,7 @@ def create_browser(browser_number, driver_path):
     chrome_options.add_argument("--disable-extensions")  # 禁用擴充功能
     chrome_options.add_argument("--disable-plugins")  # 禁用插件
     chrome_options.add_argument("--disable-images")  # 禁用圖片載入以加速
-    chrome_options.add_argument(f"--remote-debugging-port={port_number}")  # 設定調試端口
+    # chrome_options.add_argument(f"--remote-debugging-port={port_number}")  # 設定調試端口
     chrome_options.add_experimental_option("prefs", {
         "credentials_enable_service": False,  # 禁用密碼儲存服務
         "profile.password_manager_enabled": False  # 禁用密碼管理器
@@ -349,71 +349,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    # """
-    # 主程式進入點
-    # 功能：批量啟動瀏覽器並自動登入金富翁遊戲
-    # """
-    # print("\n" + "=" * 60)
-    # print("🎮 自動賽特遊戲大師 - 批量登入系統 v1.0")
-    # print("=" * 60)
-    
-    # # ===== 初始化階段 =====
-    # print("\n[階段 1] 系統初始化")
-    # driver_path = get_chromedriver_path()
-    # print(f"[系統] ChromeDriver 路徑: {driver_path}")
-
-    # user_credentials = load_user_credentials()
-    # if not user_credentials:
-    #     print("[錯誤] 無法讀取用戶資料，程式終止")
-    #     exit(1)
-
-    # # ===== 建立瀏覽器階段 =====
-    # print(f"\n[階段 2] 建立瀏覽器實例")
-    # drivers = []
-    # base_port = 9222
-    # browser_count = 2   # TODO: 修改此數值以設定瀏覽器數量
-
-    # for i in range(browser_count):
-    #     port_number = base_port + i
-    #     print(f"[系統] 正在建立瀏覽器 {i+1}/{browser_count} (端口: {port_number})")
-        
-    #     try:
-    #         driver = create_browser(driver_path, port_number)
-    #         drivers.append(driver)
-    #         time.sleep(1)
-    #     except Exception as e:
-    #         print(f"[錯誤] 瀏覽器 {i+1} 建立失敗: {e}")
-    #         drivers.append(None)
-
-    # # ===== 多線程登入階段 =====
-    # print(f"\n[階段 3] 執行多線程自動登入")
-    # threads = []
-
-    # for i, driver in enumerate(drivers):
-    #     thread = threading.Thread(target=navigate_to_JFW, args=(driver, i+1, user_credentials))
-    #     threads.append(thread)
-    #     thread.start()
-
-    # for thread in threads:
-    #     thread.join()
-
-    # print("\n" + "=" * 60)
-    # print("[系統] 所有瀏覽器登入流程已完成")
-    # print("=" * 60)
-    # input("\n按 Enter 鍵關閉所有瀏覽器...")
-
-    # # ===== 關閉瀏覽器階段 =====
-    # print("\n[階段 4] 關閉所有瀏覽器")
-    # close_threads = []
-
-    # for i, driver in enumerate(drivers):
-    #     thread = threading.Thread(target=close_browser, args=(i+1, driver))
-    #     close_threads.append(thread)
-    #     thread.start()
-
-    # for thread in close_threads:
-    #     thread.join()
-
-    # print("\n" + "=" * 60)
-    # print("[系統] 程式執行完畢，所有瀏覽器已關閉")
-    # print("=" * 60)
