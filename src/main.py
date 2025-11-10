@@ -237,7 +237,7 @@ running = False
 stop_program = False
 
 def press_space(driver):
-    """在瀏覽器內模擬空白鍵"""
+    """在瀏覽器內模擬空白鍵，按下與放開的背景執行緒"""
     global running, stop_program
     while not stop_program:
         if running:
@@ -247,7 +247,7 @@ def press_space(driver):
                         "type": t, "key": " ", "code": "Space",
                         "windowsVirtualKeyCode": 32, "nativeVirtualKeyCode": 32
                     })
-                time.sleep(0.5)
+                time.sleep(15)
             except Exception as e:
                 print("⚠️ 模擬空白鍵失敗：", e)
                 time.sleep(1)
@@ -255,47 +255,70 @@ def press_space(driver):
             time.sleep(0.1)
 
 def keyboard_control(driver):
-    """改進版：終端控制空白鍵模組"""
+    """終端互動控制：選單僅 c / p / q；按 p 時才詢問是否執行 b。
+       做用全域變數 running 控制空白鍵模組啟停。
+       在 p 分支中呼叫 run_buyfree_safe() 執行 buyfreeGame。"""
     global running, stop_program
+
     print("\n🟢 程式啟動成功！")
-    print("輸入指令控制：")
-    print("  c = Continue（開始）")
-    print("  p = Pause（暫停）")
+    print("指令：")
+    print("  c = Continue（開始/恢復自動按空白鍵）")
+    print("  p = Pause / 狀態（並可選擇是否執行買免費遊戲 b）")
     print("  q = Quit（結束）")
     print("────────────────────────────")
 
-    # 啟動背景執行緒
+    # 背景執行緒（空白鍵）
     t = threading.Thread(target=press_space, args=(driver,), daemon=True)
     t.start()
 
     while True:
         try:
             cmd = input("👉 請輸入指令 (c/p/q)：").strip().lower()
+
             if cmd == "c":
                 if not running:
                     running = True
-                    print("▶️ 開始自動按空白鍵（僅瀏覽器內）...")
+                    print("▶️ 已開始自動按空白鍵。")
                 else:
-                    print("⚠️ 已在運作中。")
+                    print("⚠️ 目前已在自動按空白鍵中。")
+
             elif cmd == "p":
+                # 顯示狀態
                 if running:
-                    running = False
-                    print("⏸️ 已暫停。")
+                    print("⏸️ 目前狀態：自動按空白鍵中（將暫停）")
                 else:
-                    print("⚠️ 目前已是暫停狀態。")
+                    print("⏸️ 目前狀態：暫停中")
+
+                # 先暫停
+                was_running = running
+                running = False
+
+                # 在「p」情境下才問是否執行 b
+                choice = input("是否執行買免費遊戲？按 'b' 執行，直接 Enter 跳過：").strip().lower()
+                if choice == "b":
+                    run_buyfree_safe(driver)
+                else:
+                    print("↩️ 已略過 buyfreeGame。")
+
+                # 若原本在跑，自動恢復
+                if was_running:
+                    running = True
+                    print("▶️ 已恢復自動按空白鍵。")
+
             elif cmd == "q":
                 print("🛑 程式即將結束...")
                 running = False
                 stop_program = True
-                driver.quit()
-                time.sleep(0.3)
-                driver.close()
+                try:
+                    driver.quit()  # quit 會關閉所有視窗；無需再 close()
+                except Exception:
+                    pass
                 break
+
             else:
-                print("❓ 無效指令，請重新輸入 c / p / q。")
+                print("❓ 無效指令，請輸入 c / p / q。")
 
         except EOFError:
-            # 終端被關閉或 stdin 無法讀取
             print("⚠️ 無法從終端讀取指令，強制結束。")
             stop_program = True
             break
@@ -306,6 +329,27 @@ def keyboard_control(driver):
 
     print("✅ 主程式已安全退出。")
 
+
+def run_buyfree_safe(driver):
+    """只在 keyboard_control 的 p 分支中被呼叫；會暫停空白鍵、檢查狀態、執行後自動恢復。"""
+    global running, last_canvas_rect
+
+    if 'last_canvas_rect' not in globals() or last_canvas_rect is None:
+        print("⚠️ 尚未完成 Canvas 初始化，請先執行 click_canvas()。")
+        return
+
+    prev = running
+    running = False  # 暫停空白鍵避免衝突
+    print("🛒 執行 buyfreeGame 中...")
+    try:
+        buyfreeGame(driver)
+        print("✅ buyfreeGame 完成。")
+    except Exception as e:
+        print("❌ buyfreeGame 發生錯誤：", e)
+    finally:
+        running = prev
+        print("🔄 已恢復先前狀態。")
+
 # === ✅ 主流程 ===
 def main():
     driver = init_driver()
@@ -313,9 +357,7 @@ def main():
     close_overlay(driver)
     enter_game(driver)
     click_canvas(driver)
-    buyfreeGame(driver)
     keyboard_control(driver)
-
 
 if __name__ == "__main__":
     main()
