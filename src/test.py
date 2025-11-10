@@ -102,7 +102,6 @@ def create_browser(driver_path):
     chrome_options.add_argument("--disable-extensions")  # 禁用擴充功能
     chrome_options.add_argument("--disable-plugins")  # 禁用插件
     chrome_options.add_argument("--disable-images")  # 禁用圖片載入以加速
-    # chrome_options.add_argument(f"--remote-debugging-port={port_number}")  # 設定調試端口
     chrome_options.add_experimental_option("prefs", {
         "credentials_enable_service": False,  # 禁用密碼儲存服務
         "profile.password_manager_enabled": False  # 禁用密碼管理器
