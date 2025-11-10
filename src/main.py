@@ -1,3 +1,5 @@
+import base64
+from io import BytesIO
 import cv2
 import pytesseract
 from selenium import webdriver
@@ -6,6 +8,8 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import time, os, pyautogui, threading, platform
+from PIL import Image
+import numpy as np
 
 
 # === ✅ 初始化 Chrome Driver ===
@@ -72,10 +76,10 @@ def close_overlay(driver):
 def enter_game(driver):
     """點擊進入遊戲"""
     atg_xpath = "/html/body/div[2]/div[3]/div/section/div/main/div[3]/div[1]/div/div[1]/div/div[8]"
-    game_xpath = "/html/body/div[2]/div[3]/div/section/div/main/div[3]/div[2]/div/div/div[1]/div[2]/div/div[2]/div"
-    start_xpath = "/html/body/div[2]/div[3]/div/section/div/main/div[3]/div[2]/div/div/div[1]/div[2]/div[3]/div[3]"
+    game_xpath = "/html/body/div[2]/div[3]/div/section/div/main/div[3]/div[2]/div/div/div[2]/div[2]/div/div[2]/div/img"
+    start_xpath = "/html/body/div[2]/div[3]/div/section/div/main/div[3]/div[2]/div/div/div[2]/div[2]/div[3]/div[3]"
 
-    input("請確認視窗已經打開並且登入完畢後按 Enter 繼續...")
+    time.sleep(1)
 
     for xpath, name in [(atg_xpath, "ATG"), (game_xpath, "Game")]:
         driver.execute_script("""
@@ -89,45 +93,144 @@ def enter_game(driver):
         time.sleep(1)
 
     driver.find_element(By.XPATH, start_xpath).click()
+
+    # 調整視窗大小
+    time.sleep(1)
+    driver.set_window_size(600, 400)
+    
     time.sleep(30)
-    input("請確認遊戲已經載入完成後按 Enter 繼續...")
+    
+    input("請確認遊戲已經載入完成按 Enter 繼續...")
 
 
 # === ✅ Canvas 點擊遊戲 ===
 def click_canvas(driver):
-    """進入 iframe 並在 Canvas 上點擊開始遊戲與確定按鈕"""
+    """在 Canvas 上點擊開始遊戲與確定按鈕，並以 CDP clip 擷取點擊區域"""
     try:
+        # === 切入 iframe ===
         iframe = WebDriverWait(driver, 10).until(
             EC.presence_of_element_located((By.ID, "gameFrame-0"))
         )
         driver.switch_to.frame(iframe)
 
+        # === 取得 Canvas 區域 ===
         rect = driver.execute_script("""
             const canvas = document.getElementById('GameCanvas');
             const r = canvas.getBoundingClientRect();
             return {x: r.left, y: r.top, w: r.width, h: r.height};
         """)
 
-        win_x, win_y = rect["x"] + rect["w"] * 0.5, rect["y"] + rect["h"] * 0.93
-        confirm_x, confirm_y = rect["x"] + rect["w"] * 0.748, rect["y"] + rect["h"] * 0.92
+        global last_canvas_rect
+        last_canvas_rect = rect
 
+        # === 計算點擊座標 ===
+        win_x = rect["x"] + rect["w"] * 0.5
+        win_y = rect["y"] + rect["h"] * 1.3
+        confirm_x = rect["x"] + rect["w"] * 0.74
+        confirm_y = rect["y"] + rect["h"] * 1.24
+
+        # === 點擊「開始遊戲」 ===
         for ev in ["mousePressed", "mouseReleased"]:
             driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
-                "type": ev, "x": win_x, "y": win_y, "button": "left", "clickCount": 1
+                "type": ev,
+                "x": win_x,
+                "y": win_y,
+                "button": "left",
+                "clickCount": 1
             })
         print(f"✅ 已在開始遊戲點擊 ({win_x:.1f}, {win_y:.1f})")
 
+        # === 等待確認後點擊「確定」 ===
         time.sleep(3)
-
         for ev in ["mousePressed", "mouseReleased"]:
             driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
-                "type": ev, "x": confirm_x, "y": confirm_y, "button": "left", "clickCount": 1
+                "type": ev,
+                "x": confirm_x,
+                "y": confirm_y,
+                "button": "left",
+                "clickCount": 1
             })
         print(f"✅ 已在確定按鈕區點擊 ({confirm_x:.1f}, {confirm_y:.1f})")
+        input("請確認遊戲已經開始按 Enter 繼續...")
 
     except Exception as e:
         print("❌ 無法切入或操作 iframe：", e)
 
+# === ✅ 自動購買免費遊戲模組（OpenCV 版） ===
+def buyfreeGame(driver):
+    """
+    在 Canvas 上點擊兩個指定位置（freegame 區域與中心點），
+    並使用 OpenCV 在「瀏覽器畫面」中截取該位置區域。
+    """
+    try:
+        global last_canvas_rect
+        rect = last_canvas_rect  # click_canvas 儲存的 Canvas 範圍
+
+        # === 第一次點擊（freegame 區域） ===
+        freegame_x = rect["x"] + rect["w"] * 0.29
+        freegame_y = rect["y"] + rect["h"] * 1.14
+
+        for ev in ["mousePressed", "mouseReleased"]:
+            driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
+                "type": ev,
+                "x": freegame_x,
+                "y": freegame_y,
+                "button": "left",
+                "clickCount": 1
+            })
+        print(f"🟢 已在 Canvas 點擊 FreeGame 位置 ({freegame_x:.1f}, {freegame_y:.1f})")
+        time.sleep(2)
+        # === 第二次點擊（Canvas ） ===
+        start_x = rect["x"] + rect["w"] * 0.6
+        start_y = rect["y"] + rect["h"] * 1.25
+
+        for ev in ["mousePressed", "mouseReleased"]:
+            driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
+                "type": ev,
+                "x": start_x,
+                "y": start_y,
+                "button": "left",
+                "clickCount": 1
+            })
+        print(f"🟢 已在 Canvas 開始點擊 ({start_x:.1f}, {start_y:.1f})")
+
+            # === 延遲 1 秒後開始空白鍵回圈 ===
+        time.sleep(1)
+        print("🔁 開始自動按空白鍵迴圈（每15秒一次，共20次）")
+
+        for i in range(20):
+            # 模擬空白鍵按下與放開
+            driver.execute_cdp_cmd("Input.dispatchKeyEvent", {
+                "type": "keyDown",
+                "key": " ",
+                "code": "Space",
+                "windowsVirtualKeyCode": 32,
+                "nativeVirtualKeyCode": 32
+            })
+            driver.execute_cdp_cmd("Input.dispatchKeyEvent", {
+                "type": "keyUp",
+                "key": " ",
+                "code": "Space",
+                "windowsVirtualKeyCode": 32,
+                "nativeVirtualKeyCode": 32
+            })
+            print(f"✅ 第 {i+1}/20 次空白鍵已按下")
+            if i < 19:
+                time.sleep(15)  # 每15秒按一次
+
+        print("🏁 空白鍵迴圈已完成！")
+
+    except Exception as e:
+        print("❌ buyfreeGame 執行錯誤：", e)
+
+    except Exception as e:
+        print("❌ buyfreeGame 執行錯誤：", e)
+
+    finally:
+        try:
+            driver.switch_to.default_content()
+        except Exception:
+            pass
 
 # === ✅ 自動空白鍵模組 ===
 running = False
@@ -185,7 +288,7 @@ def keyboard_control(driver):
                 running = False
                 stop_program = True
                 driver.quit()
-                time.sleep(0.1)
+                time.sleep(0.3)
                 driver.close()
                 break
             else:
@@ -210,6 +313,7 @@ def main():
     close_overlay(driver)
     enter_game(driver)
     click_canvas(driver)
+    buyfreeGame(driver)
     keyboard_control(driver)
 
 
