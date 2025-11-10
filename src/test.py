@@ -11,6 +11,7 @@ import pyautogui
 import os
 import platform
 
+
 def get_chromedriver_path():
     """
     自動獲取 ChromeDriver 路徑。
@@ -33,6 +34,7 @@ def get_chromedriver_path():
         driver_filename = "chromedriver"
     
     return os.path.join(project_root, driver_filename)
+
 
 def load_user_credentials():
     """
