@@ -7,6 +7,8 @@ from selenium.webdriver.support import expected_conditions as EC
 import time
 import os
 import platform
+import threading
+from threading import Lock
 
 
 def get_chromedriver_path():
@@ -94,18 +96,18 @@ def create_browser(driver_path):
 
     # 配置 Chrome 選項
     chrome_options = Options()
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument("--disable-extensions")
-    chrome_options.add_argument("--disable-plugins")
-    chrome_options.add_argument("--disable-images")
-    chrome_options.add_experimental_option("prefs", {
-        "credentials_enable_service": False,
-        "profile.password_manager_enabled": False
-    })
-    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    chrome_options.add_experimental_option('useAutomationExtension', False)
+    # chrome_options.add_argument("--no-sandbox")
+    # chrome_options.add_argument("--disable-dev-shm-usage")
+    # chrome_options.add_argument("--disable-gpu")
+    # chrome_options.add_argument("--disable-extensions")
+    # chrome_options.add_argument("--disable-plugins")
+    # chrome_options.add_argument("--disable-images")
+    # chrome_options.add_experimental_option("prefs", {
+    #     "credentials_enable_service": False,
+    #     "profile.password_manager_enabled": False
+    # })
+    # chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    # chrome_options.add_experimental_option('useAutomationExtension', False)
 
     driver = webdriver.Chrome(service=service, options=chrome_options)
     driver.set_page_load_timeout(300)
@@ -170,40 +172,9 @@ def navigate_to_JFW(driver, username, password):
             except Exception:
                 pass
 
-            # 嘗試關閉大廳公告（若有多則則迴圈嘗試）
+            # 進入賽特遊戲頁面
             try:
-                lobby_announcement_xpath = "/html/body/div[2]/div[3]/div/section/div/main/div[6]/div[2]/img"
-                for _ in range(5):
-                    try:
-                        wait.until(EC.element_to_be_clickable((By.XPATH, lobby_announcement_xpath))).click()
-                        time.sleep(0.5)
-                    except Exception:
-                        break
-            except Exception:
-                pass
-
-            # 選擇運營商與遊戲，進入賽特遊戲
-            try:
-                game_provider_xpath = "/html/body/div[2]/div[3]/div/section/div/main/div[3]/div[1]/div/div[2]/img"
-                wait.until(EC.element_to_be_clickable((By.XPATH, game_provider_xpath))).click()
-            except Exception:
-                pass
-
-            try:
-                atg_xpath = "//div[contains(@class, 'tablabel') and text()='ATG']"
-                wait.until(EC.element_to_be_clickable((By.XPATH, atg_xpath))).find_element(By.XPATH, "..").click()
-            except Exception:
-                pass
-
-            try:
-                sett_game_xpath = "/html/body/div[2]/div[3]/div/section/div/main/div[3]/div[2]/div/div/div[1]/div[2]/div/div[2]/div/img"
-                wait.until(EC.element_to_be_clickable((By.XPATH, sett_game_xpath))).click()
-            except Exception:
-                pass
-
-            try:
-                sett_game_play_button_xpath = "/html/body/div[2]/div[3]/div/section/div/main/div[3]/div[2]/div/div/div[1]/div[2]/div[3]/div[3]"
-                wait.until(EC.element_to_be_clickable((By.XPATH, sett_game_play_button_xpath))).click()
+                driver.get("https://m.jfw-win.com/#/home/loding?game_code=egyptian-mythology&factory_code=ATG&state=true&name=%E6%88%B0%E7%A5%9E%E8%B3%BD%E7%89%B9")
             except Exception:
                 pass
 
@@ -272,7 +243,7 @@ def main():
     """
     主程式入口：
     1. 由使用者輸入要啟動的瀏覽器數量。
-    2. 根據數量依序啟動瀏覽器、登入金富翁網站並進入遊戲。
+    2. 使用 threading 同步啟動多個瀏覽器、登入金富翁網站並進入遊戲。
     3. 等待使用者輸入操作指令。
        - 若輸入 'q' 則關閉所有瀏覽器並結束程式。
     """
@@ -282,7 +253,7 @@ def main():
     if not credentials:
         return
 
-    max_allowed = min(20, len(credentials))
+    max_allowed = 20
     while True:
         try:
             browser_count = int(input(f"請輸入要啟動的瀏覽器數量 (1~{max_allowed})："))
@@ -294,16 +265,45 @@ def main():
 
     driver_path = get_chromedriver_path()
 
-    drivers = []
+    drivers = [None] * browser_count
+    drivers_lock = Lock()
+    threads = []
+
+    def init_browser_thread(index, username, password):
+        """
+        線程函式：建立瀏覽器並執行登入流程
+        
+        Args:
+            index (int): 瀏覽器索引
+            username (str): 登入帳號
+            password (str): 登入密碼
+        """
+        try:
+            print(f"[系統] 啟動第 {index+1} 個瀏覽器（帳號:{username}）")
+            driver = create_browser(driver_path)
+            navigate_to_JFW(driver, username, password)
+            
+            with drivers_lock:
+                drivers[index] = driver
+        except Exception as e:
+            print(f"[錯誤] 第 {index+1} 個瀏覽器啟動失敗：{e}")
+
+    # 建立並啟動所有線程
     for i in range(browser_count):
         username = credentials[i]["username"]
         password = credentials[i]["password"]
-        print(f"[系統] 啟動第 {i+1} 個瀏覽器（帳號:{username}）")
-        driver = create_browser(driver_path)
-        # 若需要自動登入，取消下一行註解
-        # navigate_to_JFW(driver, username, password)
-        drivers.append(driver)
-        time.sleep(1)
+        thread = threading.Thread(
+            target=init_browser_thread,
+            args=(i, username, password)
+        )
+        threads.append(thread)
+        thread.start()
+        time.sleep(0.5)  # 稍微錯開啟動時間，避免資源競爭
+
+    # 等待所有線程完成
+    print("[系統] 等待所有瀏覽器啟動完成...")
+    for thread in threads:
+        thread.join()
 
     print("[系統] 已啟動所有瀏覽器。輸入 'q' 可關閉並離開。")
 
@@ -311,10 +311,39 @@ def main():
         command = input("請輸入指令：").strip().lower()
         if command == "q":
             print("[系統] 開始關閉所有瀏覽器...")
-            for d in drivers:
-                close_browser(d)
+            
+            # 使用線程同步關閉所有瀏覽器
+            close_threads = []
+            for i, driver in enumerate(drivers):
+                if driver is not None:
+                    thread = threading.Thread(
+                        target=close_browser,
+                        args=(driver,)
+                    )
+                    close_threads.append(thread)
+                    thread.start()
+            
+            # 等待所有關閉線程完成
+            for thread in close_threads:
+                thread.join()
+            
             print("[系統] 已全部關閉，程式結束。")
             break
+        else:
+            # 使用線程同步執行遊戲操作
+            operation_threads = []
+            for driver in drivers:
+                if driver is not None:
+                    thread = threading.Thread(
+                        target=operate_sett_game,
+                        args=(driver, command)
+                    )
+                    operation_threads.append(thread)
+                    thread.start()
+            
+            # 等待所有操作線程完成
+            for thread in operation_threads:
+                thread.join()
 
 if __name__ == "__main__":
     main()
