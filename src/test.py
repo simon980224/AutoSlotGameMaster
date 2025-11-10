@@ -4,77 +4,75 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from webdriver_manager.chrome import ChromeDriverManager
 import time
-# import threading
-import pyautogui
 import os
 import platform
 
 
 def get_chromedriver_path():
     """
-    自動獲取 ChromeDriver 路徑。
-    
-    根據作業系統自動判斷並返回 ChromeDriver 的完整路徑。
-    Windows 系統返回 .exe 檔案路徑，macOS 或 Linux 系統返回一般執行檔路徑。
-    
-    Returns:
+    功能：自動取得 ChromeDriver 的完整路徑。
+
+    說明：根據作業系統（Windows / macOS / Linux）回傳相對應的執行檔名稱。
+
+    回傳:
         str: ChromeDriver 的完整路徑
     """
-    # 取得專案根目錄路徑
     current_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(current_dir)
-    
-    # 根據作業系統決定驅動程式檔名
+
     system = platform.system().lower()
-    if system == "windows":
-        driver_filename = "chromedriver.exe"
-    else:  # macOS 或 Linux
-        driver_filename = "chromedriver"
-    
+    driver_filename = "chromedriver.exe" if system == "windows" else "chromedriver"
+
     return os.path.join(project_root, driver_filename)
 
 
 def load_user_credentials():
     """
-    從 user_credentials.txt 讀取用戶帳號密碼。
-    
-    讀取並解析 user_credentials.txt 文件中的帳號密碼資訊，跳過標題行，
-    每行格式為 "username:password"。同時進行帳號數量限制檢查。
-    
-    Returns:
-        list: 包含用戶帳密字典的列表，格式為 [{'username': str, 'password': str}, ...]
-        每個字典包含 'username' 和 'password' 兩個鍵值對
+    功能：從 `user_credentials.txt` 讀取帳號與密碼。
+
+    說明：跳過檔案的第一行（標題），每行格式為 `username:password`。
+    最多回傳前 20 組帳號，若少於 20 則回傳全部。
+
+    回傳:
+        list: 每項為 {'username': str, 'password': str}
     """
-    # 建構 user_credentials.txt 的完整路徑
     current_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(current_dir)
     userinfo_path = os.path.join(project_root, "user_credentials.txt")
     credentials = []
-    
-    # 讀取並解析帳密資料
-    with open(userinfo_path, 'r', encoding='utf-8') as file:
-        lines = file.readlines()
-        for line_num, line in enumerate(lines):
-            if line_num == 0:  # 跳過標題行
-                continue
-            line = line.strip()
-            if line and ':' in line:
-                username, password = line.split(':', 1)  # 以第一個冒號分割
-                credentials.append({
-                    'username': username.strip(),
-                    'password': password.strip()
-                })
-    
-    # 檢查帳號數量並進行限制
+
+    try:
+        with open(userinfo_path, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+    except FileNotFoundError:
+        print("[系統] 找不到 user_credentials.txt，請確認檔案存在於專案根目錄。")
+        return []
+
+    for idx, line in enumerate(lines):
+        if idx == 0:
+            continue
+        raw = line.strip()
+        if not raw:
+            continue
+        if ':' in raw:
+            username, password = raw.split(':', 1)
+            credentials.append({
+                'username': username.strip(),
+                'password': password.strip()
+            })
+
     total_count = len(credentials)
+    if total_count == 0:
+        print("[系統] user_credentials.txt 內容為空或格式錯誤。")
+        return []
+
     if total_count > 20:
-        print(f"[系統] 偵測到 {total_count} 個帳號，超過 20 個上限，只取前 20 個帳號")
+        print(f"[系統] 偵測到 {total_count} 組帳號，僅保留前 20 組。")
         credentials = credentials[:20]
     else:
-        print(f"[系統] 成功讀取 {total_count} 組用戶帳密")
-    
+        print(f"[系統] 已載入 {total_count} 組帳號資料。")
+
     return credentials
 
 
@@ -94,28 +92,25 @@ def create_browser(driver_path):
     # 建立 ChromeDriver Service
     service = Service(driver_path)
 
-    # 配置 Chrome 選項以優化效能
+    # 配置 Chrome 選項
     chrome_options = Options()
-    chrome_options.add_argument("--no-sandbox")  # 禁用沙盒模式
-    chrome_options.add_argument("--disable-dev-shm-usage")  # 解決共享記憶體不足問題
-    chrome_options.add_argument("--disable-gpu")  # 禁用 GPU 加速
-    chrome_options.add_argument("--disable-extensions")  # 禁用擴充功能
-    chrome_options.add_argument("--disable-plugins")  # 禁用插件
-    chrome_options.add_argument("--disable-images")  # 禁用圖片載入以加速
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("--disable-extensions")
+    chrome_options.add_argument("--disable-plugins")
+    chrome_options.add_argument("--disable-images")
     chrome_options.add_experimental_option("prefs", {
-        "credentials_enable_service": False,  # 禁用密碼儲存服務
-        "profile.password_manager_enabled": False  # 禁用密碼管理器
+        "credentials_enable_service": False,
+        "profile.password_manager_enabled": False
     })
-    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])  # 隱藏自動化控制提示
-    chrome_options.add_experimental_option('useAutomationExtension', False)  # 禁用自動化擴充
+    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    chrome_options.add_experimental_option('useAutomationExtension', False)
 
-    # 建立瀏覽器實例
     driver = webdriver.Chrome(service=service, options=chrome_options)
-    
-    # 設定超時時間
-    driver.set_page_load_timeout(300)  # 頁面載入超時：5 分鐘
-    driver.implicitly_wait(30)  # 元素查找超時：30 秒
-    
+    driver.set_page_load_timeout(300)
+    driver.implicitly_wait(30)
+
     return driver
 
 
@@ -136,123 +131,92 @@ def navigate_to_JFW(driver, username, password):
         password (str): 登入密碼
     """
     if driver is None:
-        print("[錯誤] 瀏覽器未成功建立，跳過操作")
+        print(f"[系統] [{username}] 瀏覽器未建立，跳過。")
         return
-    
+
     max_retries = 3
     for attempt in range(max_retries):
         try:
-            print(f"[帳號 {username}] 正在導向登入頁面...")
+            print(f"[帳號:{username}] 開始登入流程（嘗試 {attempt+1}/{max_retries}）")
             driver.get("https://m.jfw-win.com/#/login?redirect=%2Fhome%2Fpage")
-            
+
             wait = WebDriverWait(driver, 30)
-            time.sleep(3)
-            
-            # === 步驟 2: 輸入帳號 ===
-            print(f"[帳號 {username}] ⏳ 輸入帳號...")
+            time.sleep(2)
+
+            # 步驟 1：輸入帳號與密碼並送出
             username_xpath = "/html/body/div[2]/main/div/div[2]/div/div[3]/div[1]/div/div/div/div/input"
-            username_element = driver.find_element(By.XPATH, username_xpath)
-            username_element.send_keys(username)
-            
-            # === 步驟 3: 輸入密碼 ===
-            print(f"[帳號 {username}] ⏳ 輸入密碼...")
             password_xpath = "/html/body/div[2]/main/div/div[2]/div/div[3]/div[2]/div/div/div/div/input"
-            password_element = driver.find_element(By.XPATH, password_xpath)
-            password_element.send_keys(password)
-            
-            # === 步驟 4: 點擊登入按鈕 ===
-            print(f"[帳號 {username}] ⏳ 執行登入...")
             login_button_xpath = "/html/body/div[2]/main/div/div[2]/div/div[3]/div[4]/div[1]"
-            login_button = driver.find_element(By.XPATH, login_button_xpath)
-            login_button.click()
+
+            driver.find_element(By.XPATH, username_xpath).send_keys(username)
+            driver.find_element(By.XPATH, password_xpath).send_keys(password)
+            driver.find_element(By.XPATH, login_button_xpath).click()
             time.sleep(1)
 
-            # === 檢查是否登入失敗 ===
+            # 檢查登入失敗訊息
             try:
                 error_message_xpath = "/html/body/div[3]/div[2]/div/div[3]/span"
-                error_message_element = driver.find_element(By.XPATH, error_message_xpath)
-                if error_message_element.text == "帳號密碼錯誤":
-                    print(f"[帳號 {username}] ❌ 登入失敗：帳號密碼錯誤")
+                err_el = driver.find_element(By.XPATH, error_message_xpath)
+                if err_el.text and "錯誤" in err_el.text:
+                    print(f"[帳號:{username}] 登入失敗：{err_el.text}")
                     return
-            except:
+            except Exception:
                 pass
-            
-            # === 處理登入公告 ===
-            print(f"[帳號 {username}] 處理登入公告...")
+
+            # 嘗試關閉可能的公告彈窗（若有）
             try:
                 login_announcement_close_xpath = "/html/body/div[2]/main/div/div[2]/div/div[3]/div[6]/div/div[3]/div[2]/div[1]"
-                login_announcement_close_button = wait.until(EC.element_to_be_clickable((By.XPATH, login_announcement_close_xpath)))
-                login_announcement_close_button.click()
-            except:
+                wait.until(EC.element_to_be_clickable((By.XPATH, login_announcement_close_xpath))).click()
+            except Exception:
                 pass
 
-            # === 處理大廳公告 ===
-            print(f"[帳號 {username}] 處理大廳公告...")
-            lobby_announcement_xpath = "/html/body/div[2]/div[3]/div/section/div/main/div[6]/div[2]/img"
-            announcement_count = 0
-            while announcement_count < 10:
-                try:
-                    lobby_announcement_button = wait.until(EC.element_to_be_clickable((By.XPATH, lobby_announcement_xpath)))
-                    lobby_announcement_button.click()
-                    announcement_count += 1
-                    time.sleep(1)
-                except:
-                    break
+            # 嘗試關閉大廳公告（若有多則則迴圈嘗試）
+            try:
+                lobby_announcement_xpath = "/html/body/div[2]/div[3]/div/section/div/main/div[6]/div[2]/img"
+                for _ in range(5):
+                    try:
+                        wait.until(EC.element_to_be_clickable((By.XPATH, lobby_announcement_xpath))).click()
+                        time.sleep(0.5)
+                    except Exception:
+                        break
+            except Exception:
+                pass
 
-            print(f"[帳號 {username}] 成功進入大廳")
-            time.sleep(1)
-            
-            # === 點擊遊戲運營商選單 ===
+            # 選擇運營商與遊戲，進入賽特遊戲
             try:
-                print(f"[帳號 {username}] 開啟遊戲運營商選單...")
                 game_provider_xpath = "/html/body/div[2]/div[3]/div/section/div/main/div[3]/div[1]/div/div[2]/img"
-                game_provider_button = wait.until(EC.element_to_be_clickable((By.XPATH, game_provider_xpath)))
-                game_provider_button.click()
-            except Exception as e:
-                print(f"[錯誤] 無法開啟運營商選單: {e}")
-            
-            time.sleep(1)
-            
-            # === 選擇 ATG 運營商 ===
+                wait.until(EC.element_to_be_clickable((By.XPATH, game_provider_xpath))).click()
+            except Exception:
+                pass
+
             try:
-                print(f"[帳號 {username}] 選擇 ATG 運營商...")
                 atg_xpath = "//div[contains(@class, 'tablabel') and text()='ATG']"
-                atg_element = wait.until(EC.element_to_be_clickable((By.XPATH, atg_xpath)))
-                atg_element.find_element(By.XPATH, "..").click()
-            except Exception as e:
-                print(f"[錯誤] 無法選擇 ATG 運營商: {e}")
-            
-            time.sleep(1)
-            
-            # === 選擇賽特遊戲 ===
+                wait.until(EC.element_to_be_clickable((By.XPATH, atg_xpath))).find_element(By.XPATH, "..").click()
+            except Exception:
+                pass
+
             try:
-                print(f"[帳號 {username}] 選擇賽特遊戲...")
                 sett_game_xpath = "/html/body/div[2]/div[3]/div/section/div/main/div[3]/div[2]/div/div/div[1]/div[2]/div/div[2]/div/img"
-                sett_game_element = wait.until(EC.element_to_be_clickable((By.XPATH, sett_game_xpath)))
-                sett_game_element.click()
-            except Exception as e:
-                print(f"[錯誤] 無法選擇賽特遊戲: {e}")
-            
-            time.sleep(1)
-            
-            # === 點擊遊玩按鈕 ===
+                wait.until(EC.element_to_be_clickable((By.XPATH, sett_game_xpath))).click()
+            except Exception:
+                pass
+
             try:
-                print(f"[帳號 {username}] 啟動遊戲...")
                 sett_game_play_button_xpath = "/html/body/div[2]/div[3]/div/section/div/main/div[3]/div[2]/div/div/div[1]/div[2]/div[3]/div[3]"
-                sett_game_play_button_element = wait.until(EC.element_to_be_clickable((By.XPATH, sett_game_play_button_xpath)))
-                sett_game_play_button_element.click()
-            except Exception as e:
-                print(f"[錯誤] 無法點擊遊玩按鈕: {e}")
-            
-            print(f"[帳號 {username}] ✓ 成功進入賽特遊戲")
+                wait.until(EC.element_to_be_clickable((By.XPATH, sett_game_play_button_xpath))).click()
+            except Exception:
+                pass
+
+            print(f"[帳號:{username}] 成功進入賽特遊戲")
             return
-        
+
         except Exception as e:
             if attempt < max_retries - 1:
-                print(f"[警告] 帳號 {username} 第 {attempt + 1} 次嘗試失敗，1 秒後重試...")
+                print(f"[警告] [{username}] 第 {attempt+1} 次嘗試失敗，稍後重試。")
                 time.sleep(1)
-            else:
-                print(f"[錯誤] 帳號 {username} 操作失敗（已重試 {max_retries} 次）: {e}")
+                continue
+            print(f"[錯誤] [{username}] 登入流程失敗（重試 {max_retries} 次）：{e}")
+            return
 
 
 def operate_sett_game(driver, command):
@@ -267,11 +231,10 @@ def operate_sett_game(driver, command):
         command (str): 使用者輸入的操作指令
     """
     if driver is None:
-        print("[錯誤] 瀏覽器實例不存在，無法執行遊戲操作")
+        print("[系統] 瀏覽器實例不存在，無法執行遊戲操作")
         return
-    
-    print(f"[系統] 收到指令：{command}")
-    print("[系統] （指令功能尚未實作）")
+
+    print(f"[系統] 已收到指令：{command}（功能未實作）")
     # === 以下區塊將於未來實作各項遊戲操作指令 ===
     # if command == "start":
     #     # 執行開始遊戲動作
@@ -300,10 +263,9 @@ def close_browser(driver):
         driver.quit()
         print("[系統] 瀏覽器已關閉")
     except Exception as e:
-        # 忽略正常關閉時的無害錯誤訊息
-        error_message = str(e)
-        if "Remote end closed connection" not in error_message and "chrome not reachable" not in error_message.lower():
-            print(f"[警告] 關閉瀏覽器時發生錯誤: {e}")
+        err = str(e)
+        if "Remote end closed connection" not in err and "chrome not reachable" not in err.lower():
+            print(f"[警告] 關閉瀏覽器時發生錯誤：{e}")
 
 
 def main():
@@ -314,49 +276,44 @@ def main():
     3. 等待使用者輸入操作指令。
        - 若輸入 'q' 則關閉所有瀏覽器並結束程式。
     """
-    print("=== 金富翁自動化登入與操作系統 ===")
-    
-    # 讀取帳號資料
+    print("[系統] 金富翁自動化登入與操作系統")
+
     credentials = load_user_credentials()
     if not credentials:
-        print("[錯誤] 無法讀取 user_credentials.txt 或內容為空。")
         return
-    
-    # 讓使用者輸入要開幾個瀏覽器
+
+    max_allowed = min(20, len(credentials))
     while True:
         try:
-            browser_count = int(input("請輸入要啟動的瀏覽器數量 (1~20)："))
-            if 1 <= browser_count <= min(20, len(credentials)):
+            browser_count = int(input(f"請輸入要啟動的瀏覽器數量 (1~{max_allowed})："))
+            if 1 <= browser_count <= max_allowed:
                 break
-            else:
-                print(f"[警告] 請輸入介於 1 到 {min(20, len(credentials))} 的整數。")
+            print(f"[系統] 請輸入介於 1 到 {max_allowed} 的整數。")
         except ValueError:
-            print("[錯誤] 請輸入有效的整數。")
-    
-    # 取得 chromedriver 路徑
+            print("[系統] 請輸入有效的整數。")
+
     driver_path = get_chromedriver_path()
-    
-    # 建立並啟動瀏覽器
+
     drivers = []
     for i in range(browser_count):
         username = credentials[i]["username"]
         password = credentials[i]["password"]
-        print(f"\n[系統] 啟動第 {i+1} 個瀏覽器（帳號：{username}）...")
+        print(f"[系統] 啟動第 {i+1} 個瀏覽器（帳號:{username}）")
         driver = create_browser(driver_path)
-        # navigate_to_JFW(driver, username, password) # TODO暫時註解掉測試用
+        # 若需要自動登入，取消下一行註解
+        # navigate_to_JFW(driver, username, password)
         drivers.append(driver)
         time.sleep(1)
-    
-    print("\n[系統] 所有瀏覽器已啟動並登入成功。")
-    
-    # 操作階段
+
+    print("[系統] 已啟動所有瀏覽器。輸入 'q' 可關閉並離開。")
+
     while True:
-        command = input("\n請輸入指令：").strip().lower()
+        command = input("請輸入指令：").strip().lower()
         if command == "q":
-            print("[系統] 收到退出指令，開始關閉所有瀏覽器...")
-            for driver in drivers:
-                close_browser(driver)
-            print("[系統] 所有瀏覽器已關閉，程式結束。")
+            print("[系統] 開始關閉所有瀏覽器...")
+            for d in drivers:
+                close_browser(d)
+            print("[系統] 已全部關閉，程式結束。")
             break
 
 if __name__ == "__main__":
