@@ -207,36 +207,17 @@ def operate_sett_game(driver, command):
 
     print(f"[系統] 已收到指令：{command}（功能未實作）")
     # === 以下區塊將於未來實作各項遊戲操作指令 ===
-    # if command == "start":
-    #     # 執行開始遊戲動作
-    # elif command == "pause":
-    #     # 執行暫停遊戲動作
-    # elif command == "auto":
-    #     # 啟動自動模式
-    # else:
-    #     print("[警告] 未識別的指令")
+    if command in ("Q","q"):
+        try:
+            driver.quit()
+            print("[系統] 瀏覽器已關閉")
+        except Exception as e:
+            err = str(e)
+            if "Remote end closed connection" not in err and "chrome not reachable" not in err.lower():
+                print(f"[警告] 關閉瀏覽器時發生錯誤：{e}")
+    else:
+        print("[警告] 未識別的指令")
     return
-
-
-def close_browser(driver):
-    """
-    安全關閉指定的瀏覽器實例。
-
-    處理關閉過程中的異常並給出友善的日誌訊息。
-
-    Args:
-        driver (webdriver.Chrome): 要關閉的瀏覽器實例
-    """
-    if driver is None:
-        return
-
-    try:
-        driver.quit()
-        print("[系統] 瀏覽器已關閉")
-    except Exception as e:
-        err = str(e)
-        if "Remote end closed connection" not in err and "chrome not reachable" not in err.lower():
-            print(f"[警告] 關閉瀏覽器時發生錯誤：{e}")
 
 
 def main():
@@ -309,41 +290,20 @@ def main():
 
     while True:
         command = input("請輸入指令：").strip().lower()
-        if command == "q":
-            print("[系統] 開始關閉所有瀏覽器...")
-            
-            # 使用線程同步關閉所有瀏覽器
-            close_threads = []
-            for i, driver in enumerate(drivers):
-                if driver is not None:
-                    thread = threading.Thread(
-                        target=close_browser,
-                        args=(driver,)
-                    )
-                    close_threads.append(thread)
-                    thread.start()
-            
-            # 等待所有關閉線程完成
-            for thread in close_threads:
-                thread.join()
-            
-            print("[系統] 已全部關閉，程式結束。")
-            break
-        else:
-            # 使用線程同步執行遊戲操作
-            operation_threads = []
-            for driver in drivers:
-                if driver is not None:
-                    thread = threading.Thread(
-                        target=operate_sett_game,
-                        args=(driver, command)
-                    )
-                    operation_threads.append(thread)
-                    thread.start()
-            
-            # 等待所有操作線程完成
-            for thread in operation_threads:
-                thread.join()
+        # 使用線程同步執行遊戲操作
+        operation_threads = []
+        for driver in drivers:
+            if driver is not None:
+                thread = threading.Thread(
+                    target=operate_sett_game,
+                    args=(driver, command)
+                )
+                operation_threads.append(thread)
+                thread.start()
+        
+        # 等待所有操作線程完成
+        for thread in operation_threads:
+            thread.join()
 
 if __name__ == "__main__":
     main()
