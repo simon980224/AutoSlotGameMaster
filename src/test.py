@@ -8,7 +8,6 @@ import time
 import os
 import platform
 import threading
-from threading import Lock
 
 
 def get_chromedriver_path():
@@ -78,63 +77,67 @@ def load_user_credentials():
     return credentials
 
 
-def create_browser(driver_path):
+def navigate_to_JFW(driver_path, username, password):
     """
-    建立並配置 Chrome 瀏覽器實例。
+    建立瀏覽器並導向金富翁網站執行完整的自動登入流程。
     
-    設定瀏覽器的各項優化選項，包括禁用不必要的功能、設定調試端口、
-    配置安全選項等，以提升自動化效能和穩定性。
+    執行從建立瀏覽器到進入遊戲的完整流程，包括：
+    1. 建立並配置 Chrome 瀏覽器實例
+    2. 開啟登入頁面
+    3. 輸入帳號密碼
+    4. 處理登入後的各種彈窗
+    5. 選擇遊戲運營商和遊戲
     
     Args:
         driver_path (str): ChromeDriver 的完整路徑
+        username (str): 登入帳號
+        password (str): 登入密碼
         
     Returns:
-        webdriver.Chrome: 完整配置的 Chrome 瀏覽器實例
+        webdriver.Chrome: 已登入並進入遊戲的瀏覽器實例，失敗時返回 None
     """
     # 建立 ChromeDriver Service
     service = Service(driver_path)
 
-    # 配置 Chrome 選項
+    # 配置 Chrome 選項 - 模擬正常瀏覽器行為
     chrome_options = Options()
-    # chrome_options.add_argument("--no-sandbox")
-    # chrome_options.add_argument("--disable-dev-shm-usage")
-    # chrome_options.add_argument("--disable-gpu")
-    # chrome_options.add_argument("--disable-extensions")
-    # chrome_options.add_argument("--disable-plugins")
-    # chrome_options.add_argument("--disable-images")
-    # chrome_options.add_experimental_option("prefs", {
-    #     "credentials_enable_service": False,
-    #     "profile.password_manager_enabled": False
-    # })
-    # chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    # chrome_options.add_experimental_option('useAutomationExtension', False)
-
-    driver = webdriver.Chrome(service=service, options=chrome_options)
-    driver.set_page_load_timeout(300)
-    driver.implicitly_wait(30)
-
-    return driver
-
-
-def navigate_to_JFW(driver, username, password):
-    """
-    導向金富翁網站並執行完整的自動登入流程。
     
-    執行從登入到進入遊戲的完整流程，包括：
-    1. 開啟登入頁面
-    2. 輸入帳號密碼
-    3. 處理登入後的各種彈窗
-    4. 選擇遊戲運營商和遊戲
-    5. 調整瀏覽器視窗位置和大小
+    # 基本設定
+    chrome_options.add_argument("--disable-blink-features=AutomationControlled")  # 移除自動化控制標記
+    chrome_options.add_argument("--disable-popup-blocking")  # 禁用彈窗攔截
     
-    Args:
-        driver (webdriver.Chrome): 已配置的瀏覽器實例
-        username (str): 登入帳號
-        password (str): 登入密碼
-    """
-    if driver is None:
-        print(f"[系統] [{username}] 瀏覽器未建立，跳過。")
-        return
+    # 模擬正常使用者環境
+    # chrome_options.add_argument("--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+    # chrome_options.add_argument("--lang=zh-TW")  # 設定語言為繁體中文
+    # chrome_options.add_argument("--disable-web-security")  # 禁用網頁安全檢查
+    # chrome_options.add_argument("--allow-running-insecure-content")  # 允許執行不安全內容
+    
+    # 效能優化
+    chrome_options.add_argument("--disable-dev-shm-usage")  # 解決資源限制問題
+    chrome_options.add_argument("--no-sandbox")  # 沙箱模式（視安全需求決定）
+    
+    # 時間同步設定 - 避免時間對不上導致無法聯網
+    chrome_options.add_argument("--disable-features=NetworkTimeServiceQuerying")  # 禁用網路時間服務查詢
+    
+    # 移除自動化痕跡
+    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    chrome_options.add_experimental_option('useAutomationExtension', False)
+    
+    # 偏好設定
+    chrome_options.add_experimental_option("prefs", {
+        "credentials_enable_service": False,  # 禁用密碼管理服務
+        "profile.password_manager_enabled": False,  # 禁用密碼管理器
+        "profile.default_content_setting_values.notifications": 2,  # 禁用通知
+        "profile.default_content_settings.popups": 0,  # 允許彈出視窗
+    })
+
+    try:
+        driver = webdriver.Chrome(service=service, options=chrome_options)
+        driver.set_page_load_timeout(300)
+        driver.implicitly_wait(30)
+    except Exception as e:
+        print(f"[錯誤] [{username}] 建立瀏覽器失敗：{e}")
+        return None
 
     max_retries = 3
     for attempt in range(max_retries):
@@ -142,7 +145,7 @@ def navigate_to_JFW(driver, username, password):
             print(f"[帳號:{username}] 開始登入流程（嘗試 {attempt+1}/{max_retries}）")
             driver.get("https://m.jfw-win.com/#/login?redirect=%2Fhome%2Fpage")
 
-            wait = WebDriverWait(driver, 30)
+            wait = WebDriverWait(driver, 5)
             time.sleep(2)
 
             # 步驟 1：輸入帳號與密碼並送出
@@ -170,16 +173,34 @@ def navigate_to_JFW(driver, username, password):
                 login_announcement_close_xpath = "/html/body/div[2]/main/div/div[2]/div/div[3]/div[6]/div/div[3]/div[2]/div[1]"
                 wait.until(EC.element_to_be_clickable((By.XPATH, login_announcement_close_xpath))).click()
             except Exception:
+                print(f"[帳號:{username}] 無公告彈窗，繼續流程")
                 pass
+
+            # # 處理大廳公告（可能出現多次）
+            # lobby_announcement_xpath = "/html/body/div[2]/div[3]/div/section/div/main/div[6]/div[2]/img"
+            # announcement_count = 0
+            # max_announcements = 10  # 設定最大處理次數避免無限迴圈
+            # while announcement_count < max_announcements:
+            #     try:
+            #         lobby_announcement_button = wait.until(EC.element_to_be_clickable((By.XPATH, lobby_announcement_xpath)))
+            #         lobby_announcement_button.click()
+            #         announcement_count += 1
+            #         time.sleep(1)  # 等待下一個公告可能出現
+
+            #     except Exception:
+            #         break   # 沒有找到公告，結束迴圈
+
+            # print(f"[帳號:{username}] 成功進入大廳")
 
             # 進入賽特遊戲頁面
             try:
                 driver.get("https://m.jfw-win.com/#/home/loding?game_code=egyptian-mythology&factory_code=ATG&state=true&name=%E6%88%B0%E7%A5%9E%E8%B3%BD%E7%89%B9")
             except Exception:
+                print(f"[帳號:{username}] 進入賽特遊戲頁面失敗，重試中...")
                 pass
 
             print(f"[帳號:{username}] 成功進入賽特遊戲")
-            return
+            return driver
 
         except Exception as e:
             if attempt < max_retries - 1:
@@ -187,7 +208,12 @@ def navigate_to_JFW(driver, username, password):
                 time.sleep(1)
                 continue
             print(f"[錯誤] [{username}] 登入流程失敗（重試 {max_retries} 次）：{e}")
-            return
+            if driver:
+                try:
+                    driver.quit()
+                except Exception:
+                    pass
+            return None
 
 
 def operate_sett_game(driver, command):
@@ -222,19 +248,23 @@ def operate_sett_game(driver, command):
 
 def main():
     """
-    主程式入口：
-    1. 由使用者輸入要啟動的瀏覽器數量。
-    2. 使用 threading 同步啟動多個瀏覽器、登入金富翁網站並進入遊戲。
-    3. 等待使用者輸入操作指令。
-       - 若輸入 'q' 則關閉所有瀏覽器並結束程式。
+    主程式入口：中央控管系統
+    1. 載入帳號資料
+    2. 取得使用者輸入的瀏覽器數量
+    3. 同步啟動多個瀏覽器並登入
+    4. 進入指令控制模式
+    5. 清理資源並結束
     """
     print("[系統] 金富翁自動化登入與操作系統")
 
+    # ===== 階段 1: 載入帳號資料 =====
     credentials = load_user_credentials()
     if not credentials:
+        print("[系統] 無法載入帳號資料，程式結束")
         return
 
-    max_allowed = 20
+    # ===== 階段 2: 取得使用者輸入 =====
+    max_allowed = min(20, len(credentials))
     while True:
         try:
             browser_count = int(input(f"請輸入要啟動的瀏覽器數量 (1~{max_allowed})："))
@@ -244,66 +274,62 @@ def main():
         except ValueError:
             print("[系統] 請輸入有效的整數。")
 
+    # ===== 階段 3: 同步啟動所有瀏覽器 =====
     driver_path = get_chromedriver_path()
-
     drivers = [None] * browser_count
-    drivers_lock = Lock()
     threads = []
-
-    def init_browser_thread(index, username, password):
-        """
-        線程函式：建立瀏覽器並執行登入流程
-        
-        Args:
-            index (int): 瀏覽器索引
-            username (str): 登入帳號
-            password (str): 登入密碼
-        """
-        try:
-            print(f"[系統] 啟動第 {index+1} 個瀏覽器（帳號:{username}）")
-            driver = create_browser(driver_path)
-            navigate_to_JFW(driver, username, password)
-            
-            with drivers_lock:
-                drivers[index] = driver
-        except Exception as e:
-            print(f"[錯誤] 第 {index+1} 個瀏覽器啟動失敗：{e}")
-
-    # 建立並啟動所有線程
+    
+    # 定義執行緒工作函式（使用閉包捕獲索引）
+    def launch_worker(index):
+        username = credentials[index]["username"]
+        password = credentials[index]["password"]
+        driver = navigate_to_JFW(driver_path, username, password)
+        drivers[index] = driver  # 將結果儲存到共用串列
+    
+    print(f"[系統] 開始啟動 {browser_count} 個瀏覽器...")
     for i in range(browser_count):
-        username = credentials[i]["username"]
-        password = credentials[i]["password"]
-        thread = threading.Thread(
-            target=init_browser_thread,
-            args=(i, username, password)
-        )
+        print(f"[系統] 啟動第 {i+1} 個瀏覽器（帳號:{credentials[i]['username']}）")
+        thread = threading.Thread(target=launch_worker, args=(i,))
         threads.append(thread)
         thread.start()
-        time.sleep(0.5)  # 稍微錯開啟動時間，避免資源競爭
 
-    # 等待所有線程完成
     print("[系統] 等待所有瀏覽器啟動完成...")
     for thread in threads:
         thread.join()
+    
+    # 統計成功數量
+    success_count = sum(1 for d in drivers if d is not None)
+    print(f"[系統] 完成！成功啟動 {success_count}/{browser_count} 個瀏覽器")
 
-    print("[系統] 已啟動所有瀏覽器。輸入 'q' 可關閉並離開。")
+    # ===== 階段 4: 進入指令控制模式 =====
+    print("[系統] 已進入指令模式。輸入 'q' 可關閉所有瀏覽器並離開。")
+    
+    try:
+        while True:
+            command = input("請輸入指令：").strip()
+            
+            # 檢查是否為退出指令
+            if command.lower() == 'q':
+                break
+            
+            # 對所有瀏覽器執行指令
+            operation_threads = []
+            for driver in drivers:
+                if driver is not None:
+                    thread = threading.Thread(
+                        target=operate_sett_game,
+                        args=(driver, command)
+                    )
+                    operation_threads.append(thread)
+                    thread.start()
+            
+            # 等待所有操作完成
+            for thread in operation_threads:
+                thread.join()
+                
+    except KeyboardInterrupt:
+        print("\n[系統] 偵測到中斷訊號 (Ctrl+C)")
 
-    while True:
-        command = input("請輸入指令：").strip().lower()
-        # 使用線程同步執行遊戲操作
-        operation_threads = []
-        for driver in drivers:
-            if driver is not None:
-                thread = threading.Thread(
-                    target=operate_sett_game,
-                    args=(driver, command)
-                )
-                operation_threads.append(thread)
-                thread.start()
-        
-        # 等待所有操作線程完成
-        for thread in operation_threads:
-            thread.join()
 
 if __name__ == "__main__":
     main()
