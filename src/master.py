@@ -270,8 +270,8 @@ def create_chrome_options() -> Options:
     chrome_options.add_argument("--disable-features=NetworkTimeServiceQuerying")
     
     # 移除自動化痕跡
-    # chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    # chrome_options.add_experimental_option('useAutomationExtension', False)
+    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    chrome_options.add_experimental_option('useAutomationExtension', False)
     
     # 偏好設定
     chrome_options.add_experimental_option("prefs", {
