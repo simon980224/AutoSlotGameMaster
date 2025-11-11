@@ -902,12 +902,12 @@ def buy_free_game(driver: WebDriver) -> bool:
             return False
         
         # 點擊免費遊戲區域
-        if not click_canvas_position(driver, rect, 0.29, 1.14, "免費遊戲位置"):
+        if not click_canvas_position(driver, rect, 0.23, 1.05, "免費遊戲位置"):
             return False
         time.sleep(2)
         
         # 點擊開始按鈕
-        if not click_canvas_position(driver, rect, 0.6, 1.25, "開始按鈕"):
+        if not click_canvas_position(driver, rect, 0.65, 1.2, "開始按鈕"):
             return False
         time.sleep(1)
         
