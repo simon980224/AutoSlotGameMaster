@@ -1,7 +1,6 @@
 import base64
 from io import BytesIO
 import cv2
-import pytesseract
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
@@ -350,6 +349,44 @@ def run_buyfree_safe(driver):
         running = prev
         print("🔄 已恢復先前狀態。")
 
+def control_up_and_down(driver, crop_size=50):
+    '''在 Canvas 上 控制金額上下鍵'''
+    try:
+        global last_canvas_rect
+        rect = last_canvas_rect  # click_canvas 儲存的 Canvas 範圍
+
+        # === 第一次點擊（freegame 區域） ===
+        up_x = rect["x"] + rect["w"] * 0.755
+        up_y = rect["y"] + rect["h"] * 1.28
+
+        for ev in ["mousePressed", "mouseReleased"]:
+            driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
+                "type": ev,
+                "x": up_x,
+                "y": up_y,
+                "button": "left",
+                "clickCount": 1
+            })
+        print(f"🟢 已在 Canvas 點擊 + 位置 ({up_x:.1f}, {up_y:.1f})")
+        time.sleep(2)
+
+        down_x = rect["x"] + rect["w"] * 0.65
+        down_y = rect["y"] + rect["h"] * 1.28
+
+        for ev in ["mousePressed", "mouseReleased"]:
+            driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
+                "type": ev,
+                "x": down_x,
+                "y": down_y,
+                "button": "left",
+                "clickCount": 1
+            })
+        print(f"🟢 已在 Canvas 點擊 + 位置 ({down_x:.1f}, {down_y:.1f})")
+
+    except Exception as e:
+        print("❌ control_up_and_down 執行錯誤：", e)
+        return
+
 # === ✅ 主流程 ===
 def main():
     driver = init_driver()
@@ -357,7 +394,8 @@ def main():
     close_overlay(driver)
     enter_game(driver)
     click_canvas(driver)
-    keyboard_control(driver)
+    # keyboard_control(driver)
+    control_up_and_down(driver)
 
 if __name__ == "__main__":
     main()
