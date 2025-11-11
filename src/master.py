@@ -201,7 +201,7 @@ def load_user_credentials() -> List[Dict[str, str]]:
     """
     current_dir = Path(__file__).resolve().parent
     project_root = current_dir.parent
-    credentials_path = project_root / "user_credentials.txt"
+    credentials_path = project_root / "lib" / "user_credentials.txt"
     
     if not credentials_path.exists():
         raise FileNotFoundError(f"找不到帳號檔案：{credentials_path}")
