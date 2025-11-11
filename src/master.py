@@ -58,13 +58,22 @@ class GameConfig:
     explicit_wait: int = 5
 
 
-# XPath 常量
-class XPath:
-    """頁面元素 XPath 定義"""
-    USERNAME_INPUT = "/html/body/div[2]/main/div/div[2]/div/div[3]/div[1]/div/div/div/div/input"
-    PASSWORD_INPUT = "/html/body/div[2]/main/div/div[2]/div/div[3]/div[2]/div/div/div/div/input"
-    LOGIN_BUTTON = "/html/body/div[2]/main/div/div[2]/div/div[3]/div[4]/div[1]"
+# 元素選擇器常量
+class ElementSelector:
+    """頁面元素選擇器定義"""
+    # 使用 placeholder 屬性定位帳號輸入框
+    USERNAME_INPUT = "//input[@placeholder='請輸入帳號']"
+    
+    # 使用 placeholder 屬性定位密碼輸入框
+    PASSWORD_INPUT = "//input[@placeholder='請輸入密碼']"
+    
+    # 使用 class 和文字內容定位登入按鈕
+    LOGIN_BUTTON = "//div[contains(@class, 'login-btn')]//span[text()='立即登入']/.."
+    
+    # 錯誤訊息
     ERROR_MESSAGE = "/html/body/div[3]/div[2]/div/div[3]/span"
+    
+    # 公告關閉按鈕
     ANNOUNCEMENT_CLOSE = "/html/body/div[2]/main/div/div[2]/div/div[3]/div[6]/div/div[3]/div[2]/div[1]"
 
 
@@ -321,7 +330,7 @@ def close_announcement_popup(driver: WebDriver, wait: WebDriverWait) -> bool:
     """
     try:
         close_button = wait.until(
-            EC.element_to_be_clickable((By.XPATH, XPath.ANNOUNCEMENT_CLOSE))
+            EC.element_to_be_clickable((By.XPATH, ElementSelector.ANNOUNCEMENT_CLOSE))
         )
         close_button.click()
         logger.info("已關閉公告彈窗")
@@ -342,7 +351,7 @@ def check_login_error(driver: WebDriver) -> Optional[str]:
         Optional[str]: 錯誤訊息，無錯誤時返回 None
     """
     try:
-        error_element = driver.find_element(By.XPATH, XPath.ERROR_MESSAGE)
+        error_element = driver.find_element(By.XPATH, ElementSelector.ERROR_MESSAGE)
         error_text = error_element.text
         if error_text and "錯誤" in error_text:
             return error_text
@@ -371,9 +380,9 @@ def perform_login(driver: WebDriver, username: str, password: str) -> bool:
         wait = WebDriverWait(driver, GAME_CONFIG.explicit_wait)
         
         # 輸入帳號密碼
-        driver.find_element(By.XPATH, XPath.USERNAME_INPUT).send_keys(username)
-        driver.find_element(By.XPATH, XPath.PASSWORD_INPUT).send_keys(password)
-        driver.find_element(By.XPATH, XPath.LOGIN_BUTTON).click()
+        driver.find_element(By.XPATH, ElementSelector.USERNAME_INPUT).send_keys(username)
+        driver.find_element(By.XPATH, ElementSelector.PASSWORD_INPUT).send_keys(password)
+        driver.find_element(By.XPATH, ElementSelector.LOGIN_BUTTON).click()
         
         time.sleep(1)
         
