@@ -36,6 +36,7 @@ class GameCommand(Enum):
     CONTINUE = 'c'
     PAUSE = 'p'
     QUIT = 'q'
+    BUY_FREE = 'b'  # 購買免費遊戲
 
 
 @dataclass
@@ -72,6 +73,10 @@ class URL:
     """網站 URL 定義"""
     LOGIN_PAGE = "https://m.jfw-win.com/#/login?redirect=%2Fhome%2Fpage"
     GAME_PAGE = "https://m.jfw-win.com/#/home/loding?game_code=egyptian-mythology&factory_code=ATG&state=true&name=%E6%88%B0%E7%A5%9E%E8%B3%BD%E7%89%B9"
+
+
+# 遊戲倍率常量
+GAME_BETSIZE = [ 0.4, 0.8, 1, 1.2, 1.6, 2, 2.4, 2.8, 3, 3.2, 3.6, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 48, 56, 60, 64, 72, 80, 100, 120, 140, 160, 180, 200, 240, 280, 300, 320, 360, 400, 420, 480, 500, 540, 560, 600, 640, 700, 720, 800, 840, 900, 960, 980, 1000, 1080, 1120, 1200, 1260, 1280, 1400, 1440, 1600, 1800, 2000]
 
 
 # 全域配置實例
@@ -145,6 +150,9 @@ class GameStateManager:
 
 # 全域狀態管理器實例
 game_state_manager = GameStateManager()
+
+# Canvas 位置快取（用於 buyfreeGame）
+canvas_rect_cache: Dict[WebDriver, Optional[Dict[str, float]]] = {}
 
 
 # ==================== 工具函式 ====================
@@ -224,7 +232,7 @@ def load_user_credentials() -> List[Dict[str, str]]:
         logger.warning("帳號檔案內容為空或格式錯誤")
         return []
     
-    # 限制最多 20 組帳號
+    # 限制最多 12 組帳號
     if total_count > GAME_CONFIG.max_accounts:
         logger.info(f"偵測到 {total_count} 組帳號，僅保留前 {GAME_CONFIG.max_accounts} 組")
         credentials = credentials[:GAME_CONFIG.max_accounts]
@@ -262,8 +270,8 @@ def create_chrome_options() -> Options:
     chrome_options.add_argument("--disable-features=NetworkTimeServiceQuerying")
     
     # 移除自動化痕跡
-    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    chrome_options.add_experimental_option('useAutomationExtension', False)
+    # chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    # chrome_options.add_experimental_option('useAutomationExtension', False)
     
     # 偏好設定
     chrome_options.add_experimental_option("prefs", {
@@ -523,6 +531,45 @@ def send_space_key(driver: WebDriver) -> bool:
         return False
 
 
+def press_space_key_once(driver: WebDriver) -> bool:
+    """
+    按下一次空白鍵（按下 + 放開），不包含任何等待時間。
+    
+    此函式專門用於需要自訂間隔時間的場景。
+    呼叫者可以在呼叫此函式後自行決定等待時間。
+    
+    Args:
+        driver: WebDriver 實例
+        
+    Returns:
+        bool: 成功返回 True，失敗返回 False
+    
+    Example:
+        >>> press_space_key_once(driver)
+        >>> time.sleep(15)  # 自訂間隔時間
+        >>> press_space_key_once(driver)
+    """
+    try:
+        driver.execute_cdp_cmd("Input.dispatchKeyEvent", {
+            "type": "keyDown",
+            "key": " ",
+            "code": "Space",
+            "windowsVirtualKeyCode": 32,
+            "nativeVirtualKeyCode": 32
+        })
+        driver.execute_cdp_cmd("Input.dispatchKeyEvent", {
+            "type": "keyUp",
+            "key": " ",
+            "code": "Space",
+            "windowsVirtualKeyCode": 32,
+            "nativeVirtualKeyCode": 32
+        })
+        return True
+    except Exception as e:
+        logger.warning(f"按空白鍵失敗：{e}")
+        return False
+
+
 def switch_to_game_frame(driver: WebDriver) -> bool:
     """
     切換到遊戲 iframe（如果存在）。
@@ -677,13 +724,246 @@ def quit_browser(driver: WebDriver) -> bool:
         return False
 
 
+def initialize_canvas(driver: WebDriver) -> bool:
+    """
+    初始化 Canvas 並儲存位置資訊。
+    
+    必須在執行 buyfreeGame 之前呼叫此函式。
+    
+    Args:
+        driver: WebDriver 實例
+        
+    Returns:
+        bool: 成功返回 True，失敗返回 False
+    """
+    try:
+        # 切入 iframe
+        iframe = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.ID, "gameFrame-0"))
+        )
+        driver.switch_to.frame(iframe)
+        
+        # 取得 Canvas 區域
+        rect = driver.execute_script("""
+            const canvas = document.getElementById('GameCanvas');
+            const r = canvas.getBoundingClientRect();
+            return {x: r.left, y: r.top, w: r.width, h: r.height};
+        """)
+        
+        # 儲存到快取
+        canvas_rect_cache[driver] = rect
+        
+        # 切回主頁面
+        driver.switch_to.default_content()
+        
+        logger.info(f"Canvas 初始化成功：位置 ({rect['x']:.1f}, {rect['y']:.1f})，大小 {rect['w']:.1f}x{rect['h']:.1f}")
+        return True
+    except Exception as e:
+        logger.error(f"Canvas 初始化失敗：{e}")
+        driver.switch_to.default_content()
+        return False
+
+
+def click_canvas_position(driver: WebDriver, rect: Dict[str, float], x_ratio: float, y_ratio: float, description: str = "點擊位置") -> bool:
+    """
+    在 Canvas 上指定位置點擊。
+    
+    Args:
+        driver: WebDriver 實例
+        rect: Canvas 區域資訊
+        x_ratio: X 軸比例（0.0-1.0+）
+        y_ratio: Y 軸比例（0.0-1.0+）
+        description: 點擊位置的描述
+        
+    Returns:
+        bool: 成功返回 True，失敗返回 False
+    """
+    try:
+        click_x = rect["x"] + rect["w"] * x_ratio
+        click_y = rect["y"] + rect["h"] * y_ratio
+        
+        for ev in ["mousePressed", "mouseReleased"]:
+            driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
+                "type": ev,
+                "x": click_x,
+                "y": click_y,
+                "button": "left",
+                "clickCount": 1
+            })
+        
+        logger.info(f"已點擊{description} ({click_x:.1f}, {click_y:.1f})")
+        return True
+    except Exception as e:
+        logger.error(f"點擊{description}失敗：{e}")
+        return False
+
+
+def wait_for_user_completion() -> bool:
+    """
+    等待使用者輸入 'done' 確認完成。
+    
+    Returns:
+        bool: 使用者確認完成返回 True，中斷返回 False
+    """
+    logger.info("💡 免費遊戲結束後，請在終端輸入 'done' 並按 Enter 鍵")
+    
+    while True:
+        try:
+            user_input = input("👉 請輸入 'done' 確認免費遊戲已完成：").strip().lower()
+            if user_input == 'done':
+                return True
+            logger.warning("請輸入 'done' 以確認完成")
+        except (EOFError, KeyboardInterrupt):
+            logger.warning("輸入被中斷")
+            return False
+
+
+def auto_press_space_until_done(driver: WebDriver, stop_event: threading.Event, interval: int = 15) -> None:
+    """
+    持續按空白鍵的執行緒函式。
+    
+    會持續按空白鍵直到 stop_event 被設定。
+    
+    Args:
+        driver: WebDriver 實例
+        stop_event: 停止事件
+        interval: 按鍵間隔秒數，預設 15 秒
+    """
+    try:
+        while not stop_event.is_set():
+            if not press_space_key_once(driver):
+                logger.warning("按空白鍵失敗，停止執行緒")
+                break
+            time.sleep(interval)
+    except Exception as e:
+        logger.error(f"空白鍵執行緒發生錯誤：{e}")
+
+
+def switch_to_game_iframe(driver: WebDriver) -> bool:
+    """
+    切換到遊戲 iframe。
+    
+    Args:
+        driver: WebDriver 實例
+        
+    Returns:
+        bool: 成功返回 True，失敗返回 False
+    """
+    try:
+        iframe = driver.find_element(By.ID, "gameFrame-0")
+        driver.switch_to.frame(iframe)
+        return True
+    except Exception as e:
+        logger.error(f"切換到遊戲 iframe 失敗：{e}")
+        return False
+
+
+def buy_free_game(driver: WebDriver) -> bool:
+    """
+    自動購買免費遊戲。
+    
+    執行步驟：
+    1. 檢查 Canvas 是否已初始化
+    2. 暫停當前自動按鍵
+    3. 切換到遊戲 iframe
+    4. 點擊免費遊戲區域
+    5. 點擊開始按鈕
+    6. 持續按空白鍵直到使用者輸入 'done' 確認完成
+    7. 切回主頁面並恢復之前的狀態
+    
+    Args:
+        driver: WebDriver 實例
+        
+    Returns:
+        bool: 成功返回 True，失敗返回 False
+    """
+    # 檢查 Canvas 是否已初始化
+    if driver not in canvas_rect_cache or canvas_rect_cache[driver] is None:
+        logger.warning("Canvas 尚未初始化，正在嘗試初始化...")
+        if not initialize_canvas(driver):
+            logger.error("無法執行購買免費遊戲")
+            return False
+    
+    # 暫停當前遊戲並記錄狀態
+    was_running = game_state_manager.is_running(driver)
+    if was_running:
+        pause_game(driver)
+        time.sleep(1)
+    
+    # 建立停止事件
+    stop_event = threading.Event()
+    space_thread = None
+    
+    try:
+        rect = canvas_rect_cache[driver]
+        
+        # 切換到遊戲 iframe
+        if not switch_to_game_iframe(driver):
+            return False
+        
+        # 點擊免費遊戲區域
+        if not click_canvas_position(driver, rect, 0.29, 1.14, "免費遊戲位置"):
+            return False
+        time.sleep(2)
+        
+        # 點擊開始按鈕
+        if not click_canvas_position(driver, rect, 0.6, 1.25, "開始按鈕"):
+            return False
+        time.sleep(1)
+        
+        # 啟動自動按空白鍵執行緒
+        space_thread = threading.Thread(
+            target=auto_press_space_until_done,
+            args=(driver, stop_event, 15),
+            daemon=True
+        )
+        space_thread.start()
+        logger.info("⏳ 開始自動按空白鍵...")
+        
+        # 等待使用者確認完成
+        user_confirmed = wait_for_user_completion()
+        
+        # 停止空白鍵執行緒
+        stop_event.set()
+        if space_thread and space_thread.is_alive():
+            space_thread.join(timeout=2)
+        
+        if user_confirmed:
+            logger.info("✅ 購買免費遊戲完成！")
+        else:
+            logger.warning("購買免費遊戲被中斷")
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"購買免費遊戲失敗：{e}")
+        return False
+    
+    finally:
+        # 確保停止執行緒
+        stop_event.set()
+        if space_thread and space_thread.is_alive():
+            space_thread.join(timeout=2)
+        
+        # 切回主頁面
+        try:
+            driver.switch_to.default_content()
+        except Exception:
+            pass
+        
+        # 恢復之前的狀態
+        if was_running:
+            time.sleep(1)
+            start_game(driver)
+
+
 def operate_game(driver: WebDriver, command: str) -> bool:
     """
     根據指令操作遊戲。
     
     Args:
         driver: WebDriver 實例
-        command: 操作指令 ('c':繼續, 'p':暫停, 'q':退出)
+        command: 操作指令 ('c':繼續, 'p':暫停, 'q':退出, 'b':購買免費遊戲)
         
     Returns:
         bool: 操作成功返回 True，無效指令或失敗返回 False
@@ -700,6 +980,8 @@ def operate_game(driver: WebDriver, command: str) -> bool:
         return pause_game(driver)
     elif command == GameCommand.QUIT.value:
         return quit_browser(driver)
+    elif command == GameCommand.BUY_FREE.value:
+        return buy_free_game(driver)
     else:
         logger.warning(f"未識別的指令：{command}")
         return False
@@ -855,7 +1137,7 @@ def run_command_loop(drivers: List[Optional[WebDriver]]) -> None:
         drivers: 瀏覽器實例列表
     """
     logger.info("已進入指令模式")
-    logger.info(f"可用指令：{GameCommand.CONTINUE.value}(繼續) {GameCommand.PAUSE.value}(暫停) {GameCommand.QUIT.value}(退出)")
+    logger.info(f"可用指令：{GameCommand.CONTINUE.value}(繼續) {GameCommand.PAUSE.value}(暫停) {GameCommand.BUY_FREE.value}(購買免費遊戲) {GameCommand.QUIT.value}(退出)")
     
     try:
         while True:
