@@ -59,7 +59,18 @@ class ElementSelector:
     """頁面元素選擇器定義"""
     USERNAME_INPUT = "//input[@placeholder='請輸入帳號']"
     PASSWORD_INPUT = "//input[@placeholder='請輸入密碼']"
-    LOGIN_BUTTON = "//div[contains(@class, 'login-btn')]//span[text()='立即登入']/.."  
+    LOGIN_BUTTON = "//div[contains(@class, 'login-btn')]//span[text()='立即登入']/.."
+
+
+# 點擊座標常量
+class ClickCoordinate:
+    """遊戲中需要點擊的座標位置"""
+    START_GAME_X = 600
+    START_GAME_Y = 600
+    MACHINE_CONFIRM_X = 850
+    MACHINE_CONFIRM_Y = 550
+    FREE_GAME_X = 250
+    FREE_GAME_Y = 500
 
 
 # URL 常量
@@ -475,6 +486,40 @@ def send_space_key(driver: WebDriver) -> bool:
         return True
     except Exception as e:
         logger.warning(f"發送空白鍵失敗：{e}")
+        return False
+
+
+def click_coordinate(driver: WebDriver, x: int, y: int) -> bool:
+    """
+    點擊指定座標位置。
+    
+    Args:
+        driver: WebDriver 實例
+        x: X 座標
+        y: Y 座標
+        
+    Returns:
+        bool: 成功返回 True，失敗返回 False
+    """
+    try:
+        driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
+            "type": "mousePressed",
+            "x": x,
+            "y": y,
+            "button": "left",
+            "clickCount": 1
+        })
+        driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
+            "type": "mouseReleased",
+            "x": x,
+            "y": y,
+            "button": "left",
+            "clickCount": 1
+        })
+        logger.debug(f"已點擊座標 ({x}, {y})")
+        return True
+    except Exception as e:
+        logger.warning(f"點擊座標 ({x}, {y}) 失敗：{e}")
         return False
 
 
