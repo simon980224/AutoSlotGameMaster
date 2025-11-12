@@ -107,6 +107,12 @@ class ClickCoordinate:
     MACHINE_CONFIRM_Y = 550
     FREE_GAME_X = 250
     FREE_GAME_Y = 500
+    
+    # Betsize 顯示區域
+    BETSIZE_DISPLAY_LEFT = 750
+    BETSIZE_DISPLAY_TOP = 554
+    BETSIZE_DISPLAY_RIGHT = 850
+    BETSIZE_DISPLAY_BOTTOM = 600
 
 
 # URL 常量
