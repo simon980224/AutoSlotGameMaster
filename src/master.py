@@ -8,8 +8,6 @@
 - 執行緒安全的狀態控制
 """
 
-# TODO: press_space_key_once,send_space_key 函式合併優化
-
 from __future__ import annotations
 
 import logging
