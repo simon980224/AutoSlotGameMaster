@@ -105,7 +105,6 @@ class ClickCoordinate:
 class URL:
     """網站 URL 定義"""
     LOGIN_PAGE = "https://m.jfw-win.com/#/login?redirect=%2Fhome%2Fpage"
-    HOME_PAGE = "https://m.jfw-win.com/#/"
     GAME_PAGE = "https://m.jfw-win.com/#/home/loding?game_code=egyptian-mythology&factory_code=ATG&state=true&name=%E6%88%B0%E7%A5%9E%E8%B3%BD%E7%89%B9"
 
 
