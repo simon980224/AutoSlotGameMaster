@@ -37,6 +37,7 @@ class GameCommand(Enum):
     CONTINUE = 'c'
     PAUSE = 'p'
     QUIT = 'q'
+    BET_SIZE = 'b'
 
 
 @dataclass
@@ -141,6 +142,13 @@ class ImagePath:
     def lobby_confirm() -> str:
         """大廳確認圖片"""
         return ImagePath.get_image_path("lobby_confirm.png")
+    
+    @staticmethod
+    def bet_size_dir() -> str:
+        """bet_size 資料夾路徑"""
+        current_dir = Path(__file__).resolve().parent
+        project_root = current_dir.parent
+        return str(project_root / "img" / "bet_size")
 
 
 # 遊戲倍率常量
@@ -954,6 +962,139 @@ def quit_browser(driver: WebDriver) -> bool:
         return False
 
 
+def capture_betsize_region(driver: WebDriver) -> Optional[np.ndarray]:
+    """
+    截取 betsize 顯示區域的圖片。
+    
+    Args:
+        driver: WebDriver 實例
+        
+    Returns:
+        Optional[np.ndarray]: 截取的區域圖片 (灰階)，失敗時返回 None
+    """
+    try:
+        # 擷取整個瀏覽器截圖
+        screenshot = driver.get_screenshot_as_png()
+        screenshot_np = np.array(Image.open(io.BytesIO(screenshot)))
+        
+        # 裁剪 betsize 顯示區域
+        betsize_region = screenshot_np[
+            ClickCoordinate.BETSIZE_DISPLAY_TOP:ClickCoordinate.BETSIZE_DISPLAY_BOTTOM,
+            ClickCoordinate.BETSIZE_DISPLAY_LEFT:ClickCoordinate.BETSIZE_DISPLAY_RIGHT
+        ]
+        
+        # 轉換為灰階
+        betsize_gray = cv2.cvtColor(betsize_region, cv2.COLOR_RGB2GRAY)
+        
+        logger.debug(f"已截取 betsize 區域 ({ClickCoordinate.BETSIZE_DISPLAY_LEFT},{ClickCoordinate.BETSIZE_DISPLAY_TOP}) - ({ClickCoordinate.BETSIZE_DISPLAY_RIGHT},{ClickCoordinate.BETSIZE_DISPLAY_BOTTOM})")
+        return betsize_gray
+        
+    except Exception as e:
+        logger.error(f"截取 betsize 區域失敗：{e}")
+        return None
+
+
+def compare_betsize_images(current_image: np.ndarray, bet_size_dir: str, threshold: float = 0.8) -> Optional[str]:
+    """
+    將當前 betsize 圖片與資料夾中所有圖片進行對比。
+    
+    Args:
+        current_image: 當前截取的 betsize 圖片 (灰階)
+        bet_size_dir: bet_size 圖片資料夾路徑
+        threshold: 匹配閾值 (0-1)
+        
+    Returns:
+        Optional[str]: 匹配的金額(檔名不含副檔名)，無匹配時返回 None
+    """
+    try:
+        bet_size_path = Path(bet_size_dir)
+        if not bet_size_path.exists():
+            logger.error(f"bet_size 資料夾不存在：{bet_size_dir}")
+            return None
+        
+        # 取得所有 png 圖片
+        image_files = sorted(bet_size_path.glob("*.png"))
+        if not image_files:
+            logger.warning(f"bet_size 資料夾中沒有圖片：{bet_size_dir}")
+            return None
+        
+        logger.info(f"開始比對 {len(image_files)} 張圖片...")
+        
+        best_match_score = 0.0
+        best_match_amount = None
+        
+        # 對每張圖片進行匹配
+        for image_file in image_files:
+            # 讀取模板圖片
+            template = cv2.imread(str(image_file), cv2.IMREAD_GRAYSCALE)
+            if template is None:
+                logger.warning(f"無法讀取圖片：{image_file}")
+                continue
+            
+            # 確保模板大小不超過當前圖片
+            if template.shape[0] > current_image.shape[0] or template.shape[1] > current_image.shape[1]:
+                logger.debug(f"模板圖片 {image_file.name} 尺寸過大，跳過")
+                continue
+            
+            # 執行模板匹配
+            result = cv2.matchTemplate(current_image, template, cv2.TM_CCOEFF_NORMED)
+            min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
+            
+            logger.debug(f"圖片 {image_file.name} 匹配度：{max_val:.3f}")
+            
+            # 更新最佳匹配
+            if max_val > best_match_score:
+                best_match_score = max_val
+                best_match_amount = image_file.stem  # 檔名不含副檔名
+        
+        # 檢查是否達到閾值
+        if best_match_score >= threshold:
+            logger.info(f"找到匹配金額：{best_match_amount} (相似度：{best_match_score:.3f})")
+            return best_match_amount
+        else:
+            logger.warning(f"未找到匹配圖片 (最高相似度：{best_match_score:.3f})")
+            return None
+            
+    except Exception as e:
+        logger.error(f"比對圖片時發生錯誤：{e}")
+        return None
+
+
+def query_current_betsize(driver: WebDriver) -> Optional[str]:
+    """
+    查詢當前的下注金額。
+    
+    Args:
+        driver: WebDriver 實例
+        
+    Returns:
+        Optional[str]: 當前金額，查詢失敗時返回 None
+    """
+    try:
+        logger.info("開始查詢當前下注金額...")
+        
+        # 截取 betsize 區域
+        betsize_image = capture_betsize_region(driver)
+        if betsize_image is None:
+            logger.error("截取 betsize 區域失敗")
+            return None
+        
+        # 與資料夾中的圖片進行比對
+        bet_size_dir = ImagePath.bet_size_dir()
+        matched_amount = compare_betsize_images(betsize_image, bet_size_dir, threshold=GAME_CONFIG.image_match_threshold)
+        
+        if matched_amount:
+            logger.info(f"當前下注金額：{matched_amount}")
+            return matched_amount
+        else:
+            logger.warning("無法識別當前下注金額")
+            return None
+            
+    except Exception as e:
+        logger.error(f"查詢下注金額時發生錯誤：{e}")
+        return None
+
+
 def operate_game(driver: WebDriver, command: str) -> bool:
     """
     根據指令操作遊戲。
@@ -977,6 +1118,9 @@ def operate_game(driver: WebDriver, command: str) -> bool:
         return pause_game(driver)
     elif command == GameCommand.QUIT.value:
         return quit_browser(driver)
+    elif command == GameCommand.BET_SIZE.value:
+        amount = query_current_betsize(driver)
+        return amount is not None
     else:
         logger.warning(f"未識別的指令：{command}")
         return False
@@ -1132,7 +1276,7 @@ def run_command_loop(drivers: List[Optional[WebDriver]]) -> None:
         drivers: 瀏覽器實例列表
     """
     logger.info("已進入指令模式")
-    logger.info(f"可用指令：{GameCommand.CONTINUE.value}(繼續) {GameCommand.PAUSE.value}(暫停) {GameCommand.QUIT.value}(退出)")
+    logger.info(f"可用指令：{GameCommand.CONTINUE.value}(繼續) {GameCommand.PAUSE.value}(暫停) {GameCommand.BET_SIZE.value}(查詢金額) {GameCommand.QUIT.value}(退出)")
     
     try:
         while True:
