@@ -37,7 +37,7 @@ class GameCommand(Enum):
     CONTINUE = 'c'
     PAUSE = 'p'
     QUIT = 'q'
-    BET_SIZE = 'b'
+    BET_SIZE = 'b'  # 調整下注金額
 
 
 @dataclass
@@ -1060,15 +1060,15 @@ def compare_betsize_images(current_image: np.ndarray, bet_size_dir: str, thresho
         return None
 
 
-def query_current_betsize(driver: WebDriver) -> Optional[str]:
+def get_current_betsize_index(driver: WebDriver) -> Optional[int]:
     """
-    查詢當前的下注金額。
+    取得當前下注金額在 GAME_BETSIZE 列表中的索引。
     
     Args:
         driver: WebDriver 實例
         
     Returns:
-        Optional[str]: 當前金額，查詢失敗時返回 None
+        Optional[int]: 當前金額的索引，查詢失敗時返回 None
     """
     try:
         logger.info("開始查詢當前下注金額...")
@@ -1084,15 +1084,117 @@ def query_current_betsize(driver: WebDriver) -> Optional[str]:
         matched_amount = compare_betsize_images(betsize_image, bet_size_dir, threshold=GAME_CONFIG.image_match_threshold)
         
         if matched_amount:
-            logger.info(f"當前下注金額：{matched_amount}")
-            return matched_amount
+            # 將字串轉換為數字並在 GAME_BETSIZE 中找到對應索引
+            try:
+                amount_value = float(matched_amount)
+                if amount_value in GAME_BETSIZE:
+                    index = GAME_BETSIZE.index(amount_value)
+                    logger.info(f"當前下注金額: {matched_amount} (索引: {index})")
+                    return index
+                else:
+                    logger.warning(f"金額 {matched_amount} 不在 GAME_BETSIZE 列表中")
+                    return None
+            except ValueError:
+                logger.error(f"無法將 {matched_amount} 轉換為數字")
+                return None
         else:
             logger.warning("無法識別當前下注金額")
             return None
             
     except Exception as e:
-        logger.error(f"查詢下注金額時發生錯誤：{e}")
+        logger.error(f"查詢下注金額時發生錯誤: {e}")
         return None
+
+
+def adjust_betsize(driver: WebDriver, target_amount: float, max_attempts: int = 200) -> bool:
+    """
+    調整下注金額到目標值。
+    
+    Args:
+        driver: WebDriver 實例
+        target_amount: 目標金額
+        max_attempts: 最大嘗試次數
+        
+    Returns:
+        bool: 調整成功返回 True，失敗返回 False
+    """
+    try:
+        # 檢查目標金額是否在列表中
+        if target_amount not in GAME_BETSIZE:
+            logger.error(f"目標金額 {target_amount} 不在 GAME_BETSIZE 列表中")
+            logger.info(f"可用金額: {GAME_BETSIZE}")
+            return False
+        
+        target_index = GAME_BETSIZE.index(target_amount)
+        logger.info(f"目標金額: {target_amount} (索引: {target_index})")
+        
+        # 取得當前金額索引
+        current_index = get_current_betsize_index(driver)
+        if current_index is None:
+            logger.error("無法取得當前金額，調整失敗")
+            return False
+        
+        # 計算需要按的次數和方向
+        diff = target_index - current_index
+        
+        if diff == 0:
+            logger.info("當前金額已經是目標金額，無需調整")
+            return True
+        
+        # 決定按哪個鍵
+        if diff > 0:
+            # 需要增加，按右鍵
+            key = KeyboardKey.ARROW_RIGHT
+            direction = "增加"
+            steps = diff
+        else:
+            # 需要減少，按左鍵
+            key = KeyboardKey.ARROW_LEFT
+            direction = "減少"
+            steps = abs(diff)
+        
+        logger.info(f"需要{direction} {steps} 次才能到達目標金額")
+        
+        # 開始調整
+        for i in range(steps):
+            send_key(driver, key)
+            logger.info(f"已按 {direction} 鍵 ({i + 1}/{steps})")
+            time.sleep(0.3)  # 每次按鍵後短暫等待
+        
+        # 等待畫面更新
+        time.sleep(1)
+        
+        # 驗證是否調整成功
+        logger.info("開始驗證調整結果...")
+        for attempt in range(max_attempts):
+            final_index = get_current_betsize_index(driver)
+            
+            if final_index is None:
+                logger.warning(f"驗證失敗 (嘗試 {attempt + 1}/{max_attempts})，重試中...")
+                time.sleep(0.5)
+                continue
+            
+            if final_index == target_index:
+                logger.info(f"✓ 調整成功! 當前金額: {GAME_BETSIZE[final_index]}")
+                return True
+            else:
+                # 如果不正確，繼續調整
+                diff = target_index - final_index
+                logger.warning(f"當前金額 {GAME_BETSIZE[final_index]} 未達目標，繼續調整 (差距: {diff})")
+                
+                if diff > 0:
+                    send_key(driver, KeyboardKey.ARROW_RIGHT)
+                else:
+                    send_key(driver, KeyboardKey.ARROW_LEFT)
+                
+                time.sleep(0.5)
+        
+        logger.error(f"調整失敗，已達最大嘗試次數 ({max_attempts})")
+        return False
+        
+    except Exception as e:
+        logger.error(f"調整金額時發生錯誤: {e}")
+        return False
 
 
 def operate_game(driver: WebDriver, command: str) -> bool:
@@ -1118,9 +1220,20 @@ def operate_game(driver: WebDriver, command: str) -> bool:
         return pause_game(driver)
     elif command == GameCommand.QUIT.value:
         return quit_browser(driver)
-    elif command == GameCommand.BET_SIZE.value:
-        amount = query_current_betsize(driver)
-        return amount is not None
+    elif command.startswith(GameCommand.BET_SIZE.value):
+        # 處理調整金額指令: b <金額>
+        parts = command.split()
+        if len(parts) < 2:
+            logger.warning("請輸入目標金額，格式: b <金額>")
+            logger.info(f"可用金額: {GAME_BETSIZE}")
+            return False
+        
+        try:
+            target_amount = float(parts[1])
+            return adjust_betsize(driver, target_amount)
+        except ValueError:
+            logger.error(f"無效的金額: {parts[1]}")
+            return False
     else:
         logger.warning(f"未識別的指令：{command}")
         return False
@@ -1276,7 +1389,8 @@ def run_command_loop(drivers: List[Optional[WebDriver]]) -> None:
         drivers: 瀏覽器實例列表
     """
     logger.info("已進入指令模式")
-    logger.info(f"可用指令：{GameCommand.CONTINUE.value}(繼續) {GameCommand.PAUSE.value}(暫停) {GameCommand.BET_SIZE.value}(查詢金額) {GameCommand.QUIT.value}(退出)")
+    logger.info(f"可用指令：{GameCommand.CONTINUE.value}(繼續) {GameCommand.PAUSE.value}(暫停) {GameCommand.BET_SIZE.value} <金額>(調整金額) {GameCommand.QUIT.value}(退出)")
+    logger.info(f"可用金額列表: {GAME_BETSIZE}")
     
     try:
         while True:
