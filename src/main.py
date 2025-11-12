@@ -62,6 +62,34 @@ class ElementSelector:
     LOGIN_BUTTON = "//div[contains(@class, 'login-btn')]//span[text()='立即登入']/.."
 
 
+# 鍵盤按鍵常量
+class KeyboardKey:
+    """鍵盤按鍵屬性定義"""
+    # 空白鍵
+    SPACE = {
+        "key": " ",
+        "code": "Space",
+        "windowsVirtualKeyCode": 32,
+        "nativeVirtualKeyCode": 32
+    }
+    
+    # 左方向鍵（減少金額）
+    ARROW_LEFT = {
+        "key": "ArrowLeft",
+        "code": "ArrowLeft",
+        "windowsVirtualKeyCode": 37,
+        "nativeVirtualKeyCode": 37
+    }
+    
+    # 右方向鍵（增加金額）
+    ARROW_RIGHT = {
+        "key": "ArrowRight",
+        "code": "ArrowRight",
+        "windowsVirtualKeyCode": 39,
+        "nativeVirtualKeyCode": 39
+    }
+
+
 # 點擊座標常量
 class ClickCoordinate:
     """遊戲中需要點擊的座標位置"""
@@ -450,43 +478,83 @@ def navigate_to_jfw(driver_path: str, username: str, password: str, max_retries:
 
 # ==================== 遊戲控制 ====================
 
+def send_key(driver: WebDriver, key_config: Dict[str, any]) -> bool:
+    """
+    使用 Chrome DevTools Protocol 發送鍵盤事件。
+    
+    按下並放開指定按鍵一次，不包含任何等待時間。
+    呼叫者可以在呼叫此函式後自行決定等待時間。
+    
+    Args:
+        driver: WebDriver 實例
+        key_config: 按鍵配置字典，包含 key、code、windowsVirtualKeyCode、nativeVirtualKeyCode
+        
+    Returns:
+        bool: 成功返回 True，失敗返回 False
+        
+    Example:
+        >>> send_key(driver, KeyboardKey.SPACE)
+        >>> time.sleep(15)  # 自訂間隔時間
+        >>> send_key(driver, KeyboardKey.ARROW_LEFT)
+    """
+    try:
+        driver.execute_cdp_cmd("Input.dispatchKeyEvent", {
+            "type": "keyDown",
+            "key": key_config["key"],
+            "code": key_config["code"],
+            "windowsVirtualKeyCode": key_config["windowsVirtualKeyCode"],
+            "nativeVirtualKeyCode": key_config["nativeVirtualKeyCode"]
+        })
+        driver.execute_cdp_cmd("Input.dispatchKeyEvent", {
+            "type": "keyUp",
+            "key": key_config["key"],
+            "code": key_config["code"],
+            "windowsVirtualKeyCode": key_config["windowsVirtualKeyCode"],
+            "nativeVirtualKeyCode": key_config["nativeVirtualKeyCode"]
+        })
+        return True
+    except Exception as e:
+        logger.warning(f"發送按鍵失敗：{e}")
+        return False
+
+
 def send_space_key(driver: WebDriver) -> bool:
     """
-    使用 Chrome DevTools Protocol 發送空白鍵事件。
-    
-    按下並放開空白鍵一次，不包含任何等待時間。
-    呼叫者可以在呼叫此函式後自行決定等待時間。
+    發送空白鍵。
     
     Args:
         driver: WebDriver 實例
         
     Returns:
         bool: 成功返回 True，失敗返回 False
-        
-    Example:
-        >>> send_space_key(driver)
-        >>> time.sleep(15)  # 自訂間隔時間
-        >>> send_space_key(driver)
     """
-    try:
-        driver.execute_cdp_cmd("Input.dispatchKeyEvent", {
-            "type": "keyDown",
-            "key": " ",
-            "code": "Space",
-            "windowsVirtualKeyCode": 32,
-            "nativeVirtualKeyCode": 32
-        })
-        driver.execute_cdp_cmd("Input.dispatchKeyEvent", {
-            "type": "keyUp",
-            "key": " ",
-            "code": "Space",
-            "windowsVirtualKeyCode": 32,
-            "nativeVirtualKeyCode": 32
-        })
-        return True
-    except Exception as e:
-        logger.warning(f"發送空白鍵失敗：{e}")
-        return False
+    return send_key(driver, KeyboardKey.SPACE)
+
+
+def send_arrow_left(driver: WebDriver) -> bool:
+    """
+    發送左方向鍵（減少金額）。
+    
+    Args:
+        driver: WebDriver 實例
+        
+    Returns:
+        bool: 成功返回 True，失敗返回 False
+    """
+    return send_key(driver, KeyboardKey.ARROW_LEFT)
+
+
+def send_arrow_right(driver: WebDriver) -> bool:
+    """
+    發送右方向鍵（增加金額）。
+    
+    Args:
+        driver: WebDriver 實例
+        
+    Returns:
+        bool: 成功返回 True，失敗返回 False
+    """
+    return send_key(driver, KeyboardKey.ARROW_RIGHT)
 
 
 def click_coordinate(driver: WebDriver, x: int, y: int) -> bool:
