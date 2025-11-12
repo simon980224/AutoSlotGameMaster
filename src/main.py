@@ -53,10 +53,11 @@ class GameConfig:
     """遊戲配置"""
     max_accounts: int = 12
     key_interval: int = 15  # 按鍵間隔秒數
-    page_load_timeout: int = 300
-    implicit_wait: int = 30
-    explicit_wait: int = 5
-    image_detect_timeout: int = 120  # 圖片檢測超時秒數
+    page_load_timeout: int = 600  # 頁面載入超時（秒）- 提高到 10 分鐘
+    script_timeout: int = 600  # 腳本執行超時（秒）- 10 分鐘
+    implicit_wait: int = 60  # 隱式等待（秒）- 提高到 60 秒
+    explicit_wait: int = 10  # 顯式等待（秒）- 提高到 10 秒
+    image_detect_timeout: int = 180  # 圖片檢測超時秒數 - 提高到 3 分鐘
     image_detect_interval: float = 0.5  # 圖片檢測間隔秒數
     image_match_threshold: float = 0.8  # 圖片匹配閾值
 
@@ -101,7 +102,7 @@ class KeyboardKey:
 class ClickCoordinate:
     """遊戲中需要點擊的座標位置"""
     START_GAME_X = 600
-    START_GAME_Y = 600
+    START_GAME_Y = 620
     MACHINE_CONFIRM_X = 850
     MACHINE_CONFIRM_Y = 550
     FREE_GAME_X = 250
@@ -129,6 +130,11 @@ class ImagePath:
     def lobby_login() -> str:
         """大廳登入圖片"""
         return ImagePath.get_image_path("lobby_login.png")
+    
+    @staticmethod
+    def lobby_confirm() -> str:
+        """大廳確認圖片"""
+        return ImagePath.get_image_path("lobby_confirm.png")
 
 
 # 遊戲倍率常量
@@ -305,6 +311,7 @@ def create_chrome_options() -> Options:
     - 禁用通知
     - 禁用密碼管理
     - 效能優化設定
+    - 網路連線優化設定
     
     Returns:
         Options: 配置好的 Chrome 選項物件
@@ -319,11 +326,24 @@ def create_chrome_options() -> Options:
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--no-sandbox")
     
-    # 時間同步設定
+    # # 網路連線優化
     chrome_options.add_argument("--disable-features=NetworkTimeServiceQuerying")
+    chrome_options.add_argument("--dns-prefetch-disable")  # 禁用 DNS 預取以減少網路請求
+    chrome_options.add_argument("--disable-background-networking")  # 禁用背景網路活動
+    chrome_options.add_argument("--disable-sync")  # 禁用同步
+    chrome_options.add_argument("--metrics-recording-only")  # 僅記錄指標
+    chrome_options.add_argument("--disable-default-apps")  # 禁用預設應用程式
+    chrome_options.add_argument("--no-first-run")  # 跳過首次執行
+    chrome_options.add_argument("--disable-extensions")  # 禁用擴充功能
+    
+    # 提高網路效能
+    # chrome_options.add_argument("--disable-web-security")  # 禁用網路安全檢查（提高速度）
+    # chrome_options.add_argument("--disk-cache-size=0")  # 禁用磁碟快取
+    # chrome_options.add_argument("--aggressive-cache-discard")  # 積極丟棄快取
+    # chrome_options.add_argument("--disable-application-cache")  # 禁用應用程式快取
     
     # 移除自動化痕跡
-    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
     chrome_options.add_experimental_option('useAutomationExtension', False)
     
     # 偏好設定
@@ -335,6 +355,10 @@ def create_chrome_options() -> Options:
         "profile.default_content_setting_values.media_stream_mic": 2,
         "profile.default_content_setting_values.media_stream_camera": 2,
         "profile.default_content_setting_values.sound": 2,  # 靜音所有網站
+        # 網路優化設定
+        "profile.default_content_setting_values.automatic_downloads": 2,
+        "download.prompt_for_download": False,
+        "download_restrictions": 3,
     })
     
     return chrome_options
@@ -355,9 +379,22 @@ def create_webdriver(driver_path: str) -> Optional[WebDriver]:
         chrome_options = create_chrome_options()
         
         driver = webdriver.Chrome(service=service, options=chrome_options)
+        
+        # 設定超時時間（使用更長的時間避免逾時）
         driver.set_page_load_timeout(GAME_CONFIG.page_load_timeout)
+        driver.set_script_timeout(GAME_CONFIG.script_timeout)
         driver.implicitly_wait(GAME_CONFIG.implicit_wait)
         
+        # 設定網路條件（移除頻寬限制）
+        driver.execute_cdp_cmd("Network.enable", {})
+        driver.execute_cdp_cmd("Network.emulateNetworkConditions", {
+            "offline": False,
+            "downloadThroughput": -1,  # 無限下載速度
+            "uploadThroughput": -1,    # 無限上傳速度
+            "latency": 0               # 零延遲
+        })
+        
+        logger.info("已建立瀏覽器實例並優化網路設定")
         return driver
     except Exception as e:
         logger.error(f"建立瀏覽器失敗：{e}")
@@ -500,7 +537,57 @@ def navigate_to_game(driver: WebDriver, username: str) -> bool:
             interval=GAME_CONFIG.image_detect_interval,
             threshold=GAME_CONFIG.image_match_threshold
         ):
-            logger.info(f"[{username}] 成功進入遊戲（已確認 lobby_login.png）")
+            logger.info(f"[{username}] 成功進入遊戲大廳（已確認 lobby_login.png）")
+            
+            # 持續點擊開始遊戲按鈕直到確認彈窗出現
+            time.sleep(1)
+            logger.info(f"[{username}] 開始點擊進入遊戲...")
+            lobby_confirm_path = ImagePath.lobby_confirm()
+            
+            # 持續點擊 (600, 620) 並監測確認彈窗
+            max_click_attempts = 1000
+            confirm_detected = False
+            
+            for attempt in range(max_click_attempts):
+                # 點擊開始遊戲按鈕
+                click_coordinate(driver, ClickCoordinate.START_GAME_X, ClickCoordinate.START_GAME_Y)
+                
+                # 短暫等待後檢測確認彈窗
+                time.sleep(0.5)
+                
+                if detect_image_on_screen(driver, lobby_confirm_path, GAME_CONFIG.image_match_threshold):
+                    logger.info(f"[{username}] 檢測到確認彈窗（嘗試 {attempt + 1} 次後出現）")
+                    confirm_detected = True
+                    break
+            
+            if not confirm_detected:
+                logger.error(f"[{username}] 未能檢測到確認彈窗，進入遊戲失敗")
+                return False
+            
+            # 持續點擊確認按鈕直到 lobby_confirm 圖片消失
+            time.sleep(0.5)
+            logger.info(f"[{username}] 開始點擊確認按鈕...")
+            max_confirm_attempts = 60  # 最多嘗試 60 次 (約 30 秒)
+            confirm_disappeared = False
+            
+            for attempt in range(max_confirm_attempts):
+                # 點擊確認按鈕
+                click_coordinate(driver, ClickCoordinate.MACHINE_CONFIRM_X, ClickCoordinate.MACHINE_CONFIRM_Y)
+                
+                # 短暫等待後檢測確認彈窗是否消失
+                time.sleep(0.5)
+                
+                if not detect_image_on_screen(driver, lobby_confirm_path, GAME_CONFIG.image_match_threshold):
+                    logger.info(f"[{username}] 確認彈窗已消失（點擊 {attempt + 1} 次後）")
+                    confirm_disappeared = True
+                    break
+            
+            if not confirm_disappeared:
+                logger.error(f"[{username}] 確認彈窗未消失，進入遊戲失敗")
+                return False
+            
+            logger.info(f"[{username}] 已成功進入遊戲")
+            time.sleep(2)  # 等待遊戲載入
             return True
         else:
             logger.error(f"[{username}] 進入遊戲失敗：未檢測到 lobby_login.png")
