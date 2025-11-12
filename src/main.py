@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import io
 import logging
 import platform
 import threading
@@ -19,6 +20,9 @@ from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+import cv2
+import numpy as np
+from PIL import Image
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
@@ -52,6 +56,9 @@ class GameConfig:
     page_load_timeout: int = 300
     implicit_wait: int = 30
     explicit_wait: int = 5
+    image_detect_timeout: int = 120  # 圖片檢測超時秒數
+    image_detect_interval: float = 0.5  # 圖片檢測間隔秒數
+    image_match_threshold: float = 0.8  # 圖片匹配閾值
 
 
 # 元素選擇器常量
@@ -106,6 +113,22 @@ class URL:
     """網站 URL 定義"""
     LOGIN_PAGE = "https://m.jfw-win.com/#/login?redirect=%2Fhome%2Fpage"
     GAME_PAGE = "https://m.jfw-win.com/#/home/loding?game_code=egyptian-mythology&factory_code=ATG&state=true&name=%E6%88%B0%E7%A5%9E%E8%B3%BD%E7%89%B9"
+
+
+# 圖片路徑常量
+class ImagePath:
+    """圖片路徑定義"""
+    @staticmethod
+    def get_image_path(filename: str) -> str:
+        """取得圖片完整路徑"""
+        current_dir = Path(__file__).resolve().parent
+        project_root = current_dir.parent
+        return str(project_root / "img" / filename)
+    
+    @staticmethod
+    def lobby_login() -> str:
+        """大廳登入圖片"""
+        return ImagePath.get_image_path("lobby_login.png")
 
 
 # 遊戲倍率常量
@@ -369,9 +392,87 @@ def perform_login(driver: WebDriver, username: str, password: str) -> bool:
         return False
 
 
+def detect_image_on_screen(driver: WebDriver, template_path: str, threshold: float = 0.8) -> bool:
+    """
+    檢測瀏覽器視窗中是否出現指定圖片。
+    
+    使用模板匹配技術在螢幕截圖中尋找目標圖片。
+    
+    Args:
+        driver: WebDriver 實例
+        template_path: 模板圖片的完整路徑
+        threshold: 匹配閾值 (0-1)，越接近 1 表示要求越精確
+        
+    Returns:
+        bool: 找到圖片返回 True，否則返回 False
+    """
+    try:
+        # 檢查模板圖片是否存在
+        if not Path(template_path).exists():
+            logger.error(f"模板圖片不存在：{template_path}")
+            return False
+        
+        # 擷取瀏覽器視窗截圖
+        screenshot = driver.get_screenshot_as_png()
+        screenshot_np = np.array(Image.open(io.BytesIO(screenshot)))
+        screenshot_gray = cv2.cvtColor(screenshot_np, cv2.COLOR_RGB2GRAY)
+        
+        # 讀取模板圖片
+        template = cv2.imread(template_path, cv2.IMREAD_GRAYSCALE)
+        if template is None:
+            logger.error(f"無法讀取模板圖片：{template_path}")
+            return False
+        
+        # 執行模板匹配
+        result = cv2.matchTemplate(screenshot_gray, template, cv2.TM_CCOEFF_NORMED)
+        min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
+        
+        # 判斷是否匹配成功
+        if max_val >= threshold:
+            logger.debug(f"找到圖片匹配 (相似度: {max_val:.2f}, 位置: {max_loc})")
+            return True
+        else:
+            logger.debug(f"圖片不匹配 (相似度: {max_val:.2f})")
+            return False
+            
+    except Exception as e:
+        logger.warning(f"圖片檢測失敗：{e}")
+        return False
+
+
+def wait_for_image(driver: WebDriver, template_path: str, timeout: int = 60, 
+                   interval: float = 0.5, threshold: float = 0.8) -> bool:
+    """
+    等待指定圖片出現在瀏覽器視窗中。
+    
+    持續檢測直到圖片出現或超時。
+    
+    Args:
+        driver: WebDriver 實例
+        template_path: 模板圖片路徑
+        timeout: 超時時間（秒）
+        interval: 檢測間隔（秒）
+        threshold: 匹配閾值 (0-1)
+        
+    Returns:
+        bool: 在超時前找到圖片返回 True，超時返回 False
+    """
+    start_time = time.time()
+    
+    while time.time() - start_time < timeout:
+        if detect_image_on_screen(driver, template_path, threshold):
+            return True
+        time.sleep(interval)
+    
+    logger.warning(f"等待圖片超時（{timeout} 秒）")
+    return False
+
+
 def navigate_to_game(driver: WebDriver, username: str) -> bool:
     """
-    導航到遊戲頁面並設定視窗大小。
+    導航到遊戲頁面並確認成功進入。
+    
+    會持續檢測 lobby_login.png 圖片，確認真正進入遊戲。
     
     Args:
         driver: WebDriver 實例
@@ -387,8 +488,24 @@ def navigate_to_game(driver: WebDriver, username: str) -> bool:
         
         # 設定視窗大小
         driver.set_window_size(WINDOW_CONFIG.width, WINDOW_CONFIG.height)
-        logger.info(f"[{username}] 成功進入遊戲")
-        return True
+        
+        # 檢測 lobby_login.png 圖片確認進入遊戲
+        logger.info(f"[{username}] 正在檢測遊戲載入狀態...")
+        lobby_image_path = ImagePath.lobby_login()
+        
+        if wait_for_image(
+            driver, 
+            lobby_image_path, 
+            timeout=GAME_CONFIG.image_detect_timeout,
+            interval=GAME_CONFIG.image_detect_interval,
+            threshold=GAME_CONFIG.image_match_threshold
+        ):
+            logger.info(f"[{username}] 成功進入遊戲（已確認 lobby_login.png）")
+            return True
+        else:
+            logger.error(f"[{username}] 進入遊戲失敗：未檢測到 lobby_login.png")
+            return False
+            
     except Exception as e:
         logger.error(f"[{username}] 進入遊戲失敗：{e}")
         return False
