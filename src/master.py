@@ -13,7 +13,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import platform
 import threading
 import time
@@ -27,8 +26,6 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.webdriver import WebDriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.support.ui import WebDriverWait
 
 
 # ==================== 常量定義 ====================
@@ -62,17 +59,9 @@ class GameConfig:
 # 元素選擇器常量
 class ElementSelector:
     """頁面元素選擇器定義"""
-    # 使用 placeholder 屬性定位帳號輸入框
     USERNAME_INPUT = "//input[@placeholder='請輸入帳號']"
-    
-    # 使用 placeholder 屬性定位密碼輸入框
     PASSWORD_INPUT = "//input[@placeholder='請輸入密碼']"
-    
-    # 使用 class 和文字內容定位登入按鈕
-    LOGIN_BUTTON = "//div[contains(@class, 'login-btn')]//span[text()='立即登入']/.."
-    
-    # 錯誤訊息
-    ERROR_MESSAGE = "/html/body/div[3]/div[2]/div/div[3]/span"
+    LOGIN_BUTTON = "//div[contains(@class, 'login-btn')]//span[text()='立即登入']/.."  
 
 
 # URL 常量
@@ -196,7 +185,7 @@ def load_user_credentials() -> List[Dict[str, str]]:
     檔案格式：
     - 第一行為標題（會被跳過）
     - 每行格式：username:password
-    - 最多讀取前 20 組帳號
+    - 最多讀取前 12 組帳號
     
     Returns:
         List[Dict[str, str]]: 帳號密碼列表，每項包含 'username' 和 'password' 鍵值
@@ -311,28 +300,6 @@ def create_webdriver(driver_path: str) -> Optional[WebDriver]:
     except Exception as e:
         logger.error(f"建立瀏覽器失敗：{e}")
         return None
-
-
-def check_login_error(driver: WebDriver) -> Optional[str]:
-    """
-    檢查登入錯誤訊息。
-    
-    Args:
-        driver: WebDriver 實例
-        
-    Returns:
-        Optional[str]: 錯誤訊息，無錯誤時返回 None
-    """
-    try:
-        error_element = driver.find_element(By.XPATH, ElementSelector.ERROR_MESSAGE)
-        error_text = error_element.text
-        if error_text and "錯誤" in error_text:
-            return error_text
-    except Exception:
-        pass
-    return None
-
-
 
 
 # ==================== 登入流程 ====================
@@ -475,11 +442,19 @@ def send_space_key(driver: WebDriver) -> bool:
     """
     使用 Chrome DevTools Protocol 發送空白鍵事件。
     
+    按下並放開空白鍵一次，不包含任何等待時間。
+    呼叫者可以在呼叫此函式後自行決定等待時間。
+    
     Args:
         driver: WebDriver 實例
         
     Returns:
         bool: 成功返回 True，失敗返回 False
+        
+    Example:
+        >>> send_space_key(driver)
+        >>> time.sleep(15)  # 自訂間隔時間
+        >>> send_space_key(driver)
     """
     try:
         driver.execute_cdp_cmd("Input.dispatchKeyEvent", {
@@ -499,45 +474,6 @@ def send_space_key(driver: WebDriver) -> bool:
         return True
     except Exception as e:
         logger.warning(f"發送空白鍵失敗：{e}")
-        return False
-
-
-def press_space_key_once(driver: WebDriver) -> bool:
-    """
-    按下一次空白鍵（按下 + 放開），不包含任何等待時間。
-    
-    此函式專門用於需要自訂間隔時間的場景。
-    呼叫者可以在呼叫此函式後自行決定等待時間。
-    
-    Args:
-        driver: WebDriver 實例
-        
-    Returns:
-        bool: 成功返回 True，失敗返回 False
-    
-    Example:
-        >>> press_space_key_once(driver)
-        >>> time.sleep(15)  # 自訂間隔時間
-        >>> press_space_key_once(driver)
-    """
-    try:
-        driver.execute_cdp_cmd("Input.dispatchKeyEvent", {
-            "type": "keyDown",
-            "key": " ",
-            "code": "Space",
-            "windowsVirtualKeyCode": 32,
-            "nativeVirtualKeyCode": 32
-        })
-        driver.execute_cdp_cmd("Input.dispatchKeyEvent", {
-            "type": "keyUp",
-            "key": " ",
-            "code": "Space",
-            "windowsVirtualKeyCode": 32,
-            "nativeVirtualKeyCode": 32
-        })
-        return True
-    except Exception as e:
-        logger.warning(f"按空白鍵失敗：{e}")
         return False
 
 
