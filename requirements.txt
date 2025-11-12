@@ -6,3 +6,4 @@ pymsgbox>=1.0.9
 pyscreeze>=0.1.30
 opencv-python>=4.8.0
 numpy>=1.24.0
+pytesseract>=0.3.10
