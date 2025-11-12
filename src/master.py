@@ -74,15 +74,13 @@ class ElementSelector:
     
     # 錯誤訊息
     ERROR_MESSAGE = "/html/body/div[3]/div[2]/div/div[3]/span"
-    
-    # 公告關閉按鈕
-    ANNOUNCEMENT_CLOSE = "/html/body/div[2]/main/div/div[2]/div/div[3]/div[6]/div/div[3]/div[2]/div[1]"
 
 
 # URL 常量
 class URL:
     """網站 URL 定義"""
     LOGIN_PAGE = "https://m.jfw-win.com/#/login?redirect=%2Fhome%2Fpage"
+    HOME_PAGE = "https://m.jfw-win.com/#/"
     GAME_PAGE = "https://m.jfw-win.com/#/home/loding?game_code=egyptian-mythology&factory_code=ATG&state=true&name=%E6%88%B0%E7%A5%9E%E8%B3%BD%E7%89%B9"
 
 
@@ -319,29 +317,6 @@ def create_webdriver(driver_path: str) -> Optional[WebDriver]:
         return None
 
 
-def close_announcement_popup(driver: WebDriver, wait: WebDriverWait) -> bool:
-    """
-    嘗試關閉公告彈窗。
-    
-    Args:
-        driver: WebDriver 實例
-        wait: WebDriverWait 實例
-        
-    Returns:
-        bool: 成功關閉返回 True，否則返回 False
-    """
-    try:
-        close_button = wait.until(
-            EC.element_to_be_clickable((By.XPATH, ElementSelector.ANNOUNCEMENT_CLOSE))
-        )
-        close_button.click()
-        logger.info("已關閉公告彈窗")
-        return True
-    except Exception:
-        logger.debug("無公告彈窗")
-        return False
-
-
 def check_login_error(driver: WebDriver) -> Optional[str]:
     """
     檢查登入錯誤訊息。
@@ -379,23 +354,12 @@ def perform_login(driver: WebDriver, username: str, password: str) -> bool:
         bool: 登入成功返回 True，失敗返回 False
     """
     try:
-        wait = WebDriverWait(driver, GAME_CONFIG.explicit_wait)
-        
         # 輸入帳號密碼
         driver.find_element(By.XPATH, ElementSelector.USERNAME_INPUT).send_keys(username)
         driver.find_element(By.XPATH, ElementSelector.PASSWORD_INPUT).send_keys(password)
         driver.find_element(By.XPATH, ElementSelector.LOGIN_BUTTON).click()
         
-        time.sleep(1)
-        
-        # 檢查登入錯誤
-        error_msg = check_login_error(driver)
-        if error_msg:
-            logger.error(f"[{username}] 登入失敗：{error_msg}")
-            return False
-        
-        # 關閉公告彈窗（如果有）
-        close_announcement_popup(driver, wait)
+        time.sleep(5)
         
         return True
     except Exception as e:
