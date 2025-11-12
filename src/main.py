@@ -271,6 +271,9 @@ def create_chrome_options() -> Options:
         "profile.password_manager_enabled": False,
         "profile.default_content_setting_values.notifications": 2,
         "profile.default_content_settings.popups": 0,
+        "profile.default_content_setting_values.media_stream_mic": 2,
+        "profile.default_content_setting_values.media_stream_camera": 2,
+        "profile.default_content_setting_values.sound": 2,  # 靜音所有網站
     })
     
     return chrome_options
