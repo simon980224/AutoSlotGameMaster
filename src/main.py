@@ -798,39 +798,17 @@ def send_arrow_left(driver: WebDriver) -> bool:
                 logger.error("找不到 GameCanvas 元素")
                 return False
             
-            # 計算點擊座標（Canvas 內的相對位置）
-            click_x = rect["x"] + 725
-            click_y = rect["y"] + 575
+            # 計算點擊座標（Canvas 內座標 725, 575）
+            # 注意：725 和 575 是 Canvas 內部的絕對座標，不需要再加上 rect["x"] 和 rect["y"]
+            click_x = 725
+            click_y = 575
             
             logger.info(f"Canvas 區域: x={rect['x']}, y={rect['y']}, w={rect['w']}, h={rect['h']}")
-            logger.info(f"點擊減少按鈕座標: ({click_x:.1f}, {click_y:.1f})")
+            logger.info(f"點擊減少按鈕座標 (Canvas 內): ({click_x}, {click_y})")
             
         except Exception as e:
             logger.error(f"無法取得 Canvas 位置：{e}")
             return False
-        
-        # 截取點擊位置周圍的圖片（不同大小）
-        driver.switch_to.default_content()
-        screenshot = driver.get_screenshot_as_png()
-        screenshot_image = Image.open(io.BytesIO(screenshot))
-        
-        timestamp = time.strftime("%Y%m%d_%H%M%S")
-        desktop_path = Path.home() / "Desktop"
-        
-        # 截取三種不同大小的區域
-        for size in [10, 50, 100]:
-            left = max(0, int(click_x - size))
-            top = max(0, int(click_y - size))
-            right = min(screenshot_image.width, int(click_x + size))
-            bottom = min(screenshot_image.height, int(click_y + size))
-            
-            cropped = screenshot_image.crop((left, top, right, bottom))
-            filename = desktop_path / f"decrease_click_{size}px_{timestamp}.png"
-            cropped.save(str(filename))
-            logger.info(f"截圖已儲存: {filename} (大小: {cropped.width}x{cropped.height})")
-        
-        # 切回 iframe 並點擊
-        driver.switch_to.frame(iframe)
         
         # 使用 CDP 點擊
         for ev in ["mousePressed", "mouseReleased"]:
@@ -887,39 +865,17 @@ def send_arrow_right(driver: WebDriver) -> bool:
                 logger.error("找不到 GameCanvas 元素")
                 return False
             
-            # 計算點擊座標（Canvas 內的相對位置）
-            click_x = rect["x"] + 875
-            click_y = rect["y"] + 575
+            # 計算點擊座標（Canvas 內座標 875, 575）
+            # 注意：875 和 575 是 Canvas 內部的絕對座標，不需要再加上 rect["x"] 和 rect["y"]
+            click_x = 875
+            click_y = 575
             
             logger.info(f"Canvas 區域: x={rect['x']}, y={rect['y']}, w={rect['w']}, h={rect['h']}")
-            logger.info(f"點擊增加按鈕座標: ({click_x:.1f}, {click_y:.1f})")
+            logger.info(f"點擊增加按鈕座標 (Canvas 內): ({click_x}, {click_y})")
             
         except Exception as e:
             logger.error(f"無法取得 Canvas 位置：{e}")
             return False
-        
-        # 截取點擊位置周圍的圖片（不同大小）
-        driver.switch_to.default_content()
-        screenshot = driver.get_screenshot_as_png()
-        screenshot_image = Image.open(io.BytesIO(screenshot))
-        
-        timestamp = time.strftime("%Y%m%d_%H%M%S")
-        desktop_path = Path.home() / "Desktop"
-        
-        # 截取三種不同大小的區域
-        for size in [10, 50, 100]:
-            left = max(0, int(click_x - size))
-            top = max(0, int(click_y - size))
-            right = min(screenshot_image.width, int(click_x + size))
-            bottom = min(screenshot_image.height, int(click_y + size))
-            
-            cropped = screenshot_image.crop((left, top, right, bottom))
-            filename = desktop_path / f"increase_click_{size}px_{timestamp}.png"
-            cropped.save(str(filename))
-            logger.info(f"截圖已儲存: {filename} (大小: {cropped.width}x{cropped.height})")
-        
-        # 切回 iframe 並點擊
-        driver.switch_to.frame(iframe)
         
         # 使用 CDP 點擊
         for ev in ["mousePressed", "mouseReleased"]:
