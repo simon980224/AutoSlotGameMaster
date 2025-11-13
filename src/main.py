@@ -847,7 +847,9 @@ def send_space_key(driver: WebDriver) -> bool:
 
 def send_arrow_left(driver: WebDriver) -> bool:
     """
-    點擊減少金額按鈕（Canvas 內座標 725, 575）。
+    發送左方向鍵以減少金額。
+    
+    備註：原座標點擊位置為 Canvas 內座標 (725, 575)
     
     Args:
         driver: WebDriver 實例
@@ -855,66 +857,15 @@ def send_arrow_left(driver: WebDriver) -> bool:
     Returns:
         bool: 成功返回 True，失敗返回 False
     """
-    try:
-        # 切換到主頁面內容
-        driver.switch_to.default_content()
-        
-        # 切換到 iframe
-        try:
-            iframe = WebDriverWait(driver, 5).until(
-                EC.presence_of_element_located((By.ID, "gameFrame-0"))
-            )
-            driver.switch_to.frame(iframe)
-        except Exception as e:
-            logger.warning(f"切換 iframe 失敗：{e}")
-            return False
-        
-        # 取得 Canvas 的位置資訊
-        try:
-            rect = driver.execute_script("""
-                const canvas = document.getElementById('GameCanvas');
-                if (!canvas) return null;
-                const r = canvas.getBoundingClientRect();
-                return {x: r.left, y: r.top, w: r.width, h: r.height};
-            """)
-            
-            if rect is None:
-                logger.error("找不到 GameCanvas 元素")
-                return False
-            
-            # 計算點擊座標（Canvas 內座標 725, 575）
-            # 注意：725 和 575 是 Canvas 內部的絕對座標，不需要再加上 rect["x"] 和 rect["y"]
-            click_x = 725
-            click_y = 575
-            
-            logger.info(f"Canvas 區域: x={rect['x']}, y={rect['y']}, w={rect['w']}, h={rect['h']}")
-            logger.info(f"點擊減少按鈕座標 (Canvas 內): ({click_x}, {click_y})")
-            
-        except Exception as e:
-            logger.error(f"無法取得 Canvas 位置：{e}")
-            return False
-        
-        # 使用 CDP 點擊
-        for ev in ["mousePressed", "mouseReleased"]:
-            driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
-                "type": ev,
-                "x": click_x,
-                "y": click_y,
-                "button": "left",
-                "clickCount": 1
-            })
-        
-        logger.info("已點擊減少金額按鈕")
-        return True
-        
-    except Exception as e:
-        logger.warning(f"點擊減少金額按鈕失敗：{e}")
-        return False
+    # 使用鍵盤左方向鍵減少金額
+    return send_key(driver, KeyboardKey.ARROW_LEFT)
 
 
 def send_arrow_right(driver: WebDriver) -> bool:
     """
-    點擊增加金額按鈕（Canvas 內座標 875, 575）。
+    發送右方向鍵以增加金額。
+    
+    備註：原座標點擊位置為 Canvas 內座標 (875, 575)
     
     Args:
         driver: WebDriver 實例
@@ -922,61 +873,8 @@ def send_arrow_right(driver: WebDriver) -> bool:
     Returns:
         bool: 成功返回 True，失敗返回 False
     """
-    try:
-        # 切換到主頁面內容
-        driver.switch_to.default_content()
-        
-        # 切換到 iframe
-        try:
-            iframe = WebDriverWait(driver, 5).until(
-                EC.presence_of_element_located((By.ID, "gameFrame-0"))
-            )
-            driver.switch_to.frame(iframe)
-        except Exception as e:
-            logger.warning(f"切換 iframe 失敗：{e}")
-            return False
-        
-        # 取得 Canvas 的位置資訊
-        try:
-            rect = driver.execute_script("""
-                const canvas = document.getElementById('GameCanvas');
-                if (!canvas) return null;
-                const r = canvas.getBoundingClientRect();
-                return {x: r.left, y: r.top, w: r.width, h: r.height};
-            """)
-            
-            if rect is None:
-                logger.error("找不到 GameCanvas 元素")
-                return False
-            
-            # 計算點擊座標（Canvas 內座標 875, 575）
-            # 注意：875 和 575 是 Canvas 內部的絕對座標，不需要再加上 rect["x"] 和 rect["y"]
-            click_x = 875
-            click_y = 575
-            
-            logger.info(f"Canvas 區域: x={rect['x']}, y={rect['y']}, w={rect['w']}, h={rect['h']}")
-            logger.info(f"點擊增加按鈕座標 (Canvas 內): ({click_x}, {click_y})")
-            
-        except Exception as e:
-            logger.error(f"無法取得 Canvas 位置：{e}")
-            return False
-        
-        # 使用 CDP 點擊
-        for ev in ["mousePressed", "mouseReleased"]:
-            driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
-                "type": ev,
-                "x": click_x,
-                "y": click_y,
-                "button": "left",
-                "clickCount": 1
-            })
-        
-        logger.info("已點擊增加金額按鈕")
-        return True
-        
-    except Exception as e:
-        logger.warning(f"點擊增加金額按鈕失敗：{e}")
-        return False
+    # 使用鍵盤右方向鍵增加金額
+    return send_key(driver, KeyboardKey.ARROW_RIGHT)
 
 
 def click_coordinate(driver: WebDriver, x: int, y: int) -> bool:
