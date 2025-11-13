@@ -64,7 +64,7 @@ class GameConfig:
     explicit_wait: int = 10  # 顯式等待（秒）- 提高到 10 秒
     image_detect_timeout: int = 180  # 圖片檢測超時秒數 - 提高到 3 分鐘
     image_detect_interval: float = 0.5  # 圖片檢測間隔秒數
-    image_match_threshold: float = 0.8  # 圖片匹配閾值
+    image_match_threshold: float = 0.95  # 圖片匹配閾值（提高到 0.95 以減少誤判）
 
 
 # 元素選擇器常量
@@ -723,12 +723,44 @@ def wait_for_image(driver: WebDriver, template_path: str, timeout: int = 60,
     return False
 
 
+def wait_for_image_disappear(driver: WebDriver, template_path: str, timeout: int = 60, 
+                            interval: float = 0.5, threshold: float = 0.8) -> bool:
+    """
+    等待指定圖片從瀏覽器視窗中消失。
+    
+    持續檢測直到圖片消失或超時。
+    
+    Args:
+        driver: WebDriver 實例
+        template_path: 模板圖片路徑
+        timeout: 超時時間（秒）
+        interval: 檢測間隔（秒）
+        threshold: 匹配閾值 (0-1)
+        
+    Returns:
+        bool: 在超時前圖片消失返回 True，超時返回 False
+    """
+    start_time = time.time()
+    
+    while time.time() - start_time < timeout:
+        if not detect_image_on_screen(driver, template_path, threshold):
+            return True
+        time.sleep(interval)
+    
+    logger.warning(f"等待圖片消失超時（{timeout} 秒）")
+    return False
+
+
 def navigate_to_game(driver: WebDriver, username: str) -> bool:
     """
     導航到遊戲頁面並確認成功進入。
     
-    會持續檢測 lobby_login.png 圖片，確認真正進入遊戲。
-    使用 Canvas 動態計算座標進行點擊操作。
+    執行流程：
+    1. 判斷存在 lobby_login.png
+    2. 點擊，判斷 lobby_login.png 消失
+    3. 判斷存在 lobby_confirm.png
+    4. 點擊，判斷 lobby_confirm.png 消失
+    5. 成功進入遊戲控制模式
     
     Args:
         driver: WebDriver 實例
@@ -745,81 +777,122 @@ def navigate_to_game(driver: WebDriver, username: str) -> bool:
         # 設定視窗大小
         driver.set_window_size(WINDOW_CONFIG.width, WINDOW_CONFIG.height)
         
-        # 檢測 lobby_login.png 圖片確認進入遊戲
-        logger.info(f"[{username}] 正在檢測遊戲載入狀態...")
-        lobby_image_path = ImagePath.lobby_login()
+        # === 步驟 1: 判斷存在 lobby_login.png ===
+        logger.info(f"[{username}] 步驟 1: 正在檢測 lobby_login.png...")
+        lobby_login_path = ImagePath.lobby_login()
         
-        if wait_for_image(
+        if not wait_for_image(
             driver, 
-            lobby_image_path, 
+            lobby_login_path, 
             timeout=GAME_CONFIG.image_detect_timeout,
             interval=GAME_CONFIG.image_detect_interval,
             threshold=GAME_CONFIG.image_match_threshold
         ):
-            logger.info(f"[{username}] 成功進入遊戲大廳（已確認 lobby_login.png）")
+            logger.error(f"[{username}] 步驟 1 失敗：未檢測到 lobby_login.png")
+            return False
+        
+        logger.info(f"[{username}] 步驟 1 完成：已確認 lobby_login.png 存在")
+        
+        try:
+            # === 切入 iframe ===
+            logger.info(f"[{username}] 正在切換到遊戲 iframe...")
+            iframe = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.ID, "gameFrame-0"))
+            )
+            driver.switch_to.frame(iframe)
+            logger.info(f"[{username}] 已成功切換到 iframe")
+
+            # === 取得 Canvas 區域 ===
+            logger.info(f"[{username}] 正在取得 Canvas 座標...")
+            rect = driver.execute_script("""
+                const canvas = document.getElementById('GameCanvas');
+                const r = canvas.getBoundingClientRect();
+                return {x: r.left, y: r.top, w: r.width, h: r.height};
+            """)
+            logger.info(f"[{username}] Canvas 區域: x={rect['x']}, y={rect['y']}, w={rect['w']}, h={rect['h']}")
+
+            # === 計算點擊座標（動態根據 Canvas 大小） ===
+            start_x = rect["x"] + rect["w"] * 0.55
+            start_y = rect["y"] + rect["h"] * 1.2
+            confirm_x = rect["x"] + rect["w"] * 0.78
+            confirm_y = rect["y"] + rect["h"] * 1.15
             
-            try:
-                # === 切入 iframe ===
-                logger.info(f"[{username}] 正在切換到遊戲 iframe...")
-                iframe = WebDriverWait(driver, 10).until(
-                    EC.presence_of_element_located((By.ID, "gameFrame-0"))
-                )
-                driver.switch_to.frame(iframe)
-                logger.info(f"[{username}] 已成功切換到 iframe")
+            logger.info(f"[{username}] 開始遊戲按鈕座標: ({start_x:.1f}, {start_y:.1f})")
+            logger.info(f"[{username}] 確認按鈕座標: ({confirm_x:.1f}, {confirm_y:.1f})")
 
-                # === 取得 Canvas 區域 ===
-                logger.info(f"[{username}] 正在取得 Canvas 座標...")
-                rect = driver.execute_script("""
-                    const canvas = document.getElementById('GameCanvas');
-                    const r = canvas.getBoundingClientRect();
-                    return {x: r.left, y: r.top, w: r.width, h: r.height};
-                """)
-                logger.info(f"[{username}] Canvas 區域: x={rect['x']}, y={rect['y']}, w={rect['w']}, h={rect['h']}")
-
-                # === 計算點擊座標（動態根據 Canvas 大小） ===
-                start_x = rect["x"] + rect["w"] * 0.55
-                start_y = rect["y"] + rect["h"] * 1.2
-                confirm_x = rect["x"] + rect["w"] * 0.78
-                confirm_y = rect["y"] + rect["h"] * 1.15
-                
-                logger.info(f"[{username}] 開始遊戲按鈕座標: ({start_x:.1f}, {start_y:.1f})")
-                logger.info(f"[{username}] 確認按鈕座標: ({confirm_x:.1f}, {confirm_y:.1f})")
-
-                # === 點擊「開始遊戲」按鈕 ===
-                time.sleep(1)
-                logger.info(f"[{username}] 點擊開始遊戲按鈕...")
-                for ev in ["mousePressed", "mouseReleased"]:
-                    driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
-                        "type": ev,
-                        "x": start_x,
-                        "y": start_y,
-                        "button": "left",
-                        "clickCount": 1
-                    })
-                
-                # === 等待確認彈窗出現並點擊 ===
-                logger.info(f"[{username}] 等待確認彈窗出現...")
-                time.sleep(3)  # 等待彈窗出現
-                
-                logger.info(f"[{username}] 點擊確認按鈕...")
-                for ev in ["mousePressed", "mouseReleased"]:
-                    driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
-                        "type": ev,
-                        "x": confirm_x,
-                        "y": confirm_y,
-                        "button": "left",
-                        "clickCount": 1
-                    })
-                
-                logger.info(f"[{username}] 已成功進入遊戲")
-                time.sleep(2)  # 等待遊戲完全載入
-                return True
-
-            except Exception as e:
-                logger.error(f"[{username}] 無法切入或操作 iframe：{e}")
+            # === 步驟 2: 點擊「開始遊戲」按鈕，判斷 lobby_login.png 消失 ===
+            time.sleep(1)
+            logger.info(f"[{username}] 步驟 2: 點擊開始遊戲按鈕...")
+            for ev in ["mousePressed", "mouseReleased"]:
+                driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
+                    "type": ev,
+                    "x": start_x,
+                    "y": start_y,
+                    "button": "left",
+                    "clickCount": 1
+                })
+            
+            logger.info(f"[{username}] 步驟 2: 等待 lobby_login.png 消失...")
+            if not wait_for_image_disappear(
+                driver,
+                lobby_login_path,
+                timeout=30,
+                interval=GAME_CONFIG.image_detect_interval,
+                threshold=GAME_CONFIG.image_match_threshold
+            ):
+                logger.error(f"[{username}] 步驟 2 失敗：lobby_login.png 未消失")
                 return False
-        else:
-            logger.error(f"[{username}] 進入遊戲失敗：未檢測到 lobby_login.png")
+            
+            logger.info(f"[{username}] 步驟 2 完成：lobby_login.png 已消失")
+            
+            # === 步驟 3: 判斷存在 lobby_confirm.png ===
+            logger.info(f"[{username}] 步驟 3: 正在檢測 lobby_confirm.png...")
+            lobby_confirm_path = ImagePath.lobby_confirm()
+            
+            if not wait_for_image(
+                driver,
+                lobby_confirm_path,
+                timeout=30,
+                interval=GAME_CONFIG.image_detect_interval,
+                threshold=GAME_CONFIG.image_match_threshold
+            ):
+                logger.error(f"[{username}] 步驟 3 失敗：未檢測到 lobby_confirm.png")
+                return False
+            
+            logger.info(f"[{username}] 步驟 3 完成：已確認 lobby_confirm.png 存在")
+            
+            # === 步驟 4: 點擊確認按鈕，判斷 lobby_confirm.png 消失 ===
+            time.sleep(1)
+            logger.info(f"[{username}] 步驟 4: 點擊確認按鈕...")
+            for ev in ["mousePressed", "mouseReleased"]:
+                driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
+                    "type": ev,
+                    "x": confirm_x,
+                    "y": confirm_y,
+                    "button": "left",
+                    "clickCount": 1
+                })
+            
+            logger.info(f"[{username}] 步驟 4: 等待 lobby_confirm.png 消失...")
+            if not wait_for_image_disappear(
+                driver,
+                lobby_confirm_path,
+                timeout=30,
+                interval=GAME_CONFIG.image_detect_interval,
+                threshold=GAME_CONFIG.image_match_threshold
+            ):
+                logger.error(f"[{username}] 步驟 4 失敗：lobby_confirm.png 未消失")
+                return False
+            
+            logger.info(f"[{username}] 步驟 4 完成：lobby_confirm.png 已消失")
+            
+            # === 步驟 5: 成功進入遊戲控制模式 ===
+            logger.info(f"[{username}] 步驟 5: 已成功進入遊戲控制模式")
+            time.sleep(2)  # 等待遊戲完全載入
+            return True
+
+        except Exception as e:
+            logger.error(f"[{username}] 無法切入或操作 iframe：{e}")
             return False
             
     except Exception as e:
