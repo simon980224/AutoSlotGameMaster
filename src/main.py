@@ -1124,6 +1124,7 @@ def continue_game(driver: WebDriver) -> None:
                 
                 remaining_seconds = int(end_time - time.time())
                 logger.info(f"規則 {rule_idx}: 已按 {press_count} 次，剩餘 {remaining_seconds} 秒")
+                logger.info(f"可用指令：{GameCommand.CONTINUE.value}(繼續) {GameCommand.PAUSE.value}(暫停) {GameCommand.BET_SIZE.value} <金額>(調整金額) {GameCommand.QUIT.value}(退出)")
                 
                 # 使用小間隔檢查狀態
                 for _ in range(GAME_CONFIG.key_interval):
