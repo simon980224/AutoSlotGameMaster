@@ -13,8 +13,10 @@ from __future__ import annotations
 import io
 import logging
 import platform
+import tempfile
 import threading
 import time
+import zipfile
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -247,6 +249,89 @@ game_state_manager = GameStateManager()
 
 # ==================== 工具函式 ====================
 
+def create_proxy_extension(proxy_host: str, proxy_port: str, proxy_user: str, proxy_pass: str) -> str:
+    """
+    創建 Chrome proxy extension 來處理 proxy 認證。
+    
+    完全在記憶體中操作，不產生實體檔案。
+    
+    Args:
+        proxy_host: Proxy 主機 IP
+        proxy_port: Proxy 埠號
+        proxy_user: Proxy 使用者名稱
+        proxy_pass: Proxy 密碼
+        
+    Returns:
+        str: Extension 壓縮檔的完整路徑（臨時檔案）
+    """
+    manifest_json = """
+    {
+        "version": "1.0.0",
+        "manifest_version": 2,
+        "name": "Chrome Proxy",
+        "permissions": [
+            "proxy",
+            "tabs",
+            "unlimitedStorage",
+            "storage",
+            "<all_urls>",
+            "webRequest",
+            "webRequestBlocking"
+        ],
+        "background": {
+            "scripts": ["background.js"]
+        },
+        "minimum_chrome_version":"22.0.0"
+    }
+    """
+
+    background_js = """
+    var config = {
+            mode: "fixed_servers",
+            rules: {
+              singleProxy: {
+                scheme: "http",
+                host: "%s",
+                port: parseInt(%s)
+              },
+              bypassList: ["localhost"]
+            }
+          };
+
+    chrome.proxy.settings.set({value: config, scope: "regular"}, function() {});
+
+    function callbackFn(details) {
+        return {
+            authCredentials: {
+                username: "%s",
+                password: "%s"
+            }
+        };
+    }
+
+    chrome.webRequest.onAuthRequired.addListener(
+                callbackFn,
+                {urls: ["<all_urls>"]},
+                ['blocking']
+    );
+    """ % (proxy_host, proxy_port, proxy_user, proxy_pass)
+
+    # 使用臨時檔案（程式結束後自動刪除）
+    import tempfile
+    
+    # 創建臨時 zip 檔案
+    temp_file = tempfile.NamedTemporaryFile(mode='w+b', suffix='.zip', delete=False)
+    
+    with zipfile.ZipFile(temp_file, 'w') as zp:
+        zp.writestr("manifest.json", manifest_json)
+        zp.writestr("background.js", background_js)
+    
+    temp_file.close()
+    
+    logger.debug(f"已創建臨時 proxy extension: {temp_file.name}")
+    return temp_file.name
+
+
 def get_chromedriver_path() -> str:
     """
     取得 ChromeDriver 執行檔的完整路徑。
@@ -280,11 +365,12 @@ def load_user_credentials() -> List[Dict[str, str]]:
     
     檔案格式：
     - 第一行為標題（會被跳過）
-    - 每行格式：username:password
+    - 每行格式：username,password,proxy
+    - proxy 格式：ip:port:username:password
     - 最多讀取前 12 組帳號
     
     Returns:
-        List[Dict[str, str]]: 帳號密碼列表，每項包含 'username' 和 'password' 鍵值
+        List[Dict[str, str]]: 帳號密碼列表，每項包含 'username'、'password' 和可選的 'proxy' 鍵值
         
     Raises:
         FileNotFoundError: 當檔案不存在時
@@ -307,14 +393,25 @@ def load_user_credentials() -> List[Dict[str, str]]:
             continue
         
         line = line.strip()
-        if not line or ':' not in line:
+        if not line or ',' not in line:
             continue
         
-        username, password = line.split(':', 1)
-        credentials.append({
-            'username': username.strip(),
-            'password': password.strip()
-        })
+        parts = line.split(',')
+        if len(parts) < 2:
+            continue
+        
+        credential = {
+            'username': parts[0].strip(),
+            'password': parts[1].strip()
+        }
+        
+        # 如果有 proxy 欄位（格式：ip:port:username:password）
+        if len(parts) >= 3:
+            proxy_str = parts[2].strip()
+            if proxy_str:  # 只有在 proxy 不為空時才加入
+                credential['proxy'] = proxy_str
+        
+        credentials.append(credential)
     
     total_count = len(credentials)
     
@@ -401,7 +498,7 @@ def load_game_rules() -> List[Dict[str, any]]:
     return rules
 
 
-def create_chrome_options() -> Options:
+def create_chrome_options(proxy: Optional[str] = None) -> Options:
     """
     建立並配置 Chrome 瀏覽器選項。
     
@@ -412,11 +509,31 @@ def create_chrome_options() -> Options:
     - 禁用密碼管理
     - 效能優化設定
     - 網路連線優化設定
+    - Proxy 設定（如果提供）
+    
+    Args:
+        proxy: 可選的 proxy 字串，格式為 "ip:port:username:password"
     
     Returns:
         Options: 配置好的 Chrome 選項物件
     """
     chrome_options = Options()
+    
+    # Proxy 設定
+    if proxy:
+        # proxy 格式：ip:port:username:password
+        proxy_parts = proxy.split(':')
+        if len(proxy_parts) >= 4:
+            ip = proxy_parts[0]
+            port = proxy_parts[1]
+            username = proxy_parts[2]
+            password = proxy_parts[3]
+            
+            # 創建 proxy extension
+            extension_path = create_proxy_extension(ip, port, username, password)
+            chrome_options.add_extension(extension_path)
+            
+            logger.info(f"已設定 Proxy Extension: {ip}:{port} (使用者: {username})")
     
     # 基本設定
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
@@ -464,19 +581,20 @@ def create_chrome_options() -> Options:
     return chrome_options
 
 
-def create_webdriver(driver_path: str) -> Optional[WebDriver]:
+def create_webdriver(driver_path: str, proxy: Optional[str] = None) -> Optional[WebDriver]:
     """
     建立 Chrome WebDriver 實例。
     
     Args:
         driver_path: ChromeDriver 執行檔路徑
+        proxy: 可選的 proxy 字串，格式為 "ip:port:username:password"
         
     Returns:
         Optional[WebDriver]: WebDriver 實例，失敗時返回 None
     """
     try:
         service = Service(driver_path)
-        chrome_options = create_chrome_options()
+        chrome_options = create_chrome_options(proxy)
         
         driver = webdriver.Chrome(service=service, options=chrome_options)
         
@@ -709,7 +827,7 @@ def navigate_to_game(driver: WebDriver, username: str) -> bool:
         return False
 
 
-def navigate_to_jfw(driver_path: str, username: str, password: str, max_retries: int = 3) -> Optional[WebDriver]:
+def navigate_to_jfw(driver_path: str, username: str, password: str, proxy: Optional[str] = None, max_retries: int = 3) -> Optional[WebDriver]:
     """
     建立瀏覽器並完成完整登入流程。
     
@@ -725,6 +843,7 @@ def navigate_to_jfw(driver_path: str, username: str, password: str, max_retries:
         driver_path: ChromeDriver 路徑
         username: 登入帳號
         password: 登入密碼
+        proxy: 可選的 proxy 字串，格式為 "ip:port:username:password"
         max_retries: 最大重試次數
         
     Returns:
@@ -738,7 +857,7 @@ def navigate_to_jfw(driver_path: str, username: str, password: str, max_retries:
             
             # 建立瀏覽器（第一次嘗試或需要重建）
             if driver is None:
-                driver = create_webdriver(driver_path)
+                driver = create_webdriver(driver_path, proxy)
                 if driver is None:
                     if attempt < max_retries - 1:
                         time.sleep(1)
@@ -1499,7 +1618,8 @@ def launch_browsers_parallel(
         """執行緒工作函式"""
         username = credentials[index]["username"]
         password = credentials[index]["password"]
-        driver = navigate_to_jfw(driver_path, username, password)
+        proxy = credentials[index].get("proxy")  # 取得 proxy，如果沒有則為 None
+        driver = navigate_to_jfw(driver_path, username, password, proxy)
         drivers[index] = driver
     
     logger.info(f"開始啟動 {count} 個瀏覽器...")
