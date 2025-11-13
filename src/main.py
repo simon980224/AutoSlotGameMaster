@@ -43,6 +43,7 @@ class GameCommand(Enum):
     QUIT = 'q'
     BET_SIZE = 'b'  # 調整下注金額
     SCREENSHOT = 's'  # 截圖
+    PEEK = 'p'  # 檢測指定金額圖片是否存在
 
 
 @dataclass
@@ -65,7 +66,7 @@ class GameConfig:
     explicit_wait: int = 10  # 顯式等待（秒）- 提高到 10 秒
     image_detect_timeout: int = 180  # 圖片檢測超時秒數 - 提高到 3 分鐘
     image_detect_interval: float = 0.5  # 圖片檢測間隔秒數
-    image_match_threshold: float = 0.95  # 圖片匹配閾值（提高到 0.95 以減少誤判）
+    image_match_threshold: float = 0.95  # 圖片匹配閾值
 
 
 # 元素選擇器常量
@@ -1051,7 +1052,13 @@ def send_arrow_left(driver: WebDriver) -> bool:
         bool: 成功返回 True，失敗返回 False
     """
     # 使用鍵盤左方向鍵減少金額
-    return send_key(driver, KeyboardKey.ARROW_LEFT)
+    logger.debug("發送鍵盤左方向鍵 (ArrowLeft)")
+    result = send_key(driver, KeyboardKey.ARROW_LEFT)
+    if result:
+        logger.debug("✓ 左方向鍵發送成功")
+    else:
+        logger.warning("✗ 左方向鍵發送失敗")
+    return result
 
 
 def send_arrow_right(driver: WebDriver) -> bool:
@@ -1067,7 +1074,13 @@ def send_arrow_right(driver: WebDriver) -> bool:
         bool: 成功返回 True，失敗返回 False
     """
     # 使用鍵盤右方向鍵增加金額
-    return send_key(driver, KeyboardKey.ARROW_RIGHT)
+    logger.debug("發送鍵盤右方向鍵 (ArrowRight)")
+    result = send_key(driver, KeyboardKey.ARROW_RIGHT)
+    if result:
+        logger.debug("✓ 右方向鍵發送成功")
+    else:
+        logger.warning("✗ 右方向鍵發送失敗")
+    return result
 
 
 def click_coordinate(driver: WebDriver, x: int, y: int) -> bool:
@@ -1198,7 +1211,7 @@ def continue_game(driver: WebDriver) -> None:
                 
                 remaining_seconds = int(end_time - time.time())
                 logger.info(f"規則 {rule_idx}: 已按 {press_count} 次，剩餘 {remaining_seconds} 秒")
-                logger.info(f"可用指令：{GameCommand.CONTINUE.value}(繼續) {GameCommand.PAUSE.value}(暫停) {GameCommand.BET_SIZE.value} <金額>(調整金額) {GameCommand.SCREENSHOT.value}(截圖) {GameCommand.QUIT.value}(退出)")
+                logger.info(f"可用指令：{GameCommand.CONTINUE.value}(繼續) {GameCommand.PEEK.value} <金額>(檢測金額圖片) {GameCommand.BET_SIZE.value} <金額>(調整金額) {GameCommand.SCREENSHOT.value}(截圖) {GameCommand.QUIT.value}(退出)")
                 
                 # 使用小間隔檢查狀態
                 for _ in range(GAME_CONFIG.key_interval):
@@ -1227,6 +1240,7 @@ def start_game(driver: WebDriver) -> bool:
     開始遊戲執行。
     
     會先載入 user_rules.txt 中的規則，然後按照規則執行遊戲。
+    開始前會確認當前金額是否符合第一條規則，不符合則先調整。
     
     Args:
         driver: WebDriver 實例
@@ -1245,6 +1259,45 @@ def start_game(driver: WebDriver) -> bool:
         
         if rules:
             logger.info(f"已載入 {len(rules)} 條遊戲規則")
+            
+            # 檢查並調整到第一條規則的金額
+            first_rule_betsize = rules[0]['betsize']
+            logger.info(f"檢查當前金額是否符合第一條規則的金額 {first_rule_betsize}...")
+            
+            # 切換到遊戲 iframe
+            switch_to_game_frame(driver)
+            
+            # 截取整個瀏覽器截圖並識別當前金額
+            screenshot = driver.get_screenshot_as_png()
+            screenshot_np = np.array(Image.open(io.BytesIO(screenshot)))
+            screenshot_gray = cv2.cvtColor(screenshot_np, cv2.COLOR_RGB2GRAY)
+            
+            bet_size_dir = ImagePath.bet_size_dir()
+            current_amount_str = compare_betsize_images(screenshot_gray, bet_size_dir, threshold=GAME_CONFIG.image_match_threshold)
+            
+            if current_amount_str:
+                try:
+                    current_amount = float(current_amount_str)
+                    logger.info(f"當前金額: {current_amount}")
+                    
+                    if current_amount != first_rule_betsize:
+                        logger.info(f"當前金額 {current_amount} 不符合規則金額 {first_rule_betsize}，開始調整...")
+                        if not adjust_betsize(driver, first_rule_betsize):
+                            logger.error("調整金額失敗，無法開始遊戲")
+                            return False
+                        logger.info(f"✓ 金額已調整為 {first_rule_betsize}")
+                    else:
+                        logger.info(f"✓ 當前金額已符合規則要求")
+                except ValueError:
+                    logger.warning(f"無法識別當前金額 {current_amount_str}，將嘗試調整到目標金額")
+                    if not adjust_betsize(driver, first_rule_betsize):
+                        logger.error("調整金額失敗，無法開始遊戲")
+                        return False
+            else:
+                logger.warning("無法識別當前金額，將嘗試調整到目標金額")
+                if not adjust_betsize(driver, first_rule_betsize):
+                    logger.error("調整金額失敗，無法開始遊戲")
+                    return False
         else:
             logger.warning("未載入任何規則，將使用預設模式")
     except Exception as e:
@@ -1334,11 +1387,27 @@ def capture_betsize_region(driver: WebDriver) -> Optional[np.ndarray]:
         screenshot = driver.get_screenshot_as_png()
         screenshot_np = np.array(Image.open(io.BytesIO(screenshot)))
         
-        # 裁剪 betsize 顯示區域
+        logger.debug(f"截圖尺寸: {screenshot_np.shape}")
+        logger.debug(f"裁剪座標: TOP={ClickCoordinate.BETSIZE_DISPLAY_TOP}, BOTTOM={ClickCoordinate.BETSIZE_DISPLAY_BOTTOM}, LEFT={ClickCoordinate.BETSIZE_DISPLAY_LEFT}, RIGHT={ClickCoordinate.BETSIZE_DISPLAY_RIGHT}")
+        
+        # 檢查座標是否有效
+        if (ClickCoordinate.BETSIZE_DISPLAY_TOP >= ClickCoordinate.BETSIZE_DISPLAY_BOTTOM or 
+            ClickCoordinate.BETSIZE_DISPLAY_LEFT >= ClickCoordinate.BETSIZE_DISPLAY_RIGHT):
+            logger.error(f"裁剪座標無效")
+            return None
+        
+        # 裁剪 betsize 顯示區域 (numpy 陣列順序: [height, width])
         betsize_region = screenshot_np[
             ClickCoordinate.BETSIZE_DISPLAY_TOP:ClickCoordinate.BETSIZE_DISPLAY_BOTTOM,
             ClickCoordinate.BETSIZE_DISPLAY_LEFT:ClickCoordinate.BETSIZE_DISPLAY_RIGHT
         ]
+        
+        logger.debug(f"裁剪後區域尺寸: {betsize_region.shape}")
+        
+        # 檢查裁剪結果是否為空
+        if betsize_region.size == 0:
+            logger.error(f"裁剪後的區域為空")
+            return None
         
         # 轉換為灰階
         betsize_gray = cv2.cvtColor(betsize_region, cv2.COLOR_RGB2GRAY)
@@ -1351,12 +1420,12 @@ def capture_betsize_region(driver: WebDriver) -> Optional[np.ndarray]:
         return None
 
 
-def compare_betsize_images(current_image: np.ndarray, bet_size_dir: str, threshold: float = 0.8) -> Optional[str]:
+def compare_betsize_images(screenshot_gray: np.ndarray, bet_size_dir: str, threshold: float = 0.8) -> Optional[str]:
     """
-    將當前 betsize 圖片與資料夾中所有圖片進行對比。
+    使用 bet_size 資料夾中的圖片在整個瀏覽器截圖中尋找匹配。
     
     Args:
-        current_image: 當前截取的 betsize 圖片 (灰階)
+        screenshot_gray: 整個瀏覽器截圖 (灰階)
         bet_size_dir: bet_size 圖片資料夾路徑
         threshold: 匹配閾值 (0-1)
         
@@ -1380,24 +1449,24 @@ def compare_betsize_images(current_image: np.ndarray, bet_size_dir: str, thresho
         best_match_score = 0.0
         best_match_amount = None
         
-        # 對每張圖片進行匹配
+        # 對每張圖片進行匹配（用小圖在大圖中尋找）
         for image_file in image_files:
-            # 讀取模板圖片
+            # 讀取模板圖片（資料夾中的小圖）
             template = cv2.imread(str(image_file), cv2.IMREAD_GRAYSCALE)
             if template is None:
                 logger.warning(f"無法讀取圖片：{image_file}")
                 continue
             
-            # 確保模板大小不超過當前圖片
-            if template.shape[0] > current_image.shape[0] or template.shape[1] > current_image.shape[1]:
-                logger.debug(f"模板圖片 {image_file.name} 尺寸過大，跳過")
+            # 確保截圖大於或等於模板圖片
+            if screenshot_gray.shape[0] < template.shape[0] or screenshot_gray.shape[1] < template.shape[1]:
+                logger.debug(f"截圖小於模板圖片 {image_file.name}，跳過")
                 continue
             
-            # 執行模板匹配
-            result = cv2.matchTemplate(current_image, template, cv2.TM_CCOEFF_NORMED)
+            # 執行模板匹配（在整個截圖中尋找模板圖片）
+            result = cv2.matchTemplate(screenshot_gray, template, cv2.TM_CCOEFF_NORMED)
             min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
             
-            logger.debug(f"圖片 {image_file.name} 匹配度：{max_val:.3f}")
+            logger.debug(f"圖片 {image_file.name} 匹配度：{max_val:.3f} 位置：{max_loc}")
             
             # 更新最佳匹配
             if max_val > best_match_score:
@@ -1430,15 +1499,14 @@ def get_current_betsize_index(driver: WebDriver) -> Optional[int]:
     try:
         logger.info("開始查詢當前下注金額...")
         
-        # 截取 betsize 區域
-        betsize_image = capture_betsize_region(driver)
-        if betsize_image is None:
-            logger.error("截取 betsize 區域失敗")
-            return None
+        # 截取整個瀏覽器截圖
+        screenshot = driver.get_screenshot_as_png()
+        screenshot_np = np.array(Image.open(io.BytesIO(screenshot)))
+        screenshot_gray = cv2.cvtColor(screenshot_np, cv2.COLOR_RGB2GRAY)
         
         # 與資料夾中的圖片進行比對
         bet_size_dir = ImagePath.bet_size_dir()
-        matched_amount = compare_betsize_images(betsize_image, bet_size_dir, threshold=GAME_CONFIG.image_match_threshold)
+        matched_amount = compare_betsize_images(screenshot_gray, bet_size_dir, threshold=GAME_CONFIG.image_match_threshold)
         
         if matched_amount:
             # 將字串轉換為數字並在 GAME_BETSIZE 中找到對應索引
@@ -1465,7 +1533,7 @@ def get_current_betsize_index(driver: WebDriver) -> Optional[int]:
 
 def adjust_betsize(driver: WebDriver, target_amount: float, max_attempts: int = 200) -> bool:
     """
-    調整下注金額到目標值。
+    調整下注金額到目標值（使用圖片比對驗證）。
     
     Args:
         driver: WebDriver 實例
@@ -1482,69 +1550,98 @@ def adjust_betsize(driver: WebDriver, target_amount: float, max_attempts: int = 
             logger.info(f"可用金額: {GAME_BETSIZE}")
             return False
         
-        target_index = GAME_BETSIZE.index(target_amount)
-        logger.info(f"目標金額: {target_amount} (索引: {target_index})")
+        logger.info(f"目標金額: {target_amount}")
         
-        # 取得當前金額索引
-        current_index = get_current_betsize_index(driver)
-        if current_index is None:
-            logger.error("無法取得當前金額，調整失敗")
+        # 截取整個瀏覽器截圖並識別當前金額
+        screenshot = driver.get_screenshot_as_png()
+        screenshot_np = np.array(Image.open(io.BytesIO(screenshot)))
+        screenshot_gray = cv2.cvtColor(screenshot_np, cv2.COLOR_RGB2GRAY)
+        
+        bet_size_dir = ImagePath.bet_size_dir()
+        current_amount_str = compare_betsize_images(screenshot_gray, bet_size_dir, threshold=GAME_CONFIG.image_match_threshold)
+        
+        if current_amount_str is None:
+            logger.error("無法識別當前金額，調整失敗")
             return False
         
-        # 計算需要按的次數和方向
-        diff = target_index - current_index
+        try:
+            current_amount = float(current_amount_str)
+        except ValueError:
+            logger.error(f"無法將 {current_amount_str} 轉換為數字")
+            return False
         
-        if diff == 0:
+        logger.info(f"當前金額: {current_amount}")
+        
+        # 檢查是否已經是目標金額
+        if current_amount == target_amount:
             logger.info("當前金額已經是目標金額，無需調整")
             return True
         
-        # 決定點擊哪個按鈕
-        if diff > 0:
-            # 需要增加，點擊增加按鈕
-            click_func = send_arrow_right
-            direction = "增加"
-            steps = diff
+        # 計算需要按的次數和方向（使用索引來估算）
+        if current_amount in GAME_BETSIZE and target_amount in GAME_BETSIZE:
+            current_index = GAME_BETSIZE.index(current_amount)
+            target_index = GAME_BETSIZE.index(target_amount)
+            diff = target_index - current_index
+            
+            # 決定點擊哪個按鈕
+            if diff > 0:
+                click_func = send_arrow_right
+                direction = "增加"
+                estimated_steps = diff
+            else:
+                click_func = send_arrow_left
+                direction = "減少"
+                estimated_steps = abs(diff)
+            
+            logger.info(f"預估需要點擊{direction}按鈕約 {estimated_steps} 次")
+            
+            # 開始調整（先按預估次數）
+            for i in range(estimated_steps):
+                click_func(driver)
+                logger.info(f"已點擊 {direction} 按鈕 ({i + 1}/{estimated_steps})")
+                time.sleep(0.3)
+            
+            time.sleep(1)  # 等待畫面更新
         else:
-            # 需要減少，點擊減少按鈕
-            click_func = send_arrow_left
-            direction = "減少"
-            steps = abs(diff)
+            logger.warning("當前金額或目標金額不在 GAME_BETSIZE 列表中，使用逐步調整模式")
         
-        logger.info(f"需要點擊{direction}按鈕 {steps} 次才能到達目標金額")
-        
-        # 開始調整
-        for i in range(steps):
-            click_func(driver)
-            logger.info(f"已點擊 {direction} 按鈕 ({i + 1}/{steps})")
-            time.sleep(0.3)  # 每次點擊後短暫等待
-        
-        # 等待畫面更新
-        time.sleep(1)
-        
-        # 驗證是否調整成功
+        # 驗證並微調（使用圖片比對）
         logger.info("開始驗證調整結果...")
         for attempt in range(max_attempts):
-            final_index = get_current_betsize_index(driver)
+            # 重新截取整個瀏覽器截圖並識別當前金額
+            screenshot = driver.get_screenshot_as_png()
+            screenshot_np = np.array(Image.open(io.BytesIO(screenshot)))
+            screenshot_gray = cv2.cvtColor(screenshot_np, cv2.COLOR_RGB2GRAY)
             
-            if final_index is None:
-                logger.warning(f"驗證失敗 (嘗試 {attempt + 1}/{max_attempts})，重試中...")
+            current_amount_str = compare_betsize_images(screenshot_gray, bet_size_dir, threshold=GAME_CONFIG.image_match_threshold)
+            if current_amount_str is None:
+                logger.warning(f"驗證失敗：無法識別金額 (嘗試 {attempt + 1}/{max_attempts})")
                 time.sleep(0.5)
                 continue
             
-            if final_index == target_index:
-                logger.info(f"✓ 調整成功! 當前金額: {GAME_BETSIZE[final_index]}")
-                return True
-            else:
-                # 如果不正確，繼續調整
-                diff = target_index - final_index
-                logger.warning(f"當前金額 {GAME_BETSIZE[final_index]} 未達目標，繼續調整 (差距: {diff})")
-                
-                if diff > 0:
-                    send_arrow_right(driver)
-                else:
-                    send_arrow_left(driver)
-                
+            try:
+                current_amount = float(current_amount_str)
+            except ValueError:
+                logger.warning(f"驗證失敗：無效的金額 {current_amount_str}")
                 time.sleep(0.5)
+                continue
+            
+            # 檢查是否達到目標
+            if current_amount == target_amount:
+                logger.info(f"✓ 調整成功! 當前金額: {current_amount}")
+                return True
+            
+            # 如果不正確，繼續調整
+            logger.info(f"當前金額 {current_amount}，目標 {target_amount}，繼續調整...")
+            
+            if current_amount < target_amount:
+                send_arrow_right(driver)
+                logger.debug("點擊增加按鈕")
+            else:
+                send_arrow_left(driver)
+                logger.debug("點擊減少按鈕")
+            
+            time.sleep(0.5)
         
         logger.error(f"調整失敗，已達最大嘗試次數 ({max_attempts})")
         return False
@@ -1592,13 +1689,81 @@ def save_screenshot(driver: WebDriver) -> bool:
         return False
 
 
+def peek_betsize(driver: WebDriver, target_amount: float) -> bool:
+    """
+    檢測指定金額的圖片是否出現在當前瀏覽器畫面中。
+    
+    Args:
+        driver: WebDriver 實例
+        target_amount: 要檢測的金額
+        
+    Returns:
+        bool: 找到圖片返回 True，未找到返回 False
+    """
+    try:
+        # 檢查金額是否在列表中
+        if target_amount not in GAME_BETSIZE:
+            logger.error(f"金額 {target_amount} 不在 GAME_BETSIZE 列表中")
+            logger.info(f"可用金額: {GAME_BETSIZE}")
+            return False
+        
+        logger.info(f"開始檢測金額 {target_amount} 的圖片...")
+        
+        # 擷取整個瀏覽器截圖
+        screenshot = driver.get_screenshot_as_png()
+        screenshot_np = np.array(Image.open(io.BytesIO(screenshot)))
+        screenshot_gray = cv2.cvtColor(screenshot_np, cv2.COLOR_RGB2GRAY)
+        
+        logger.info(f"瀏覽器截圖尺寸: {screenshot_gray.shape}")
+        
+        # 讀取目標金額的模板圖片
+        bet_size_dir = ImagePath.bet_size_dir()
+        template_path = Path(bet_size_dir) / f"{target_amount}.png"
+        
+        if not template_path.exists():
+            logger.error(f"找不到金額 {target_amount} 的圖片：{template_path}")
+            return False
+        
+        # 讀取模板圖片
+        template = cv2.imread(str(template_path), cv2.IMREAD_GRAYSCALE)
+        if template is None:
+            logger.error(f"無法讀取圖片：{template_path}")
+            return False
+        
+        logger.info(f"模板圖片尺寸: {template.shape}")
+        
+        # 確保截圖大於或等於模板圖片
+        if screenshot_gray.shape[0] < template.shape[0] or screenshot_gray.shape[1] < template.shape[1]:
+            logger.error(f"截圖尺寸小於模板圖片")
+            return False
+        
+        # 執行模板匹配（在整個截圖中尋找）
+        result = cv2.matchTemplate(screenshot_gray, template, cv2.TM_CCOEFF_NORMED)
+        min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
+        
+        logger.info(f"金額 {target_amount} 的匹配度：{max_val:.3f} (閾值：{GAME_CONFIG.image_match_threshold})")
+        logger.info(f"匹配位置：{max_loc}")
+        
+        # 檢查是否達到閾值
+        if max_val >= GAME_CONFIG.image_match_threshold:
+            logger.info(f"✓ 找到金額 {target_amount} 的圖片！(相似度：{max_val:.3f})")
+            return True
+        else:
+            logger.info(f"✗ 未找到金額 {target_amount} 的圖片 (相似度：{max_val:.3f})")
+            return False
+            
+    except Exception as e:
+        logger.error(f"檢測金額圖片時發生錯誤：{e}")
+        return False
+
+
 def operate_game(driver: WebDriver, command: str) -> bool:
     """
     根據指令操作遊戲。
     
     Args:
         driver: WebDriver 實例
-        command: 操作指令 ('c':繼續, 'p':暫停, 'q':退出, 's':截圖, 'b <金額>':調整金額)
+        command: 操作指令 ('c':繼續, 'p <金額>':檢測金額圖片, 'q':退出, 's':截圖, 'b <金額>':調整金額)
         
     Returns:
         bool: 操作成功返回 True，無效指令或失敗返回 False
@@ -1611,12 +1776,24 @@ def operate_game(driver: WebDriver, command: str) -> bool:
     
     if command == GameCommand.CONTINUE.value:
         return start_game(driver)
-    elif command == GameCommand.PAUSE.value:
-        return pause_game(driver)
     elif command == GameCommand.QUIT.value:
         return quit_browser(driver)
     elif command == GameCommand.SCREENSHOT.value:
         return save_screenshot(driver)
+    elif command.startswith(GameCommand.PEEK.value):
+        # 處理檢測金額圖片指令: p <金額>
+        parts = command.split()
+        if len(parts) < 2:
+            logger.warning("請輸入要檢測的金額，格式: p <金額>")
+            logger.info(f"可用金額: {GAME_BETSIZE}")
+            return False
+        
+        try:
+            target_amount = float(parts[1])
+            return peek_betsize(driver, target_amount)
+        except ValueError:
+            logger.error(f"無效的金額: {parts[1]}")
+            return False
     elif command.startswith(GameCommand.BET_SIZE.value):
         # 處理調整金額指令: b <金額>
         parts = command.split()
@@ -1787,7 +1964,7 @@ def run_command_loop(drivers: List[Optional[WebDriver]]) -> None:
         drivers: 瀏覽器實例列表
     """
     logger.info("已進入指令模式")
-    logger.info(f"可用指令：{GameCommand.CONTINUE.value}(繼續) {GameCommand.PAUSE.value}(暫停) {GameCommand.BET_SIZE.value} <金額>(調整金額) {GameCommand.SCREENSHOT.value}(截圖) {GameCommand.QUIT.value}(退出)")
+    logger.info(f"可用指令：{GameCommand.CONTINUE.value}(繼續) {GameCommand.PEEK.value} <金額>(檢測金額圖片) {GameCommand.BET_SIZE.value} <金額>(調整金額) {GameCommand.SCREENSHOT.value}(截圖) {GameCommand.QUIT.value}(退出)")
     logger.info(f"可用金額列表: {GAME_BETSIZE}")
     
     try:
