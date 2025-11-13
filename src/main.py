@@ -179,6 +179,7 @@ class GameState:
     """遊戲狀態資料類別"""
     running: bool = False
     thread: Optional[threading.Thread] = None
+    rules: Optional[List[Dict[str, any]]] = None
 
 
 class GameStateManager:
@@ -212,6 +213,20 @@ class GameStateManager:
         with self._lock:
             if driver in self._states:
                 return self._states[driver].thread
+            return None
+    
+    def set_rules(self, driver: WebDriver, rules: Optional[List[Dict[str, any]]]) -> None:
+        """設定遊戲規則"""
+        with self._lock:
+            if driver not in self._states:
+                self._states[driver] = GameState()
+            self._states[driver].rules = rules
+    
+    def get_rules(self, driver: WebDriver) -> Optional[List[Dict[str, any]]]:
+        """取得遊戲規則"""
+        with self._lock:
+            if driver in self._states:
+                return self._states[driver].rules
             return None
     
     def remove(self, driver: WebDriver) -> None:
@@ -315,6 +330,75 @@ def load_user_credentials() -> List[Dict[str, str]]:
         logger.info(f"已載入 {total_count} 組帳號資料")
     
     return credentials
+
+
+def load_game_rules() -> List[Dict[str, any]]:
+    """
+    從檔案讀取遊戲規則資料。
+    
+    檔案格式：
+    - 第一行為標題（會被跳過）
+    - 每行格式：金額:時間(分鐘)
+    - 例如：0.4:10 表示 0.4 betsize 執行 10 分鐘
+    
+    Returns:
+        List[Dict[str, any]]: 規則列表，每項包含 'betsize' (float) 和 'duration_minutes' (int) 鍵值
+        
+    Raises:
+        FileNotFoundError: 當檔案不存在時
+        ValueError: 當金額不在 GAME_BETSIZE 列表中時
+    """
+    current_dir = Path(__file__).resolve().parent
+    project_root = current_dir.parent
+    rules_path = project_root / "lib" / "user_rules.txt"
+    
+    if not rules_path.exists():
+        raise FileNotFoundError(f"找不到規則檔案：{rules_path}")
+    
+    rules = []
+    
+    with open(rules_path, 'r', encoding='utf-8') as f:
+        lines = f.readlines()
+    
+    for idx, line in enumerate(lines):
+        # 跳過標題行
+        if idx == 0:
+            continue
+        
+        line = line.strip()
+        if not line or ':' not in line:
+            continue
+        
+        try:
+            betsize_str, duration_str = line.split(':', 1)
+            betsize = float(betsize_str.strip())
+            duration_minutes = int(duration_str.strip())
+            
+            # 檢核金額是否在 GAME_BETSIZE 中
+            if betsize not in GAME_BETSIZE:
+                logger.warning(f"規則第 {idx + 1} 行：金額 {betsize} 不在可用金額列表中，已跳過")
+                continue
+            
+            rules.append({
+                'betsize': betsize,
+                'duration_minutes': duration_minutes
+            })
+            
+        except ValueError as e:
+            logger.warning(f"規則第 {idx + 1} 行格式錯誤：{line}，已跳過")
+            continue
+    
+    total_count = len(rules)
+    
+    if total_count == 0:
+        logger.warning("規則檔案內容為空或格式錯誤")
+        return []
+    
+    logger.info(f"已載入 {total_count} 條遊戲規則")
+    for idx, rule in enumerate(rules, 1):
+        logger.info(f"  規則 {idx}: 金額 {rule['betsize']} 執行 {rule['duration_minutes']} 分鐘")
+    
+    return rules
 
 
 def create_chrome_options() -> Options:
@@ -955,11 +1039,12 @@ def continue_game(driver: WebDriver) -> None:
     """
     持續執行遊戲操作的執行緒函式。
     
-    循環執行：
-    1. 按下空白鍵
-    2. 等待指定秒數
-    3. 再按一次空白鍵
-    4. 重複循環
+    根據 user_rules.txt 中的規則執行：
+    1. 調整金額到規則指定的 betsize
+    2. 每 15 秒按一次空白鍵
+    3. 持續執行規則指定的分鐘數
+    4. 切換到下一條規則
+    5. 所有規則執行完畢後停止
     
     會定期檢查執行狀態，當狀態變為非執行時立即停止。
     
@@ -970,29 +1055,73 @@ def continue_game(driver: WebDriver) -> None:
         # 嘗試切換到遊戲 iframe
         switch_to_game_frame(driver)
         
-        while True:
-            # 檢查是否應該繼續執行
+        # 取得規則列表
+        rules = game_state_manager.get_rules(driver)
+        
+        if not rules:
+            logger.warning("沒有可用的遊戲規則，使用預設模式（每 15 秒按一次空白鍵）")
+            # 使用預設模式
+            while True:
+                if not game_state_manager.is_running(driver):
+                    break
+                
+                send_space_key(driver)
+                
+                # 使用小間隔檢查狀態，避免延遲停止
+                for _ in range(GAME_CONFIG.key_interval):
+                    if not game_state_manager.is_running(driver):
+                        break
+                    time.sleep(1)
+            return
+        
+        # 按照規則執行
+        for rule_idx, rule in enumerate(rules, 1):
             if not game_state_manager.is_running(driver):
                 logger.info("遊戲已暫停")
                 break
             
-            # 第一次按空白鍵
-            if not send_space_key(driver):
-                break
-            logger.debug("按下空白鍵（第一次）")
+            betsize = rule['betsize']
+            duration_minutes = rule['duration_minutes']
             
-            # 分段等待，以便快速響應暫停指令
-            for _ in range(GAME_CONFIG.key_interval):
-                time.sleep(1)
+            logger.info(f"開始執行規則 {rule_idx}/{len(rules)}: 金額 {betsize}, 持續 {duration_minutes} 分鐘")
+            
+            # 調整金額
+            if not adjust_betsize(driver, betsize):
+                logger.error(f"調整金額失敗，跳過規則 {rule_idx}")
+                continue
+            
+            logger.info(f"金額已調整為 {betsize}，開始執行 {duration_minutes} 分鐘")
+            
+            # 計算結束時間
+            end_time = time.time() + (duration_minutes * 60)
+            press_count = 0
+            
+            # 在指定時間內持續按空白鍵
+            while time.time() < end_time:
                 if not game_state_manager.is_running(driver):
-                    logger.info("偵測到暫停指令")
+                    logger.info("遊戲已暫停")
                     return
-            
-            # 第二次按空白鍵
-            if not send_space_key(driver):
-                break
-            logger.debug("按下空白鍵（第二次）")
                 
+                send_space_key(driver)
+                press_count += 1
+                
+                remaining_seconds = int(end_time - time.time())
+                logger.info(f"規則 {rule_idx}: 已按 {press_count} 次，剩餘 {remaining_seconds} 秒")
+                
+                # 使用小間隔檢查狀態
+                for _ in range(GAME_CONFIG.key_interval):
+                    if not game_state_manager.is_running(driver):
+                        logger.info("遊戲已暫停")
+                        return
+                    if time.time() >= end_time:
+                        break
+                    time.sleep(1)
+            
+            logger.info(f"規則 {rule_idx} 執行完成（共按 {press_count} 次空白鍵）")
+        
+        logger.info("所有規則執行完畢，遊戲停止")
+        game_state_manager.set_running(driver, False)
+        
     except Exception as e:
         logger.error(f"遊戲執行發生錯誤：{e}")
     finally:
@@ -1005,6 +1134,8 @@ def start_game(driver: WebDriver) -> bool:
     """
     開始遊戲執行。
     
+    會先載入 user_rules.txt 中的規則，然後按照規則執行遊戲。
+    
     Args:
         driver: WebDriver 實例
         
@@ -1014,6 +1145,19 @@ def start_game(driver: WebDriver) -> bool:
     if game_state_manager.is_running(driver):
         logger.info("遊戲已在執行中")
         return False
+    
+    # 載入遊戲規則
+    try:
+        rules = load_game_rules()
+        game_state_manager.set_rules(driver, rules)
+        
+        if rules:
+            logger.info(f"已載入 {len(rules)} 條遊戲規則")
+        else:
+            logger.warning("未載入任何規則，將使用預設模式")
+    except Exception as e:
+        logger.error(f"載入規則失敗：{e}，將使用預設模式")
+        game_state_manager.set_rules(driver, None)
     
     # 啟動遊戲執行緒
     game_state_manager.set_running(driver, True)
@@ -1522,6 +1666,7 @@ def run_command_loop(drivers: List[Optional[WebDriver]]) -> None:
                 break
             
             if not command:
+                logger.warning("指令不能為空白，請重新輸入")
                 continue
             
             # 檢查退出指令
