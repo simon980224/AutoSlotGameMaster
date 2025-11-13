@@ -42,6 +42,7 @@ class GameCommand(Enum):
     PAUSE = 'p'
     QUIT = 'q'
     BET_SIZE = 'b'  # 調整下注金額
+    SCREENSHOT = 's'  # 截圖
 
 
 @dataclass
@@ -1197,7 +1198,7 @@ def continue_game(driver: WebDriver) -> None:
                 
                 remaining_seconds = int(end_time - time.time())
                 logger.info(f"規則 {rule_idx}: 已按 {press_count} 次，剩餘 {remaining_seconds} 秒")
-                logger.info(f"可用指令：{GameCommand.CONTINUE.value}(繼續) {GameCommand.PAUSE.value}(暫停) {GameCommand.BET_SIZE.value} <金額>(調整金額) {GameCommand.QUIT.value}(退出)")
+                logger.info(f"可用指令：{GameCommand.CONTINUE.value}(繼續) {GameCommand.PAUSE.value}(暫停) {GameCommand.BET_SIZE.value} <金額>(調整金額) {GameCommand.SCREENSHOT.value}(截圖) {GameCommand.QUIT.value}(退出)")
                 
                 # 使用小間隔檢查狀態
                 for _ in range(GAME_CONFIG.key_interval):
@@ -1553,13 +1554,51 @@ def adjust_betsize(driver: WebDriver, target_amount: float, max_attempts: int = 
         return False
 
 
+def save_screenshot(driver: WebDriver) -> bool:
+    """
+    截取瀏覽器完整畫面並儲存到桌面。
+    
+    檔名格式：screenshot_YYYYMMDD_HHMMSS.png
+    
+    Args:
+        driver: WebDriver 實例
+        
+    Returns:
+        bool: 儲存成功返回 True，失敗返回 False
+    """
+    try:
+        from datetime import datetime
+        
+        # 取得桌面路徑
+        desktop_path = Path.home() / "Desktop"
+        
+        # 生成檔名（包含時間戳記）
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"screenshot_{timestamp}.png"
+        filepath = desktop_path / filename
+        
+        # 截取畫面
+        screenshot = driver.get_screenshot_as_png()
+        
+        # 儲存到桌面
+        with open(filepath, 'wb') as f:
+            f.write(screenshot)
+        
+        logger.info(f"✓ 截圖已儲存至：{filepath}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"截圖失敗：{e}")
+        return False
+
+
 def operate_game(driver: WebDriver, command: str) -> bool:
     """
     根據指令操作遊戲。
     
     Args:
         driver: WebDriver 實例
-        command: 操作指令 ('c':繼續, 'p':暫停, 'q':退出)
+        command: 操作指令 ('c':繼續, 'p':暫停, 'q':退出, 's':截圖, 'b <金額>':調整金額)
         
     Returns:
         bool: 操作成功返回 True，無效指令或失敗返回 False
@@ -1576,6 +1615,8 @@ def operate_game(driver: WebDriver, command: str) -> bool:
         return pause_game(driver)
     elif command == GameCommand.QUIT.value:
         return quit_browser(driver)
+    elif command == GameCommand.SCREENSHOT.value:
+        return save_screenshot(driver)
     elif command.startswith(GameCommand.BET_SIZE.value):
         # 處理調整金額指令: b <金額>
         parts = command.split()
@@ -1746,7 +1787,7 @@ def run_command_loop(drivers: List[Optional[WebDriver]]) -> None:
         drivers: 瀏覽器實例列表
     """
     logger.info("已進入指令模式")
-    logger.info(f"可用指令：{GameCommand.CONTINUE.value}(繼續) {GameCommand.PAUSE.value}(暫停) {GameCommand.BET_SIZE.value} <金額>(調整金額) {GameCommand.QUIT.value}(退出)")
+    logger.info(f"可用指令：{GameCommand.CONTINUE.value}(繼續) {GameCommand.PAUSE.value}(暫停) {GameCommand.BET_SIZE.value} <金額>(調整金額) {GameCommand.SCREENSHOT.value}(截圖) {GameCommand.QUIT.value}(退出)")
     logger.info(f"可用金額列表: {GAME_BETSIZE}")
     
     try:
