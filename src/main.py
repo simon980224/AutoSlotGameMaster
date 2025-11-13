@@ -763,7 +763,7 @@ def send_space_key(driver: WebDriver) -> bool:
 
 def send_arrow_left(driver: WebDriver) -> bool:
     """
-    發送左方向鍵（減少金額）。
+    點擊減少金額按鈕（Canvas 內座標 725, 575）。
     
     Args:
         driver: WebDriver 實例
@@ -771,12 +771,88 @@ def send_arrow_left(driver: WebDriver) -> bool:
     Returns:
         bool: 成功返回 True，失敗返回 False
     """
-    return send_key(driver, KeyboardKey.ARROW_LEFT)
+    try:
+        # 切換到主頁面內容
+        driver.switch_to.default_content()
+        
+        # 切換到 iframe
+        try:
+            iframe = WebDriverWait(driver, 5).until(
+                EC.presence_of_element_located((By.ID, "gameFrame-0"))
+            )
+            driver.switch_to.frame(iframe)
+        except Exception as e:
+            logger.warning(f"切換 iframe 失敗：{e}")
+            return False
+        
+        # 取得 Canvas 的位置資訊
+        try:
+            rect = driver.execute_script("""
+                const canvas = document.getElementById('GameCanvas');
+                if (!canvas) return null;
+                const r = canvas.getBoundingClientRect();
+                return {x: r.left, y: r.top, w: r.width, h: r.height};
+            """)
+            
+            if rect is None:
+                logger.error("找不到 GameCanvas 元素")
+                return False
+            
+            # 計算點擊座標（Canvas 內的相對位置）
+            click_x = rect["x"] + 725
+            click_y = rect["y"] + 575
+            
+            logger.info(f"Canvas 區域: x={rect['x']}, y={rect['y']}, w={rect['w']}, h={rect['h']}")
+            logger.info(f"點擊減少按鈕座標: ({click_x:.1f}, {click_y:.1f})")
+            
+        except Exception as e:
+            logger.error(f"無法取得 Canvas 位置：{e}")
+            return False
+        
+        # 截取點擊位置周圍的圖片（不同大小）
+        driver.switch_to.default_content()
+        screenshot = driver.get_screenshot_as_png()
+        screenshot_image = Image.open(io.BytesIO(screenshot))
+        
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        desktop_path = Path.home() / "Desktop"
+        
+        # 截取三種不同大小的區域
+        for size in [10, 50, 100]:
+            left = max(0, int(click_x - size))
+            top = max(0, int(click_y - size))
+            right = min(screenshot_image.width, int(click_x + size))
+            bottom = min(screenshot_image.height, int(click_y + size))
+            
+            cropped = screenshot_image.crop((left, top, right, bottom))
+            filename = desktop_path / f"decrease_click_{size}px_{timestamp}.png"
+            cropped.save(str(filename))
+            logger.info(f"截圖已儲存: {filename} (大小: {cropped.width}x{cropped.height})")
+        
+        # 切回 iframe 並點擊
+        driver.switch_to.frame(iframe)
+        
+        # 使用 CDP 點擊
+        for ev in ["mousePressed", "mouseReleased"]:
+            driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
+                "type": ev,
+                "x": click_x,
+                "y": click_y,
+                "button": "left",
+                "clickCount": 1
+            })
+        
+        logger.info("已點擊減少金額按鈕")
+        return True
+        
+    except Exception as e:
+        logger.warning(f"點擊減少金額按鈕失敗：{e}")
+        return False
 
 
 def send_arrow_right(driver: WebDriver) -> bool:
     """
-    發送右方向鍵（增加金額）。
+    點擊增加金額按鈕（Canvas 內座標 875, 575）。
     
     Args:
         driver: WebDriver 實例
@@ -784,7 +860,83 @@ def send_arrow_right(driver: WebDriver) -> bool:
     Returns:
         bool: 成功返回 True，失敗返回 False
     """
-    return send_key(driver, KeyboardKey.ARROW_RIGHT)
+    try:
+        # 切換到主頁面內容
+        driver.switch_to.default_content()
+        
+        # 切換到 iframe
+        try:
+            iframe = WebDriverWait(driver, 5).until(
+                EC.presence_of_element_located((By.ID, "gameFrame-0"))
+            )
+            driver.switch_to.frame(iframe)
+        except Exception as e:
+            logger.warning(f"切換 iframe 失敗：{e}")
+            return False
+        
+        # 取得 Canvas 的位置資訊
+        try:
+            rect = driver.execute_script("""
+                const canvas = document.getElementById('GameCanvas');
+                if (!canvas) return null;
+                const r = canvas.getBoundingClientRect();
+                return {x: r.left, y: r.top, w: r.width, h: r.height};
+            """)
+            
+            if rect is None:
+                logger.error("找不到 GameCanvas 元素")
+                return False
+            
+            # 計算點擊座標（Canvas 內的相對位置）
+            click_x = rect["x"] + 875
+            click_y = rect["y"] + 575
+            
+            logger.info(f"Canvas 區域: x={rect['x']}, y={rect['y']}, w={rect['w']}, h={rect['h']}")
+            logger.info(f"點擊增加按鈕座標: ({click_x:.1f}, {click_y:.1f})")
+            
+        except Exception as e:
+            logger.error(f"無法取得 Canvas 位置：{e}")
+            return False
+        
+        # 截取點擊位置周圍的圖片（不同大小）
+        driver.switch_to.default_content()
+        screenshot = driver.get_screenshot_as_png()
+        screenshot_image = Image.open(io.BytesIO(screenshot))
+        
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        desktop_path = Path.home() / "Desktop"
+        
+        # 截取三種不同大小的區域
+        for size in [10, 50, 100]:
+            left = max(0, int(click_x - size))
+            top = max(0, int(click_y - size))
+            right = min(screenshot_image.width, int(click_x + size))
+            bottom = min(screenshot_image.height, int(click_y + size))
+            
+            cropped = screenshot_image.crop((left, top, right, bottom))
+            filename = desktop_path / f"increase_click_{size}px_{timestamp}.png"
+            cropped.save(str(filename))
+            logger.info(f"截圖已儲存: {filename} (大小: {cropped.width}x{cropped.height})")
+        
+        # 切回 iframe 並點擊
+        driver.switch_to.frame(iframe)
+        
+        # 使用 CDP 點擊
+        for ev in ["mousePressed", "mouseReleased"]:
+            driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
+                "type": ev,
+                "x": click_x,
+                "y": click_y,
+                "button": "left",
+                "clickCount": 1
+            })
+        
+        logger.info("已點擊增加金額按鈕")
+        return True
+        
+    except Exception as e:
+        logger.warning(f"點擊增加金額按鈕失敗：{e}")
+        return False
 
 
 def click_coordinate(driver: WebDriver, x: int, y: int) -> bool:
@@ -1154,25 +1306,25 @@ def adjust_betsize(driver: WebDriver, target_amount: float, max_attempts: int = 
             logger.info("當前金額已經是目標金額，無需調整")
             return True
         
-        # 決定按哪個鍵
+        # 決定點擊哪個按鈕
         if diff > 0:
-            # 需要增加，按右鍵
-            key = KeyboardKey.ARROW_RIGHT
+            # 需要增加，點擊增加按鈕
+            click_func = send_arrow_right
             direction = "增加"
             steps = diff
         else:
-            # 需要減少，按左鍵
-            key = KeyboardKey.ARROW_LEFT
+            # 需要減少，點擊減少按鈕
+            click_func = send_arrow_left
             direction = "減少"
             steps = abs(diff)
         
-        logger.info(f"需要{direction} {steps} 次才能到達目標金額")
+        logger.info(f"需要點擊{direction}按鈕 {steps} 次才能到達目標金額")
         
         # 開始調整
         for i in range(steps):
-            send_key(driver, key)
-            logger.info(f"已按 {direction} 鍵 ({i + 1}/{steps})")
-            time.sleep(0.3)  # 每次按鍵後短暫等待
+            click_func(driver)
+            logger.info(f"已點擊 {direction} 按鈕 ({i + 1}/{steps})")
+            time.sleep(0.3)  # 每次點擊後短暫等待
         
         # 等待畫面更新
         time.sleep(1)
@@ -1196,9 +1348,9 @@ def adjust_betsize(driver: WebDriver, target_amount: float, max_attempts: int = 
                 logger.warning(f"當前金額 {GAME_BETSIZE[final_index]} 未達目標，繼續調整 (差距: {diff})")
                 
                 if diff > 0:
-                    send_key(driver, KeyboardKey.ARROW_RIGHT)
+                    send_arrow_right(driver)
                 else:
-                    send_key(driver, KeyboardKey.ARROW_LEFT)
+                    send_arrow_left(driver)
                 
                 time.sleep(0.5)
         
