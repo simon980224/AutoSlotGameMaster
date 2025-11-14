@@ -1225,16 +1225,25 @@ class LoginManager:
                         # 標記正在截圖
                         _template_capturing['lobby_confirm'] = True
                         
-                        # 直接截取固定座標
+                        # 使用確認按鈕座標截取模板
                         try:
                             screenshot = self.driver.get_screenshot_as_png()
                             screenshot_img = Image.open(io.BytesIO(screenshot))
                             
-                            # 固定座標：(800, 550) 上下40px, 左右50px
-                            crop_left = 750
-                            crop_top = 510
-                            crop_right = 850
-                            crop_bottom = 590
+                            # 獲取實際截圖尺寸
+                            img_width, img_height = screenshot_img.size
+                            
+                            # 使用已計算好的確認按鈕座標
+                            center_x = int(confirm_x)
+                            center_y = int(confirm_y)
+                            
+                            # 固定像素偏移：上下左右各20px
+                            crop_left = max(0, center_x - 20)
+                            crop_top = max(0, center_y - 20)
+                            crop_right = min(img_width, center_x + 20)
+                            crop_bottom = min(img_height, center_y + 20)
+                            
+                            logger.info(f"[{self.username}] 截圖尺寸: {img_width}x{img_height}, 確認按鈕座標: ({center_x}, {center_y})")
                             
                             cropped_img = screenshot_img.crop((crop_left, crop_top, crop_right, crop_bottom))
                             
@@ -1242,7 +1251,7 @@ class LoginManager:
                             lobby_confirm_path.parent.mkdir(parents=True, exist_ok=True)
                             cropped_img.save(lobby_confirm_path)
                             
-                            logger.info(f"[{self.username}] ✓ lobby_confirm.png 已建立 (座標: 800,550, 上下40px 左右50px)")
+                            logger.info(f"[{self.username}] ✓ lobby_confirm.png 已建立")
                         except Exception as e:
                             _template_capturing['lobby_confirm'] = False
                             raise LoginError(f"[{self.username}] 建立 lobby_confirm.png 失敗: {e}")
