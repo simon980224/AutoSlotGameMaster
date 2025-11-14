@@ -1842,8 +1842,9 @@ class GameController:
                 })
             
             # === 購買完成後自動按一次空白鍵 ===
-            time.sleep(1)
-            logger.info("購買完成，自動按下空白鍵開始遊戲...")
+            logger.info("購買完成，等待 10 秒後開始遊戲...")
+            time.sleep(10)
+            logger.info("按下空白鍵開始遊戲...")
             self.send_key(KEYBOARD_KEY.SPACE)
             
             logger.info("免費遊戲購買完成！")
@@ -2424,10 +2425,28 @@ class MainController:
         
         elif command == GameCommand.BUY_FREE_GAME.value:
             logger.info("開始購買免費遊戲流程...")
+            
+            # 使用執行緒同步執行所有瀏覽器的購買操作
+            threads = []
             for driver in self.drivers:
                 if driver is not None:
-                    controller = GameController(driver)
-                    controller.buy_free_game()
+                    def buy_worker(d):
+                        try:
+                            controller = GameController(d)
+                            controller.buy_free_game()
+                        except Exception as e:
+                            username = game_state_manager.get_username(d) or "未知"
+                            logger.error(f"[{username}] 購買免費遊戲失敗: {e}")
+                    
+                    thread = threading.Thread(target=buy_worker, args=(driver,), daemon=True)
+                    threads.append(thread)
+                    thread.start()
+            
+            # 等待所有執行緒完成
+            for thread in threads:
+                thread.join()
+            
+            logger.info("所有瀏覽器購買操作完成")
         
         elif command.startswith(GameCommand.BET_SIZE.value):
             parts = command.split()
