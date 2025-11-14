@@ -1641,6 +1641,41 @@ class GameController:
             logger.error(f"比對圖片時發生錯誤: {e}")
             return None
     
+    def _click_betsize_button(self, x: float, y: float) -> None:
+        """
+        點擊下注金額調整按鈕
+        
+        Args:
+            x: X 座標 (基於 600x400 視窗)
+            y: Y 座標 (基於 600x400 視窗)
+        """
+        import io
+        from PIL import Image
+        
+        screenshot = self.driver.get_screenshot_as_png()
+        screenshot_img = Image.open(io.BytesIO(screenshot))
+        
+        # 獲取實際截圖尺寸
+        img_width, img_height = screenshot_img.size
+        
+        # 計算相對座標比例（基於 600x400）
+        x_ratio = x / 600
+        y_ratio = y / 400
+        
+        # 應用到實際截圖尺寸
+        actual_x = int(img_width * x_ratio)
+        actual_y = int(img_height * y_ratio)
+        
+        # 使用轉換後的實際座標進行點擊
+        for ev in ["mousePressed", "mouseReleased"]:
+            self.driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
+                "type": ev,
+                "x": actual_x,
+                "y": actual_y,
+                "button": "left",
+                "clickCount": 1
+            })
+    
     def adjust_betsize(self, target_amount: float, max_attempts: int = 200) -> bool:
         """
         調整下注金額到目標值
@@ -1679,12 +1714,17 @@ class GameController:
             target_index = GAME_BETSIZE.index(target_amount)
             diff = target_index - current_index
             
+            # 設定點擊座標（基於 600x400 視窗）
             if diff > 0:
-                click_func = self.send_arrow_right
+                # 增加金額
+                click_x = 440
+                click_y = 370
                 direction = "增加"
                 estimated_steps = diff
             else:
-                click_func = self.send_arrow_left
+                # 減少金額
+                click_x = 360
+                click_y = 370
                 direction = "減少"
                 estimated_steps = abs(diff)
             
@@ -1692,7 +1732,7 @@ class GameController:
             
             # 開始調整
             for i in range(estimated_steps):
-                click_func()
+                self._click_betsize_button(click_x, click_y)
                 logger.info(f"已點擊 {direction} 按鈕 ({i + 1}/{estimated_steps})")
                 time.sleep(0.3)
             
@@ -1714,10 +1754,11 @@ class GameController:
                 
                 logger.info(f"[{self.username}] 當前金額 {current_amount}，目標 {target_amount}，繼續調整...")
                 
+                # 根據當前金額決定點擊哪個按鈕
                 if current_amount < target_amount:
-                    self.send_arrow_right()
+                    self._click_betsize_button(440, 370)  # 增加
                 else:
-                    self.send_arrow_left()
+                    self._click_betsize_button(360, 370)  # 減少
                 
                 time.sleep(0.5)
             
