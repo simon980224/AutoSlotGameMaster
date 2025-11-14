@@ -20,6 +20,7 @@ import io
 import logging
 import platform
 import random
+import sys
 import tempfile
 import threading
 import time
@@ -296,7 +297,13 @@ class PathManager:
     
     def __init__(self):
         """初始化路徑管理器"""
-        self._project_root = Path(__file__).resolve().parent.parent
+        # 支援 PyInstaller 打包後的路徑
+        if getattr(sys, 'frozen', False):
+            # 如果是打包後的 EXE
+            self._project_root = Path(sys.executable).resolve().parent
+        else:
+            # 如果是原始 Python 腳本
+            self._project_root = Path(__file__).resolve().parent.parent
     
     @property
     def project_root(self) -> Path:
@@ -306,12 +313,26 @@ class PathManager:
     @property
     def lib_dir(self) -> Path:
         """取得 lib 目錄"""
-        return self._project_root / "lib"
+        lib_path = self._project_root / "lib"
+        # 檢查目錄是否存在
+        if not lib_path.exists():
+            logger.warning(f"lib 目錄不存在: {lib_path}")
+            logger.info(f"當前工作目錄: {Path.cwd()}")
+            logger.info(f"專案根目錄: {self._project_root}")
+        return lib_path
     
     @property
     def img_dir(self) -> Path:
         """取得 img 目錄"""
-        return self._project_root / "img"
+        img_path = self._project_root / "img"
+        # 確保目錄存在
+        if not img_path.exists():
+            try:
+                img_path.mkdir(parents=True, exist_ok=True)
+                logger.debug(f"已建立 img 目錄: {img_path}")
+            except Exception as e:
+                logger.warning(f"無法建立 img 目錄: {e}")
+        return img_path
     
     @property
     def bet_size_dir(self) -> Path:
@@ -1630,8 +1651,13 @@ class GameController:
         try:
             bet_size_dir = path_manager.bet_size_dir
             if not bet_size_dir.exists():
-                logger.error(f"bet_size 資料夾不存在: {bet_size_dir}")
-                return None
+                logger.warning(f"bet_size 資料夾不存在: {bet_size_dir}，嘗試建立...")
+                try:
+                    bet_size_dir.mkdir(parents=True, exist_ok=True)
+                    logger.info(f"已建立 bet_size 資料夾: {bet_size_dir}")
+                except Exception as e:
+                    logger.error(f"無法建立 bet_size 資料夾: {e}")
+                    return None
             
             # 取得所有 png 圖片
             image_files = sorted(bet_size_dir.glob("*.png"))
@@ -2055,6 +2081,52 @@ class MainController:
         """初始化主程式控制器"""
         self.drivers: List[Optional[WebDriver]] = []
         self.credentials: List[UserCredential] = []
+    
+    def _check_environment(self) -> None:
+        """檢查執行環境"""
+        logger.info("檢查執行環境...")
+        
+        # 顯示路徑資訊
+        logger.info(f"專案根目錄: {path_manager.project_root}")
+        logger.info(f"當前工作目錄: {Path.cwd()}")
+        
+        # 檢查是否為打包後的 EXE
+        if getattr(sys, 'frozen', False):
+            logger.info("執行模式: EXE (打包版本)")
+            logger.info(f"執行檔路徑: {sys.executable}")
+        else:
+            logger.info("執行模式: Python 腳本")
+        
+        # 檢查必要目錄
+        lib_dir = path_manager.lib_dir
+        img_dir = path_manager.img_dir
+        
+        if not lib_dir.exists():
+            logger.error(f"✗ 缺少 lib 目錄: {lib_dir}")
+            logger.error("請確保 lib 目錄與執行檔在同一層級")
+            raise ConfigurationError("找不到 lib 目錄")
+        else:
+            logger.info(f"✓ lib 目錄: {lib_dir}")
+        
+        if not img_dir.exists():
+            logger.warning(f"⚠ img 目錄不存在，將自動建立: {img_dir}")
+            try:
+                img_dir.mkdir(parents=True, exist_ok=True)
+                logger.info(f"✓ 已建立 img 目錄")
+            except Exception as e:
+                logger.warning(f"無法建立 img 目錄: {e}")
+        else:
+            logger.info(f"✓ img 目錄: {img_dir}")
+        
+        # 檢查必要檔案
+        credentials_file = path_manager.credentials_file
+        if not credentials_file.exists():
+            logger.error(f"✗ 缺少帳號檔案: {credentials_file}")
+            raise ConfigurationError("找不到 user_credentials.txt")
+        else:
+            logger.info(f"✓ 帳號檔案: {credentials_file}")
+        
+        logger.info("環境檢查完成\n")
     
     def load_configurations(self) -> bool:
         """
@@ -2554,6 +2626,9 @@ class MainController:
         logger.info("=== 金富翁遊戲自動化系統 ===")
         
         try:
+            # 階段 0：環境檢查
+            self._check_environment()
+            
             # 階段 1：載入配置
             if not self.load_configurations():
                 return

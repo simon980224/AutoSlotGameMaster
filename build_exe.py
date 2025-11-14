@@ -118,7 +118,7 @@ def build_exe():
     pyinstaller_args = [
         'pyinstaller',
         '--onefile',                    # 打包成單一執行檔
-        '--windowed',                   # 不顯示控制台視窗（如果需要看日誌，移除此選項）
+        '--console',                    # 顯示控制台視窗（程式需要互動）
         '--name=AutoSlotGameMaster',    # 執行檔名稱
         '--clean',                      # 清理暫存檔案
         '--noconfirm',                  # 不詢問覆蓋
