@@ -161,6 +161,7 @@ class GameCommand(Enum):
     BET_SIZE = 'bet'    # 調整下注金額
     BUY_FREE_GAME = 'b' # 購買免費遊戲
     SCREENSHOT = 's'    # 截取螢幕
+    CAPTURE_AMOUNT = 'cap'  # 截取金額模板
     HELP = 'h'          # 顯示幫助
 
 
@@ -2169,6 +2170,122 @@ class MainController:
         game_state_manager.cleanup_all()
         logger.info("清理完成")
     
+    def _capture_betsize_template(self, driver: WebDriver, amount: float) -> None:
+        """
+        截取下注金額模板
+        
+        Args:
+            driver: WebDriver實例
+            amount: 下注金額
+        """
+        try:
+            import io
+            from PIL import Image
+            
+            # 固定座標：金額顯示位置 (基於 600x400 視窗)
+            target_x = 400
+            target_y = 380
+            
+            # 截取整個瀏覽器畫面
+            screenshot = driver.get_screenshot_as_png()
+            screenshot_img = Image.open(io.BytesIO(screenshot))
+            
+            # 獲取實際截圖尺寸
+            img_width, img_height = screenshot_img.size
+            
+            # 計算相對座標比例（基於 600x400）
+            x_ratio = target_x / 600
+            y_ratio = target_y / 400
+            
+            # 應用到實際截圖尺寸
+            actual_x = int(img_width * x_ratio)
+            actual_y = int(img_height * y_ratio)
+            
+            # 裁切範圍：上下20px, 左右50px
+            crop_left = max(0, actual_x - 50)
+            crop_top = max(0, actual_y - 20)
+            crop_right = min(img_width, actual_x + 50)
+            crop_bottom = min(img_height, actual_y + 20)
+            
+            # 裁切圖片
+            cropped_img = screenshot_img.crop((crop_left, crop_top, crop_right, crop_bottom))
+            
+            # 儲存到 img/bet_size 目錄
+            betsize_dir = path_manager.img_dir / "bet_size"
+            betsize_dir.mkdir(parents=True, exist_ok=True)
+            
+            # 檔名使用金額（整數去掉 .0，小數保留）
+            if amount == int(amount):
+                filename = f"{int(amount)}.png"
+            else:
+                filename = f"{amount}.png"
+            
+            output_path = betsize_dir / filename
+            cropped_img.save(output_path)
+            
+            logger.info(f"✓ 金額模板已儲存: {output_path}")
+            logger.info(f"  - 金額: {amount}")
+            logger.info(f"  - 尺寸: {cropped_img.size[0]}x{cropped_img.size[1]}")
+            
+        except Exception as e:
+            logger.error(f"截取金額模板失敗: {e}")
+            raise
+    
+    def _capture_amount_template(self, driver: WebDriver, target_x: int, target_y: int) -> None:
+        """
+        截取金額模板
+        
+        Args:
+            driver: WebDriver實例
+            target_x: 目標 X 座標 (基於 600x400 視窗)
+            target_y: 目標 Y 座標 (基於 600x400 視窗)
+        """
+        try:
+            import io
+            from PIL import Image
+            
+            # 截取整個瀏覽器畫面
+            screenshot = driver.get_screenshot_as_png()
+            screenshot_img = Image.open(io.BytesIO(screenshot))
+            
+            # 獲取實際截圖尺寸
+            img_width, img_height = screenshot_img.size
+            logger.info(f"截圖尺寸: {img_width}x{img_height}")
+            
+            # 計算相對座標比例（基於 600x400）
+            x_ratio = target_x / 600
+            y_ratio = target_y / 400
+            
+            # 應用到實際截圖尺寸
+            actual_x = int(img_width * x_ratio)
+            actual_y = int(img_height * y_ratio)
+            
+            logger.info(f"目標位置 ({target_x}, {target_y}) -> 實際座標 ({actual_x}, {actual_y})")
+            
+            # 裁切範圍：上下20px, 左右50px
+            crop_left = max(0, actual_x - 50)
+            crop_top = max(0, actual_y - 20)
+            crop_right = min(img_width, actual_x + 50)
+            crop_bottom = min(img_height, actual_y + 20)
+            
+            logger.info(f"裁切範圍: left={crop_left}, top={crop_top}, right={crop_right}, bottom={crop_bottom}")
+            
+            # 裁切圖片
+            cropped_img = screenshot_img.crop((crop_left, crop_top, crop_right, crop_bottom))
+            
+            # 儲存到 img 目錄
+            output_path = path_manager.img_dir / f"amount_template_{target_x}_{target_y}.png"
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            cropped_img.save(output_path)
+            
+            logger.info(f"✓ 模板已儲存: {output_path}")
+            logger.info(f"  - 尺寸: {cropped_img.size[0]}x{cropped_img.size[1]}")
+            logger.info(f"  - 相對比例: X={x_ratio:.4f} ({x_ratio*100:.2f}%), Y={y_ratio:.4f} ({y_ratio*100:.2f}%)")
+            
+        except Exception as e:
+            logger.error(f"截取模板失敗: {e}")
+            raise
+    
     def process_command(self, command: str) -> bool:
         """
         處理使用者指令
@@ -2194,6 +2311,44 @@ class MainController:
             for driver in self.drivers:
                 if driver is not None:
                     GameController(driver).take_screenshot()
+        
+        elif command == GameCommand.CAPTURE_AMOUNT.value:
+            logger.info("=== 截取金額模板工具 ===")
+            logger.info("請輸入目前遊戲顯示的金額（例如: 0.4, 2.4, 10）")
+            logger.info("按 Enter 鍵退出")
+            
+            while True:
+                try:
+                    amount_input = input("\n金額: ").strip()
+                    
+                    # 空白輸入則退出
+                    if not amount_input:
+                        logger.info("退出金額模板工具")
+                        break
+                    
+                    amount = float(amount_input)
+                    
+                    # 驗證金額是否在有效列表中
+                    if amount not in GAME_BETSIZE:
+                        logger.warning(f"⚠ 金額 {amount} 不在標準列表中，但仍會建立模板")
+                    
+                    logger.info(f"目標金額: {amount}")
+                    
+                    # 使用第一個瀏覽器截取
+                    if self.drivers and self.drivers[0] is not None:
+                        self._capture_betsize_template(self.drivers[0], amount)
+                    else:
+                        logger.error("沒有可用的瀏覽器")
+                        break
+                        
+                except ValueError:
+                    logger.error("金額格式錯誤，請輸入有效數字（例如: 0.4）")
+                except EOFError:
+                    logger.info("退出金額模板工具")
+                    break
+                except Exception as e:
+                    logger.error(f"截取失敗: {e}")
+                    break
         
         elif command == GameCommand.BUY_FREE_GAME.value:
             logger.info("開始購買免費遊戲流程...")
@@ -2238,6 +2393,7 @@ class MainController:
 ║  b            - 購買免費遊戲                                      ║
 ║  bet <金額>   - 調整下注金額（例如: bet 2.4）                      ║
 ║  s            - 截取螢幕畫面                                     ║
+║  cap          - 截取金額模板（輸入當前金額）                        ║
 ║  q            - 退出程式                                        ║
 ║  h 或 ?       - 顯示此說明                                       ║
 ╠════════════════════════════════════════════════════════════════╣
