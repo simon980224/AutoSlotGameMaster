@@ -52,6 +52,10 @@ from selenium.common.exceptions import (
 # 儲存最後一次取得的 Canvas 範圍，供 buy_free_game 使用
 last_canvas_rect = None
 
+# 截圖流程控制（確保只有一個瀏覽器執行截圖）
+_template_capture_lock = threading.Lock()
+_template_capturing = {}
+
 
 # ==================== 自定義異常類別 ====================
 
@@ -1136,24 +1140,36 @@ class LoginManager:
             lobby_login_path = path_manager.lobby_login_image
             
             if not lobby_login_path.exists():
-                logger.warning(f"[{self.username}] ⚠️  未找到 lobby_login.png 模板圖片")
-                logger.info(f"[{self.username}] 這似乎是第一次登入，需要建立模板圖片")
-                logger.info(f"[{self.username}] 請確保遊戲已載入到大廳登入畫面")
-                
-                # 互動式截圖流程
-                if not self._capture_lobby_login_template():
-                    raise LoginError(f"[{self.username}] 無法建立 lobby_login.png 模板")
-                
-                logger.info(f"[{self.username}] ✓ 模板圖片已成功建立")
-            else:
-                logger.info(f"[{self.username}] 步驟 1: 正在檢測 lobby_login.png...")
-                if not self.wait_for_image(
-                    lobby_login_path, 
-                    GAME_CONFIG.image_detect_timeout
-                ):
-                    raise LoginError(f"[{self.username}] 步驟 1 失敗：未檢測到 lobby_login.png")
-                
-                logger.info(f"[{self.username}] 步驟 1 完成：已確認 lobby_login.png 存在")
+                # 使用鎖確保只有一個瀏覽器執行截圖
+                with _template_capture_lock:
+                    # 再次檢查（可能已被其他執行緒建立）
+                    if not lobby_login_path.exists():
+                        logger.warning(f"[{self.username}] ⚠️  未找到 lobby_login.png 模板圖片")
+                        logger.info(f"[{self.username}] 這似乎是第一次登入，需要建立模板圖片")
+                        logger.info(f"[{self.username}] 請確保遊戲已載入到大廳登入畫面")
+                        
+                        # 標記正在截圖
+                        _template_capturing['lobby_login'] = True
+                        
+                        # 互動式截圖流程
+                        if not self._capture_lobby_login_template():
+                            _template_capturing['lobby_login'] = False
+                            raise LoginError(f"[{self.username}] 無法建立 lobby_login.png 模板")
+                        
+                        _template_capturing['lobby_login'] = False
+                        logger.info(f"[{self.username}] ✓ 模板圖片已成功建立")
+                    else:
+                        logger.info(f"[{self.username}] 模板已由其他瀏覽器建立，繼續執行...")
+            
+            # 等待並檢測圖片
+            logger.info(f"[{self.username}] 步驟 1: 正在檢測 lobby_login.png...")
+            if not self.wait_for_image(
+                lobby_login_path, 
+                GAME_CONFIG.image_detect_timeout
+            ):
+                raise LoginError(f"[{self.username}] 步驟 1 失敗：未檢測到 lobby_login.png")
+            
+            logger.info(f"[{self.username}] 步驟 1 完成：已確認 lobby_login.png 存在")
             
             # === 切入 iframe ===
             logger.info(f"[{self.username}] 正在切換到遊戲 iframe...")
@@ -1196,9 +1212,48 @@ class LoginManager:
             
             logger.info(f"[{self.username}] 步驟 2 完成：lobby_login.png 已消失")
             
-            # === 步驟 3: 等待 lobby_confirm.png 出現 ===
+            # === 步驟 3: 檢查 lobby_confirm.png 是否存在 ===
+            lobby_confirm_path = path_manager.lobby_confirm_image
+            
+            if not lobby_confirm_path.exists():
+                # 使用鎖確保只有一個瀏覽器執行截圖
+                with _template_capture_lock:
+                    # 再次檢查（可能已被其他執行緒建立）
+                    if not lobby_confirm_path.exists():
+                        logger.info(f"[{self.username}] 正在建立 lobby_confirm.png 模板...")
+                        
+                        # 標記正在截圖
+                        _template_capturing['lobby_confirm'] = True
+                        
+                        # 直接截取固定座標
+                        try:
+                            screenshot = self.driver.get_screenshot_as_png()
+                            screenshot_img = Image.open(io.BytesIO(screenshot))
+                            
+                            # 固定座標：(800, 550) 上下40px, 左右50px
+                            crop_left = 750
+                            crop_top = 510
+                            crop_right = 850
+                            crop_bottom = 590
+                            
+                            cropped_img = screenshot_img.crop((crop_left, crop_top, crop_right, crop_bottom))
+                            
+                            # 儲存圖片
+                            lobby_confirm_path.parent.mkdir(parents=True, exist_ok=True)
+                            cropped_img.save(lobby_confirm_path)
+                            
+                            logger.info(f"[{self.username}] ✓ lobby_confirm.png 已建立 (座標: 800,550, 上下40px 左右50px)")
+                        except Exception as e:
+                            _template_capturing['lobby_confirm'] = False
+                            raise LoginError(f"[{self.username}] 建立 lobby_confirm.png 失敗: {e}")
+                        
+                        _template_capturing['lobby_confirm'] = False
+                    else:
+                        logger.info(f"[{self.username}] 模板已由其他瀏覽器建立，繼續執行...")
+            
+            # 等待並檢測圖片
             logger.info(f"[{self.username}] 步驟 3: 正在檢測 lobby_confirm.png...")
-            if not self.wait_for_image(path_manager.lobby_confirm_image, 30):
+            if not self.wait_for_image(lobby_confirm_path, 30):
                 raise LoginError(f"[{self.username}] 步驟 3 失敗：未檢測到 lobby_confirm.png")
             
             logger.info(f"[{self.username}] 步驟 3 完成：已確認 lobby_confirm.png 存在")
