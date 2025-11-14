@@ -45,6 +45,7 @@ from selenium.common.exceptions import (
     WebDriverException,
     NoSuchElementException,
 )
+from webdriver_manager.chrome import ChromeDriverManager
 
 
 # ==================== 全域變數 ====================
@@ -352,21 +353,18 @@ class PathManager:
     @property
     def chromedriver_path(self) -> Path:
         """
-        取得 ChromeDriver 路徑
+        取得 ChromeDriver 路徑 (已棄用 - 現在使用 WebDriver Manager)
+        
+        此方法保留用於向後相容，但不再使用。
+        WebDriver Manager 會自動管理 ChromeDriver。
         
         Returns:
             Path: ChromeDriver 路徑
-            
-        Raises:
-            FileNotFoundError: 當檔案不存在時
         """
+        logger.warning("chromedriver_path 已棄用，現在使用 WebDriver Manager 自動管理驅動程式")
         system = platform.system().lower()
         driver_filename = "chromedriver.exe" if system == "windows" else "chromedriver"
         driver_path = self._project_root / driver_filename
-        
-        if not driver_path.exists():
-            raise FileNotFoundError(f"找不到 ChromeDriver: {driver_path}")
-        
         return driver_path
 
 
@@ -445,15 +443,15 @@ class GameState:
 
 
 class ProxyExtensionManager:
-    """Proxy Chrome Extension 管理器"""
+    """Proxy Chrome Extension 管理器 - 支援 Chrome 131+"""
     
     @staticmethod
     def create_extension(proxy_host: str, proxy_port: str, 
                         proxy_user: str, proxy_pass: str) -> str:
         """
-        創建 Chrome Proxy Extension
+        創建 Chrome Proxy Extension (支援 Chrome 131+)
         
-        完全在記憶體中操作，返回臨時檔案路徑。
+        Chrome 131+ 使用 Manifest V3，需要使用新的 API。
         
         Args:
             proxy_host: Proxy 主機 IP
@@ -468,56 +466,66 @@ class ProxyExtensionManager:
             BrowserError: 當創建失敗時
         """
         try:
+            # 使用 Manifest V3 支援 Chrome 131+
             manifest_json = """
             {
                 "version": "1.0.0",
-                "manifest_version": 2,
+                "manifest_version": 3,
                 "name": "Chrome Proxy Auth",
                 "permissions": [
                     "proxy",
-                    "tabs",
-                    "unlimitedStorage",
-                    "storage",
-                    "<all_urls>",
                     "webRequest",
-                    "webRequestBlocking"
+                    "webRequestAuthProvider",
+                    "storage"
+                ],
+                "host_permissions": [
+                    "<all_urls>"
                 ],
                 "background": {
-                    "scripts": ["background.js"]
+                    "service_worker": "background.js"
                 },
-                "minimum_chrome_version":"22.0.0"
+                "minimum_chrome_version": "88.0"
             }
             """
 
+            # Chrome 131+ 使用新的 proxy API
             background_js = f"""
-            var config = {{
-                    mode: "fixed_servers",
-                    rules: {{
-                      singleProxy: {{
+            // Chrome 131+ Proxy 設定
+            const proxyConfig = {{
+                mode: "fixed_servers",
+                rules: {{
+                    singleProxy: {{
                         scheme: "http",
                         host: "{proxy_host}",
                         port: parseInt({proxy_port})
-                      }},
-                      bypassList: ["localhost"]
-                    }}
-                  }};
+                    }},
+                    bypassList: ["localhost", "127.0.0.1"]
+                }}
+            }};
 
-            chrome.proxy.settings.set({{value: config, scope: "regular"}}, function() {{}});
-
-            function callbackFn(details) {{
-                return {{
-                    authCredentials: {{
-                        username: "{proxy_user}",
-                        password: "{proxy_pass}"
-                    }}
-                }};
-            }}
-
-            chrome.webRequest.onAuthRequired.addListener(
-                        callbackFn,
-                        {{urls: ["<all_urls>"]}},
-                        ['blocking']
+            // 設定 proxy
+            chrome.proxy.settings.set(
+                {{value: proxyConfig, scope: "regular"}},
+                function() {{
+                    console.log('Proxy configured:', '{proxy_host}:{proxy_port}');
+                }}
             );
+
+            // Chrome 131+ 使用 onAuthRequired 處理認證
+            chrome.webRequest.onAuthRequired.addListener(
+                function(details) {{
+                    return {{
+                        authCredentials: {{
+                            username: "{proxy_user}",
+                            password: "{proxy_pass}"
+                        }}
+                    }};
+                }},
+                {{urls: ["<all_urls>"]}},
+                ["blocking"]
+            );
+
+            console.log('Proxy extension loaded successfully');
             """
 
             # 創建臨時 zip 檔案
@@ -532,6 +540,7 @@ class ProxyExtensionManager:
                 zp.writestr("background.js", background_js)
             
             temp_file.close()
+            logger.debug(f"Proxy extension 已建立: {temp_file.name}")
             return temp_file.name
             
         except Exception as e:
@@ -906,7 +915,7 @@ class BrowserManager:
     @staticmethod
     def create_chrome_options(proxy: Optional[str] = None) -> Options:
         """
-        創建Chrome瀏覽器選項
+        創建Chrome瀏覽器選項 (支援 Chrome 131+)
         
         Args:
             proxy: Proxy字串（格式：ip:port:username:password）
@@ -920,15 +929,17 @@ class BrowserManager:
         try:
             chrome_options = Options()
             
-            # Proxy設定
+            # Proxy設定 (Chrome 131+ 相容)
             if proxy:
                 parts = proxy.split(':')
                 if len(parts) >= 4:
                     extension_path = ProxyExtensionManager.create_extension(
                         parts[0], parts[1], parts[2], parts[3]
                     )
+                    # Chrome 131+ 使用 add_extension
                     chrome_options.add_extension(extension_path)
                     logger.info(f"已設定 Proxy: {parts[0]}:{parts[1]} (使用者: {parts[2]})")
+                    logger.info(f"使用 Chrome 131+ 相容的 Proxy 設定方式")
             
             # 基本設定
             chrome_options.add_argument("--disable-blink-features=AutomationControlled")
@@ -936,7 +947,7 @@ class BrowserManager:
             chrome_options.add_argument("--disable-dev-shm-usage")
             chrome_options.add_argument("--no-sandbox")
             
-            # 網路優化
+            # Chrome 131+ 優化設定
             chrome_options.add_argument("--disable-features=NetworkTimeServiceQuerying")
             chrome_options.add_argument("--dns-prefetch-disable")
             chrome_options.add_argument("--disable-background-networking")
@@ -944,7 +955,10 @@ class BrowserManager:
             chrome_options.add_argument("--metrics-recording-only")
             chrome_options.add_argument("--disable-default-apps")
             chrome_options.add_argument("--no-first-run")
-            chrome_options.add_argument("--disable-extensions")
+            
+            # 注意: 如果使用 proxy extension，不要加 --disable-extensions
+            if not proxy:
+                chrome_options.add_argument("--disable-extensions")
             
             # 移除自動化痕跡
             chrome_options.add_experimental_option(
@@ -975,7 +989,7 @@ class BrowserManager:
     @staticmethod
     def create_webdriver(proxy: Optional[str] = None) -> WebDriver:
         """
-        創建WebDriver實例
+        創建WebDriver實例 (使用 WebDriver Manager 自動管理)
         
         Args:
             proxy: Proxy字串（可選）
@@ -987,10 +1001,21 @@ class BrowserManager:
             BrowserError: 當創建失敗時
         """
         try:
-            service = Service(str(path_manager.chromedriver_path))
+            # 使用 WebDriver Manager 自動下載並管理 ChromeDriver
+            logger.info("正在使用 WebDriver Manager 取得 ChromeDriver...")
+            service = Service(ChromeDriverManager().install())
+            
             chrome_options = BrowserManager.create_chrome_options(proxy)
             
+            logger.info("正在啟動 Chrome 瀏覽器...")
             driver = webdriver.Chrome(service=service, options=chrome_options)
+            
+            # 取得 Chrome 版本
+            try:
+                chrome_version = driver.capabilities.get('browserVersion', 'unknown')
+                logger.info(f"Chrome 版本: {chrome_version}")
+            except Exception:
+                pass
             
             # 設定超時
             driver.set_page_load_timeout(GAME_CONFIG.page_load_timeout)
@@ -1006,7 +1031,7 @@ class BrowserManager:
                 "latency": 0
             })
             
-            logger.info("已創建瀏覽器實例並優化網路設定")
+            logger.info("✓ 瀏覽器實例已創建並完成設定")
             return driver
             
         except Exception as e:
