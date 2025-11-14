@@ -47,6 +47,12 @@ from selenium.common.exceptions import (
 )
 
 
+# ==================== 全域變數 ====================
+
+# 儲存最後一次取得的 Canvas 範圍，供 buy_free_game 使用
+last_canvas_rect = None
+
+
 # ==================== 自定義異常類別 ====================
 
 
@@ -148,7 +154,8 @@ class GameCommand(Enum):
     CONTINUE = 'c'      # 繼續遊戲
     PAUSE = 'p'         # 暫停遊戲
     QUIT = 'q'          # 退出程式
-    BET_SIZE = 'b'      # 調整下注金額
+    BET_SIZE = 'bet'    # 調整下注金額
+    BUY_FREE_GAME = 'b' # 購買免費遊戲
     SCREENSHOT = 's'    # 截取螢幕
     HELP = 'h'          # 顯示幫助
 
@@ -1152,6 +1159,10 @@ class LoginManager:
             """)
             logger.info(f"[{self.username}] Canvas 區域: x={rect['x']}, y={rect['y']}, w={rect['w']}, h={rect['h']}")
             
+            # 儲存到全域變數供 buy_free_game 使用
+            global last_canvas_rect
+            last_canvas_rect = rect
+            
             # === 計算點擊座標 ===
             start_x = rect["x"] + rect["w"] * CLICK_COORD.START_GAME_X_RATIO
             start_y = rect["y"] + rect["h"] * CLICK_COORD.START_GAME_Y_RATIO
@@ -1539,7 +1550,76 @@ class GameController:
             logger.error(f"截圖失敗：{e}")
             return False
     
-
+    def buy_free_game(self) -> bool:
+        """
+        購買免費遊戲
+        
+        Returns:
+            bool: 成功返回True
+        """
+        try:
+            global last_canvas_rect
+            
+            if last_canvas_rect is None:
+                logger.error("Canvas 範圍未初始化，請先進入遊戲")
+                return False
+            
+            rect = last_canvas_rect
+            
+            # === 第一次點擊（freegame 區域） ===
+            freegame_x = rect["x"] + rect["w"] * 0.23
+            freegame_y = rect["y"] + rect["h"] * 1.05
+            
+            logger.info("點擊免費遊戲區域...")
+            for ev in ["mousePressed", "mouseReleased"]:
+                self.driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
+                    "type": ev,
+                    "x": freegame_x,
+                    "y": freegame_y,
+                    "button": "left",
+                    "clickCount": 1
+                })
+            time.sleep(2)
+            
+            # === 第二次點擊（Canvas 確認按鈕） ===
+            start_x = rect["x"] + rect["w"] * 0.65
+            start_y = rect["y"] + rect["h"] * 1.2
+            
+            logger.info("點擊確認按鈕...")
+            for ev in ["mousePressed", "mouseReleased"]:
+                self.driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
+                    "type": ev,
+                    "x": start_x,
+                    "y": start_y,
+                    "button": "left",
+                    "clickCount": 1
+                })
+            
+            # === 購買完成後自動按一次空白鍵 ===
+            time.sleep(1)
+            logger.info("購買完成，自動按下空白鍵開始遊戲...")
+            self.send_key(KEYBOARD_KEY.SPACE)
+            
+            logger.info("免費遊戲購買完成！")
+            logger.info("您現在可以手動操作遊戲")
+            
+            # === 等待用戶按 'o' 返回指令選單 ===
+            while True:
+                user_input = input("輸入 'o' 返回指令選單：").strip().lower()
+                if user_input == "o":
+                    logger.info("返回指令選單...")
+                    break
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"購買免費遊戲失敗：{e}")
+            return False
+        finally:
+            try:
+                self.driver.switch_to.default_content()
+            except Exception:
+                pass
 
 
 # ==================== 遊戲執行器 ====================
@@ -1940,6 +2020,13 @@ class MainController:
                 if driver is not None:
                     GameController(driver).take_screenshot()
         
+        elif command == GameCommand.BUY_FREE_GAME.value:
+            logger.info("開始購買免費遊戲流程...")
+            for driver in self.drivers:
+                if driver is not None:
+                    controller = GameController(driver)
+                    controller.buy_free_game()
+        
         elif command.startswith(GameCommand.BET_SIZE.value):
             parts = command.split()
             if len(parts) < 2:
@@ -1972,11 +2059,12 @@ class MainController:
 ╔════════════════════════════════════════════════════════════════╗
 ║                      遊戲控制指令說明                             ║
 ╠════════════════════════════════════════════════════════════════╣
-║  c          - 開始遊戲（自動執行規則）                             ║
-║  b <金額>   - 調整下注金額（例如: b 2.4）                          ║
-║  s          - 截取螢幕畫面                                       ║
-║  q          - 退出程式                                          ║
-║  h 或 ?     - 顯示此說明                                         ║
+║  c            - 開始遊戲（自動執行規則）                           ║
+║  b            - 購買免費遊戲                                      ║
+║  bet <金額>   - 調整下注金額（例如: bet 2.4）                      ║
+║  s            - 截取螢幕畫面                                     ║
+║  q            - 退出程式                                        ║
+║  h 或 ?       - 顯示此說明                                       ║
 ╠════════════════════════════════════════════════════════════════╣
 ║                      可用金額列表                                ║
 ╠════════════════════════════════════════════════════════════════╣
