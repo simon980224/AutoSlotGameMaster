@@ -2530,7 +2530,53 @@ class MainController:
                     def buy_worker(d):
                         try:
                             controller = GameController(d)
-                            controller.buy_free_game()
+                            username = game_state_manager.get_username(d) or "未知"
+                            
+                            # 執行購買操作（不包含等待用戶輸入）
+                            global last_canvas_rect
+                            if last_canvas_rect is None:
+                                logger.error(f"[{username}] Canvas 範圍未初始化，請先進入遊戲")
+                                return
+                            
+                            rect = last_canvas_rect
+                            
+                            # 第一次點擊（freegame 區域）
+                            freegame_x = rect["x"] + rect["w"] * 0.23
+                            freegame_y = rect["y"] + rect["h"] * 1.05
+                            
+                            logger.info(f"[{username}] 點擊免費遊戲區域...")
+                            for ev in ["mousePressed", "mouseReleased"]:
+                                d.execute_cdp_cmd("Input.dispatchMouseEvent", {
+                                    "type": ev,
+                                    "x": freegame_x,
+                                    "y": freegame_y,
+                                    "button": "left",
+                                    "clickCount": 1
+                                })
+                            time.sleep(2)
+                            
+                            # 第二次點擊（Canvas 確認按鈕）
+                            start_x = rect["x"] + rect["w"] * 0.65
+                            start_y = rect["y"] + rect["h"] * 1.2
+                            
+                            logger.info(f"[{username}] 點擊確認按鈕...")
+                            for ev in ["mousePressed", "mouseReleased"]:
+                                d.execute_cdp_cmd("Input.dispatchMouseEvent", {
+                                    "type": ev,
+                                    "x": start_x,
+                                    "y": start_y,
+                                    "button": "left",
+                                    "clickCount": 1
+                                })
+                            
+                            # 購買完成後自動按一次空白鍵
+                            logger.info(f"[{username}] 購買完成，等待 10 秒後開始遊戲...")
+                            time.sleep(10)
+                            logger.info(f"[{username}] 按下空白鍵開始遊戲...")
+                            controller.send_key(KEYBOARD_KEY.SPACE)
+                            
+                            logger.info(f"[{username}] 免費遊戲購買完成！")
+                            
                         except Exception as e:
                             username = game_state_manager.get_username(d) or "未知"
                             logger.error(f"[{username}] 購買免費遊戲失敗: {e}")
@@ -2544,6 +2590,26 @@ class MainController:
                 thread.join()
             
             logger.info("所有瀏覽器購買操作完成")
+            logger.info("您現在可以手動操作遊戲")
+            
+            # 等待用戶按 'o' 返回指令選單（只需按一次）
+            while True:
+                user_input = input("輸入 'o' 返回指令選單：").strip().lower()
+                if user_input == "o":
+                    logger.info("免費遊戲結束，對所有瀏覽器按下空白鍵...")
+                    # 對所有瀏覽器統一再按一次空白鍵
+                    for driver in self.drivers:
+                        if driver is not None:
+                            try:
+                                controller = GameController(driver)
+                                controller.send_key(KEYBOARD_KEY.SPACE)
+                                username = game_state_manager.get_username(driver) or "未知"
+                                logger.info(f"[{username}] 已按下空白鍵")
+                            except Exception as e:
+                                username = game_state_manager.get_username(driver) or "未知"
+                                logger.error(f"[{username}] 按空白鍵失敗: {e}")
+                    logger.info("返回指令選單...")
+                    break
         
         elif command.startswith(GameCommand.BET_SIZE.value):
             parts = command.split()
