@@ -19,6 +19,7 @@ from __future__ import annotations
 import io
 import logging
 import platform
+import random
 import tempfile
 import threading
 import time
@@ -172,7 +173,8 @@ class WindowConfig:
 class GameConfig:
     """遊戲配置（不可變）"""
     max_accounts: int = 12
-    key_interval: int = 15
+    key_interval_min: int = 10
+    key_interval_max: int = 15
     page_load_timeout: int = 600
     script_timeout: int = 600
     implicit_wait: int = 60
@@ -187,8 +189,10 @@ class GameConfig:
         """驗證配置有效性"""
         if self.max_accounts <= 0:
             raise ConfigurationError(f"最大帳號數必須為正數: {self.max_accounts}")
-        if self.key_interval <= 0:
-            raise ConfigurationError(f"按鍵間隔必須為正數: {self.key_interval}")
+        if self.key_interval_min <= 0 or self.key_interval_max <= 0:
+            raise ConfigurationError(f"按鍵間隔必須為正數: min={self.key_interval_min}, max={self.key_interval_max}")
+        if self.key_interval_min > self.key_interval_max:
+            raise ConfigurationError(f"最小按鍵間隔不能大於最大間隔: min={self.key_interval_min}, max={self.key_interval_max}")
         if not 0.0 < self.image_match_threshold <= 1.0:
             raise ConfigurationError(f"圖片匹配閾值必須在 (0, 1] 範圍內: {self.image_match_threshold}")
 
@@ -1603,8 +1607,9 @@ class GameExecutor:
                     remaining_seconds = int(end_time - time.time())
                     logger.info(f"規則 {rule_idx}: 已按 {press_count} 次，剩餘 {remaining_seconds} 秒")
                     
-                    # 使用小間隔檢查狀態
-                    for _ in range(GAME_CONFIG.key_interval):
+                    # 使用隨機間隔
+                    wait_seconds = random.randint(GAME_CONFIG.key_interval_min, GAME_CONFIG.key_interval_max)
+                    for _ in range(wait_seconds):
                         if not game_state_manager.is_running(self.driver):
                             logger.info("遊戲已暫停")
                             return
@@ -1624,7 +1629,7 @@ class GameExecutor:
             game_state_manager.set_thread(self.driver, None)
     
     def _execute_default_mode(self) -> None:
-        """執行預設模式（每15秒按一次空白鍵）"""
+        """執行預設模式（每10~15秒隨機按一次空白鍵）"""
         logger.info("使用預設模式執行遊戲")
         
         while True:
@@ -1633,8 +1638,9 @@ class GameExecutor:
             
             self.controller.send_space()
             
-            # 使用小間隔檢查狀態
-            for _ in range(GAME_CONFIG.key_interval):
+            # 使用隨機間隔
+            wait_seconds = random.randint(GAME_CONFIG.key_interval_min, GAME_CONFIG.key_interval_max)
+            for _ in range(wait_seconds):
                 if not game_state_manager.is_running(self.driver):
                     break
                 time.sleep(1)
