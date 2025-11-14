@@ -1132,15 +1132,28 @@ class LoginManager:
             # 設定視窗大小
             self.driver.set_window_size(WINDOW_CONFIG.width, WINDOW_CONFIG.height)
             
-            # === 步驟 1: 等待 lobby_login.png 出現 ===
-            logger.info(f"[{self.username}] 步驟 1: 正在檢測 lobby_login.png...")
-            if not self.wait_for_image(
-                path_manager.lobby_login_image, 
-                GAME_CONFIG.image_detect_timeout
-            ):
-                raise LoginError(f"[{self.username}] 步驟 1 失敗：未檢測到 lobby_login.png")
+            # === 步驟 1: 檢查 lobby_login.png 是否存在 ===
+            lobby_login_path = path_manager.lobby_login_image
             
-            logger.info(f"[{self.username}] 步驟 1 完成：已確認 lobby_login.png 存在")
+            if not lobby_login_path.exists():
+                logger.warning(f"[{self.username}] ⚠️  未找到 lobby_login.png 模板圖片")
+                logger.info(f"[{self.username}] 這似乎是第一次登入，需要建立模板圖片")
+                logger.info(f"[{self.username}] 請確保遊戲已載入到大廳登入畫面")
+                
+                # 互動式截圖流程
+                if not self._capture_lobby_login_template():
+                    raise LoginError(f"[{self.username}] 無法建立 lobby_login.png 模板")
+                
+                logger.info(f"[{self.username}] ✓ 模板圖片已成功建立")
+            else:
+                logger.info(f"[{self.username}] 步驟 1: 正在檢測 lobby_login.png...")
+                if not self.wait_for_image(
+                    lobby_login_path, 
+                    GAME_CONFIG.image_detect_timeout
+                ):
+                    raise LoginError(f"[{self.username}] 步驟 1 失敗：未檢測到 lobby_login.png")
+                
+                logger.info(f"[{self.username}] 步驟 1 完成：已確認 lobby_login.png 存在")
             
             # === 切入 iframe ===
             logger.info(f"[{self.username}] 正在切換到遊戲 iframe...")
@@ -1229,6 +1242,104 @@ class LoginManager:
                 "button": "left",
                 "clickCount": 1
             })
+    
+    def _capture_lobby_login_template(self) -> bool:
+        """
+        互動式截取 lobby_login.png 模板
+        
+        Returns:
+            bool: 成功返回True
+        """
+        logger.info(f"[{self.username}] ")
+        logger.info(f"[{self.username}] ╔═══════════════════════════════════════════════╗")
+        logger.info(f"[{self.username}] ║     需要建立 lobby_login.png 模板圖片        ║")
+        logger.info(f"[{self.username}] ╠═══════════════════════════════════════════════╣")
+        logger.info(f"[{self.username}] ║  請確保：                                    ║")
+        logger.info(f"[{self.username}] ║  1. 遊戲已載入到大廳登入畫面                 ║")
+        logger.info(f"[{self.username}] ║  2. 可以看到「開始遊戲」按鈕                 ║")
+        logger.info(f"[{self.username}] ║  3. 畫面穩定，沒有動畫或載入中               ║")
+        logger.info(f"[{self.username}] ╠═══════════════════════════════════════════════╣")
+        logger.info(f"[{self.username}] ║  指令：                                      ║")
+        logger.info(f"[{self.username}] ║    's' - 截取當前畫面作為模板               ║")
+        logger.info(f"[{self.username}] ║    'q' - 取消並退出                         ║")
+        logger.info(f"[{self.username}] ╚═══════════════════════════════════════════════╝")
+        logger.info(f"[{self.username}] ")
+        
+        max_attempts = 5
+        for attempt in range(1, max_attempts + 1):
+            try:
+                user_input = input(f"[{self.username}] 請輸入指令 (嘗試 {attempt}/{max_attempts}): ").strip().lower()
+                
+                if user_input == 'q':
+                    logger.info(f"[{self.username}] 用戶取消截圖操作")
+                    return False
+                
+                elif user_input == 's':
+                    logger.info(f"[{self.username}] 正在截取畫面...")
+                    
+                    # 截取畫面
+                    screenshot = self.driver.get_screenshot_as_png()
+                    lobby_login_path = path_manager.lobby_login_image
+                    
+                    # 確保目錄存在
+                    lobby_login_path.parent.mkdir(parents=True, exist_ok=True)
+                    
+                    # 儲存圖片
+                    with open(lobby_login_path, 'wb') as f:
+                        f.write(screenshot)
+                    
+                    logger.info(f"[{self.username}] ✓ 圖片已儲存至: {lobby_login_path}")
+                    
+                    # 自動驗證
+                    logger.info(f"[{self.username}] 正在驗證模板圖片...")
+                    time.sleep(1)
+                    
+                    # 重新截圖進行比對
+                    verify_screenshot = self.driver.get_screenshot_as_png()
+                    verify_np = ImageProcessor.screenshot_to_array(verify_screenshot)
+                    verify_gray = ImageProcessor.to_grayscale(verify_np)
+                    
+                    # 使用新建立的模板進行匹配
+                    matched, similarity, position = ImageProcessor.match_template(
+                        verify_gray,
+                        lobby_login_path,
+                        GAME_CONFIG.image_match_threshold
+                    )
+                    
+                    if matched:
+                        logger.info(f"[{self.username}] ✓ 驗證成功！相似度: {similarity:.3f}")
+                        logger.info(f"[{self.username}] ✓ 模板圖片可以正常使用")
+                        return True
+                    else:
+                        logger.warning(f"[{self.username}] ✗ 驗證失敗（相似度: {similarity:.3f}）")
+                        logger.warning(f"[{self.username}] 可能原因：畫面不穩定或有動畫")
+                        logger.info(f"[{self.username}] 請等待畫面穩定後重試")
+                        
+                        # 刪除無效的模板
+                        if lobby_login_path.exists():
+                            lobby_login_path.unlink()
+                            logger.info(f"[{self.username}] 已刪除無效的模板圖片")
+                        
+                        if attempt < max_attempts:
+                            continue
+                        else:
+                            return False
+                
+                else:
+                    logger.warning(f"[{self.username}] 無效的指令，請輸入 's' 或 'q'")
+                    
+            except (EOFError, KeyboardInterrupt):
+                logger.info(f"\n[{self.username}] 操作已中斷")
+                return False
+            except Exception as e:
+                logger.error(f"[{self.username}] 截圖過程發生錯誤: {e}")
+                if attempt < max_attempts:
+                    continue
+                else:
+                    return False
+        
+        logger.error(f"[{self.username}] 已達最大嘗試次數，無法建立有效的模板")
+        return False
     
     @staticmethod
     def login_with_retry(driver: WebDriver, credential: UserCredential, 
