@@ -438,6 +438,7 @@ class GameState:
     running: bool = False
     thread: Optional[threading.Thread] = None
     rules: Optional[List[GameRule]] = None
+    username: Optional[str] = None
 
 
 # ==================== Proxy 擴充功能管理器 ====================
@@ -768,6 +769,33 @@ class GameStateManager:
         with self._get_lock():
             if driver in self._states:
                 return self._states[driver].rules
+            return None
+    
+    def set_username(self, driver: WebDriver, username: str) -> None:
+        """
+        設定使用者名稱
+        
+        Args:
+            driver: WebDriver 實例
+            username: 使用者名稱
+        """
+        with self._get_lock():
+            state = self._ensure_state(driver)
+            state.username = username
+    
+    def get_username(self, driver: WebDriver) -> Optional[str]:
+        """
+        取得使用者名稱
+        
+        Args:
+            driver: WebDriver 實例
+            
+        Returns:
+            Optional[str]: 使用者名稱
+        """
+        with self._get_lock():
+            if driver in self._states:
+                return self._states[driver].username
             return None
     
     def remove(self, driver: WebDriver) -> None:
@@ -1476,6 +1504,7 @@ class GameController:
             driver: WebDriver實例
         """
         self.driver = driver
+        self.username = game_state_manager.get_username(driver) or "未知"
     
     def send_key(self, key_config: Dict[str, Any]) -> bool:
         """
@@ -1534,7 +1563,7 @@ class GameController:
             Optional[float]: 當前金額，失敗返回None
         """
         try:
-            logger.info("開始查詢當前下注金額...")
+            logger.info(f"[{self.username}] 開始查詢當前下注金額...")
             
             # 截取整個瀏覽器截圖
             screenshot = self.driver.get_screenshot_as_png()
@@ -1548,7 +1577,7 @@ class GameController:
                 try:
                     amount_value = float(matched_amount)
                     if amount_value in GAME_BETSIZE:
-                        logger.info(f"當前下注金額: {amount_value}")
+                        logger.info(f"[{self.username}] 當前下注金額: {amount_value}")
                         return amount_value
                     else:
                         logger.warning(f"金額 {matched_amount} 不在 GAME_BETSIZE 列表中")
@@ -1585,7 +1614,7 @@ class GameController:
                 logger.warning(f"bet_size 資料夾中沒有圖片")
                 return None
             
-            logger.info(f"開始比對 {len(image_files)} 張圖片...")
+            logger.info(f"[{self.username}] 開始比對 {len(image_files)} 張圖片...")
             
             best_match_score = 0.0
             best_match_amount = None
@@ -1602,7 +1631,7 @@ class GameController:
                     best_match_amount = image_file.stem
             
             if best_match_score >= GAME_CONFIG.image_match_threshold:
-                logger.info(f"找到匹配金額：{best_match_amount} (相似度：{best_match_score:.3f})")
+                logger.info(f"[{self.username}] 找到匹配金額：{best_match_amount} (相似度：{best_match_score:.3f})")
                 return best_match_amount
             else:
                 logger.warning(f"未找到匹配圖片 (最高相似度：{best_match_score:.3f})")
@@ -1680,10 +1709,10 @@ class GameController:
                     continue
                 
                 if current_amount == target_amount:
-                    logger.info(f"✓ 調整成功! 當前金額: {current_amount}")
+                    logger.info(f"[{self.username}] ✓ 調整成功! 當前金額: {current_amount}")
                     return True
                 
-                logger.info(f"當前金額 {current_amount}，目標 {target_amount}，繼續調整...")
+                logger.info(f"[{self.username}] 當前金額 {current_amount}，目標 {target_amount}，繼續調整...")
                 
                 if current_amount < target_amount:
                     self.send_arrow_right()
@@ -2015,6 +2044,8 @@ class MainController:
                 driver = BrowserManager.create_webdriver(credential.proxy)
                 if LoginManager.login_with_retry(driver, credential):
                     self.drivers[index] = driver
+                    # 設定 username 到 game_state_manager
+                    game_state_manager.set_username(driver, credential.username)
                 else:
                     if driver:
                         driver.quit()
