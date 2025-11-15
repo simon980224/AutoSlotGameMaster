@@ -164,6 +164,7 @@ class GameCommand(Enum):
     BUY_FREE_GAME = 'b' # 購買免費遊戲
     SCREENSHOT = 's'    # 截取螢幕
     CAPTURE_AMOUNT = 'cap'  # 截取金額模板
+    REPEAT_SPACE = 'r'  # 重複按空白鍵
     HELP = 'h'          # 顯示幫助
 
 
@@ -2081,6 +2082,8 @@ class MainController:
         """初始化主程式控制器"""
         self.drivers: List[Optional[WebDriver]] = []
         self.credentials: List[UserCredential] = []
+        self.repeat_space_running = False
+        self.repeat_space_thread: Optional[threading.Thread] = None
     
     def _check_environment(self) -> None:
         """檢查執行環境"""
@@ -2324,6 +2327,9 @@ class MainController:
     
     def cleanup_all(self) -> None:
         """清理所有資源"""
+        # 先停止重複按鍵功能
+        self.stop_repeat_space()
+        
         logger.info("正在停止所有遊戲...")
         for driver in self.drivers:
             if driver is not None:
@@ -2456,6 +2462,116 @@ class MainController:
             logger.error(f"截取模板失敗: {e}")
             raise
     
+    def start_repeat_space(self, min_interval: float, max_interval: float) -> bool:
+        """
+        開始重複按空白鍵功能（控制所有瀏覽器）
+        這個函式會阻塞當前執行緒，直到使用者輸入 'p' 為止
+        
+        Args:
+            min_interval: 最小間隔（秒）
+            max_interval: 最大間隔（秒）
+            
+        Returns:
+            bool: 成功返回True
+        """
+        if self.repeat_space_running:
+            logger.info("重複按鍵功能已在執行中")
+            return False
+        
+        if not self.drivers or all(d is None for d in self.drivers):
+            logger.error("沒有可用的瀏覽器")
+            return False
+        
+        if min_interval <= 0 or max_interval <= 0 or min_interval > max_interval:
+            logger.error(f"間隔時間設定錯誤: {min_interval}~{max_interval} 秒")
+            return False
+        
+        # Windows 系統使用 msvcrt 進行非阻塞輸入檢查
+        import sys
+        if sys.platform == 'win32':
+            import msvcrt
+        
+        logger.info(f"開始重複按空白鍵（間隔 {min_interval}~{max_interval} 秒）")
+        logger.info("輸入 'p' + Enter 可暫停並返回指令選單")
+        logger.info("輸入其他內容會繼續運行")
+        
+        self.repeat_space_running = True
+        press_count = 0
+        input_buffer = ""
+        
+        try:
+            while self.repeat_space_running:
+                # 對所有瀏覽器按空白鍵
+                for driver in self.drivers:
+                    if driver is not None and self.repeat_space_running:
+                        try:
+                            controller = GameController(driver)
+                            controller.send_space()
+                            username = game_state_manager.get_username(driver) or "未知"
+                            logger.debug(f"[{username}] 已按空白鍵")
+                        except Exception as e:
+                            username = game_state_manager.get_username(driver) or "未知"
+                            logger.warning(f"[{username}] 按空白鍵失敗: {e}")
+                
+                press_count += 1
+                logger.info(f"已完成第 {press_count} 次按鍵")
+                
+                # 計算隨機間隔
+                wait_time = random.uniform(min_interval, max_interval)
+                logger.info(f"等待 {wait_time:.1f} 秒後再次按鍵...")
+                
+                # 每 0.1 秒檢查一次輸入
+                sleep_step = 0.1
+                total_slept = 0
+                while total_slept < wait_time and self.repeat_space_running:
+                    # Windows 系統檢查鍵盤輸入
+                    if sys.platform == 'win32' and msvcrt.kbhit():
+                        char = msvcrt.getch().decode('utf-8', errors='ignore').lower()
+                        if char == '\r' or char == '\n':
+                            # Enter 鍵：處理緩衝區的內容
+                            if input_buffer.strip() == 'p':
+                                logger.info("收到 'p' 輸入，停止重複按鍵")
+                                self.repeat_space_running = False
+                                input_buffer = ""
+                                break
+                            elif input_buffer.strip():
+                                logger.info(f"收到 '{input_buffer.strip()}' 輸入，繼續轉動")
+                            input_buffer = ""
+                        else:
+                            # 累積字元到緩衝區
+                            input_buffer += char
+                    
+                    time.sleep(sleep_step)
+                    total_slept += sleep_step
+        
+        except KeyboardInterrupt:
+            logger.info("\n偵測到中斷訊號，停止重複按鍵")
+        finally:
+            self.repeat_space_running = False
+            logger.info("重複按鍵功能已停止，返回指令選單")
+        
+        return True
+    
+    def stop_repeat_space(self) -> bool:
+        """
+        停止重複按空白鍵功能
+        
+        Returns:
+            bool: 成功返回True
+        """
+        if not self.repeat_space_running:
+            logger.info("重複按鍵功能未在執行中")
+            return False
+        
+        logger.info("正在停止重複按鍵功能...")
+        self.repeat_space_running = False
+        
+        if self.repeat_space_thread and self.repeat_space_thread.is_alive():
+            self.repeat_space_thread.join(timeout=3)
+        
+        logger.info("重複按鍵功能已停止")
+        return True
+    
     def process_command(self, command: str) -> bool:
         """
         處理使用者指令
@@ -2472,7 +2588,15 @@ class MainController:
             self.cleanup_all()
             return True
         
-        if command == GameCommand.CONTINUE.value:
+        if command == GameCommand.PAUSE.value:
+            # 暫停重複按鍵功能
+            self.stop_repeat_space()
+            # 也暫停原本的遊戲
+            for driver in self.drivers:
+                if driver is not None:
+                    self.pause_game(driver)
+        
+        elif command == GameCommand.CONTINUE.value:
             for driver in self.drivers:
                 if driver is not None:
                     self.start_game(driver)
@@ -2628,6 +2752,25 @@ class MainController:
                 except ValueError:
                     logger.error(f"無效的金額: {parts[1]}")
         
+        elif command.startswith(GameCommand.REPEAT_SPACE.value):
+            # 處理 r 指令：r min,max
+            parts = command.split()
+            if len(parts) < 2:
+                logger.warning("請輸入間隔時間，格式: r <最小秒數>,<最大秒數>")
+                logger.info("範例: r 1,2 代表每次間隔 1~2 秒")
+            else:
+                try:
+                    intervals = parts[1].split(',')
+                    if len(intervals) != 2:
+                        logger.error("格式錯誤，請使用逗號分隔兩個數字，例如: r 1,2")
+                    else:
+                        min_interval = float(intervals[0].strip())
+                        max_interval = float(intervals[1].strip())
+                        # 注意：這個函式會阻塞直到使用者按 p 停止
+                        self.start_repeat_space(min_interval, max_interval)
+                except ValueError:
+                    logger.error(f"無效的間隔時間: {parts[1]}")
+        
         elif command == GameCommand.HELP.value or command == '?':
             self._show_help()
         
@@ -2644,6 +2787,9 @@ class MainController:
 ║                      遊戲控制指令說明                             ║
 ╠════════════════════════════════════════════════════════════════╣
 ║  c            - 開始遊戲（自動執行規則）                           ║
+║  p            - 暫停遊戲／暫停重複按鍵                             ║
+║  r <秒,秒>    - 重複按空白鍵（例如: r 1,2）                        ║
+║                 所有瀏覽器同時操作，間隔 1~2 秒                    ║
 ║  b            - 購買免費遊戲                                      ║
 ║  bet <金額>   - 調整下注金額（例如: bet 2.4）                      ║
 ║  s            - 截取螢幕畫面                                     ║
