@@ -373,6 +373,11 @@ class PathManager:
         return self.lib_dir / "user_rules.txt"
     
     @property
+    def proxys_file(self) -> Path:
+        """取得 Proxy 列表檔案路徑"""
+        return self.lib_dir / "user_proxys.txt"
+    
+    @property
     def chromedriver_path(self) -> Path:
         """
         取得 ChromeDriver 路徑 (已棄用 - 現在使用 WebDriver Manager)
@@ -464,109 +469,80 @@ class GameState:
 # ==================== Proxy 擴充功能管理器 ====================
 
 
-class ProxyExtensionManager:
-    """Proxy Chrome Extension 管理器 - 支援 Chrome 131+"""
+class LocalProxyServerManager:
+    """本機 Proxy 中繼伺服器管理器
+    
+    使用 simple_proxy_server.py 建立本機 HTTP proxy 伺服器,
+    每個瀏覽器實例使用獨立的本機 proxy port,
+    本機 proxy 再轉發到上游的認證 proxy。
+    """
+    
+    # 儲存所有執行中的 proxy 伺服器實例和執行緒
+    _proxy_servers: Dict[int, Any] = {}
+    _proxy_threads: Dict[int, threading.Thread] = {}
     
     @staticmethod
-    def create_extension(proxy_host: str, proxy_port: str, 
-                        proxy_user: str, proxy_pass: str) -> str:
+    def start_proxy_server(local_port: int, upstream_proxy: str) -> bool:
         """
-        創建 Chrome Proxy Extension (支援 Chrome 131+)
-        
-        Chrome 131+ 使用 Manifest V3，需要使用新的 API。
+        啟動本機 proxy 中繼伺服器
         
         Args:
-            proxy_host: Proxy 主機 IP
-            proxy_port: Proxy 埠號
-            proxy_user: Proxy 使用者名稱
-            proxy_pass: Proxy 密碼
+            local_port: 本機監聽埠號（例如 9000）
+            upstream_proxy: 上游 proxy 字串，格式為 "ip:port:user:pass"
             
         Returns:
-            str: Extension 壓縮檔的完整路徑（臨時檔案）
+            bool: 啟動成功返回 True
             
         Raises:
-            BrowserError: 當創建失敗時
+            BrowserError: 當啟動失敗時
         """
         try:
-            # 使用 Manifest V3 支援 Chrome 131+
-            manifest_json = """
-            {
-                "version": "1.0.0",
-                "manifest_version": 3,
-                "name": "Chrome Proxy Auth",
-                "permissions": [
-                    "proxy",
-                    "webRequest",
-                    "webRequestAuthProvider",
-                    "storage"
-                ],
-                "host_permissions": [
-                    "<all_urls>"
-                ],
-                "background": {
-                    "service_worker": "background.js"
-                },
-                "minimum_chrome_version": "88.0"
-            }
-            """
-
-            # Chrome 131+ 使用新的 proxy API
-            background_js = f"""
-            // Chrome 131+ Proxy 設定
-            const proxyConfig = {{
-                mode: "fixed_servers",
-                rules: {{
-                    singleProxy: {{
-                        scheme: "http",
-                        host: "{proxy_host}",
-                        port: parseInt({proxy_port})
-                    }},
-                    bypassList: ["localhost", "127.0.0.1"]
-                }}
-            }};
-
-            // 設定 proxy
-            chrome.proxy.settings.set(
-                {{value: proxyConfig, scope: "regular"}},
-                function() {{
-                    console.log('Proxy configured:', '{proxy_host}:{proxy_port}');
-                }}
-            );
-
-            // Chrome 131+ 使用 onAuthRequired 處理認證
-            chrome.webRequest.onAuthRequired.addListener(
-                function(details) {{
-                    return {{
-                        authCredentials: {{
-                            username: "{proxy_user}",
-                            password: "{proxy_pass}"
-                        }}
-                    }};
-                }},
-                {{urls: ["<all_urls>"]}},
-                ["blocking"]
-            );
-
-            console.log('Proxy extension loaded successfully');
-            """
-
-            # 創建臨時 zip 檔案
-            temp_file = tempfile.NamedTemporaryFile(
-                mode='w+b', 
-                suffix='.zip', 
-                delete=False
-            )
+            # 動態匯入 SimpleProxyServer
+            import sys
+            import os
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            from simple_proxy_server import SimpleProxyServer
             
-            with zipfile.ZipFile(temp_file, 'w') as zp:
-                zp.writestr("manifest.json", manifest_json)
-                zp.writestr("background.js", background_js)
+            # 建立 proxy 伺服器實例
+            server = SimpleProxyServer(local_port, upstream_proxy)
             
-            temp_file.close()
-            logger.debug(f"Proxy extension 已建立: {temp_file.name}")
-            return temp_file.name
+            # 在新執行緒中啟動伺服器
+            def run_server():
+                server.start()
+            
+            server_thread = threading.Thread(target=run_server, daemon=True)
+            server_thread.start()
+            
+            # 儲存實例和執行緒參考
+            LocalProxyServerManager._proxy_servers[local_port] = server
+            LocalProxyServerManager._proxy_threads[local_port] = server_thread
+            
+            # 等待伺服器啟動
+            time.sleep(0.5)
+            
+            proxy_parts = upstream_proxy.split(':')
+            logger.info(f"本機 Proxy 伺服器已啟動: 127.0.0.1:{local_port} -> {proxy_parts[0]}:{proxy_parts[1]}")
+            return True
             
         except Exception as e:
-            raise BrowserError(f"創建 Proxy Extension 失敗: {e}") from e
+            raise BrowserError(f"啟動本機 Proxy 伺服器失敗 (port={local_port}): {e}") from e
+    
+    @staticmethod
+    def stop_proxy_server(local_port: int) -> None:
+        """停止指定的 proxy 伺服器"""
+        if local_port in LocalProxyServerManager._proxy_servers:
+            server = LocalProxyServerManager._proxy_servers[local_port]
+            server.running = False
+            logger.info(f"已停止本機 Proxy 伺服器: 127.0.0.1:{local_port}")
+            del LocalProxyServerManager._proxy_servers[local_port]
+            if local_port in LocalProxyServerManager._proxy_threads:
+                del LocalProxyServerManager._proxy_threads[local_port]
+    
+    @staticmethod
+    def stop_all_servers() -> None:
+        """停止所有 proxy 伺服器"""
+        for local_port in list(LocalProxyServerManager._proxy_servers.keys()):
+            LocalProxyServerManager.stop_proxy_server(local_port)
 
 
 # ==================== 配置載入器 ====================
@@ -695,6 +671,53 @@ class ConfigLoader:
             if isinstance(e, ConfigurationError):
                 raise
             raise ConfigurationError(f"讀取規則檔案失敗: {e}") from e
+    
+    @staticmethod
+    def load_proxys() -> List[str]:
+        """
+        從檔案讀取 Proxy 列表
+        
+        Returns:
+            List[str]: Proxy 列表
+            
+        Raises:
+            ConfigurationError: 當檔案不存在或格式錯誤時
+        """
+        proxys_path = path_manager.proxys_file
+        
+        if not proxys_path.exists():
+            raise ConfigurationError(f"找不到 Proxy 檔案: {proxys_path}")
+        
+        proxys = []
+        
+        try:
+            with open(proxys_path, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+            
+            for idx, line in enumerate(lines):
+                line = line.strip()
+                # 跳過空行
+                if not line:
+                    continue
+                
+                # 驗證格式: ip:port:username:password
+                parts = line.split(':')
+                if len(parts) != 4:
+                    logger.warning(f"第 {idx + 1} 行格式錯誤,已跳過: {line}")
+                    continue
+                
+                proxys.append(line)
+            
+            if not proxys:
+                raise ConfigurationError("Proxy 檔案內容為空或格式錯誤")
+            
+            logger.info(f"已載入 {len(proxys)} 組 Proxy 資料")
+            return proxys
+            
+        except Exception as e:
+            if isinstance(e, ConfigurationError):
+                raise
+            raise ConfigurationError(f"讀取 Proxy 檔案失敗: {e}") from e
 
 
 # ==================== 遊戲狀態管理器 ====================
@@ -935,12 +958,12 @@ class BrowserManager:
     """瀏覽器管理器"""
     
     @staticmethod
-    def create_chrome_options(proxy: Optional[str] = None) -> Options:
+    def create_chrome_options(local_proxy_port: Optional[int] = None) -> Options:
         """
-        創建Chrome瀏覽器選項 (支援 Chrome 131+)
+        創建Chrome瀏覽器選項（使用本機 Proxy 中繼）
         
         Args:
-            proxy: Proxy字串（格式：ip:port:username:password）
+            local_proxy_port: 本機 proxy 中繼埠號（例如 9000），設定後將使用 127.0.0.1:port
             
         Returns:
             Options: 配置好的Chrome選項
@@ -951,17 +974,11 @@ class BrowserManager:
         try:
             chrome_options = Options()
             
-            # Proxy設定 (Chrome 131+ 相容)
-            if proxy:
-                parts = proxy.split(':')
-                if len(parts) >= 4:
-                    extension_path = ProxyExtensionManager.create_extension(
-                        parts[0], parts[1], parts[2], parts[3]
-                    )
-                    # Chrome 131+ 使用 add_extension
-                    chrome_options.add_extension(extension_path)
-                    logger.info(f"已設定 Proxy: {parts[0]}:{parts[1]} (使用者: {parts[2]})")
-                    logger.info(f"使用 Chrome 131+ 相容的 Proxy 設定方式")
+            # 本機 Proxy 設定
+            if local_proxy_port:
+                proxy_address = f"http://127.0.0.1:{local_proxy_port}"
+                chrome_options.add_argument(f"--proxy-server={proxy_address}")
+                logger.info(f"已設定本機 Proxy 中繼: {proxy_address}")
             
             # 基本設定
             chrome_options.add_argument("--disable-blink-features=AutomationControlled")
@@ -977,10 +994,7 @@ class BrowserManager:
             chrome_options.add_argument("--metrics-recording-only")
             chrome_options.add_argument("--disable-default-apps")
             chrome_options.add_argument("--no-first-run")
-            
-            # 注意: 如果使用 proxy extension，不要加 --disable-extensions
-            if not proxy:
-                chrome_options.add_argument("--disable-extensions")
+            chrome_options.add_argument("--disable-extensions")
             
             # 移除自動化痕跡
             chrome_options.add_experimental_option(
@@ -1009,12 +1023,12 @@ class BrowserManager:
             raise BrowserError(f"創建Chrome選項失敗: {e}") from e
     
     @staticmethod
-    def create_webdriver(proxy: Optional[str] = None) -> WebDriver:
+    def create_webdriver(local_proxy_port: Optional[int] = None) -> WebDriver:
         """
-        創建WebDriver實例 (使用 WebDriver Manager 自動管理)
+        創建WebDriver實例（使用 WebDriver Manager 自動管理，配合本機 Proxy 中繼）
         
         Args:
-            proxy: Proxy字串（可選）
+            local_proxy_port: 本機 proxy 中繼埠號（可選）
             
         Returns:
             WebDriver: WebDriver實例
@@ -1027,7 +1041,7 @@ class BrowserManager:
             logger.info("正在使用 WebDriver Manager 取得 ChromeDriver...")
             service = Service(ChromeDriverManager().install())
             
-            chrome_options = BrowserManager.create_chrome_options(proxy)
+            chrome_options = BrowserManager.create_chrome_options(local_proxy_port)
             
             logger.info("正在啟動 Chrome 瀏覽器...")
             driver = webdriver.Chrome(service=service, options=chrome_options)
@@ -2168,7 +2182,7 @@ class MainController:
     
     def launch_browsers(self, count: int) -> int:
         """
-        並行啟動多個瀏覽器
+        並行啟動多個瀏覽器 (使用本地 proxy 中繼)
         
         Args:
             count: 要啟動的數量
@@ -2176,38 +2190,70 @@ class MainController:
         Returns:
             int: 成功啟動的數量
         """
+        # 載入 proxy 列表
+        try:
+            proxys = ConfigLoader.load_proxys()
+        except ConfigurationError as e:
+            logger.error(f"載入 Proxy 失敗: {e}")
+            return 0
+        
         self.drivers = [None] * count
         threads = []
+        
+        BASE_LOCAL_PORT = 9000  # 本地 proxy 起始端口
         
         def launch_worker(index: int) -> None:
             """執行緒工作函式"""
             credential = self.credentials[index]
+            local_proxy_port = None
+            
             try:
-                driver = BrowserManager.create_webdriver(credential.proxy)
+                # 取得對應的 upstream proxy
+                upstream_proxy = proxys[index % len(proxys)]
+                
+                # 計算本地 proxy 端口
+                local_proxy_port = BASE_LOCAL_PORT + index
+                
+                # 啟動本地 proxy 中繼伺服器
+                logger.info(f"[{credential.username}] 正在啟動本地 Proxy 伺服器...")
+                logger.info(f"  本地端口: {local_proxy_port}")
+                logger.info(f"  上游 Proxy: {upstream_proxy.split(':')[0]}:{upstream_proxy.split(':')[1]}")
+                
+                if not LocalProxyServerManager.start_proxy_server(local_proxy_port, upstream_proxy):
+                    logger.error(f"[{credential.username}] Proxy 伺服器啟動失敗")
+                    return
+                
+                # 創建瀏覽器(使用本地 proxy)
+                driver = BrowserManager.create_webdriver(local_proxy_port)
+                
+                # 登入
                 if LoginManager.login_with_retry(driver, credential):
                     self.drivers[index] = driver
-                    # 設定 username 到 game_state_manager
                     game_state_manager.set_username(driver, credential.username)
                 else:
                     if driver:
                         driver.quit()
             except Exception as e:
                 logger.error(f"[{credential.username}] 啟動失敗: {e}")
+                import traceback
+                traceback.print_exc()
         
         logger.info(f"開始啟動 {count} 個瀏覽器...")
+        logger.info(f"將使用 {len(proxys)} 組 Proxy (循環使用)")
         
         for i in range(count):
-            logger.info(f"啟動第 {i + 1} 個瀏覽器（帳號：{self.credentials[i].username}）")
+            logger.info(f"\n啟動第 {i + 1} 個瀏覽器（帳號：{self.credentials[i].username}）")
             thread = threading.Thread(target=launch_worker, args=(i,), daemon=True)
             threads.append(thread)
             thread.start()
+            time.sleep(1)  # 錯開啟動時間
         
-        logger.info("等待所有瀏覽器啟動完成...")
+        logger.info("\n等待所有瀏覽器啟動完成...")
         for thread in threads:
             thread.join()
         
         success_count = sum(1 for d in self.drivers if d is not None)
-        logger.info(f"完成！成功啟動 {success_count}/{count} 個瀏覽器")
+        logger.info(f"\n完成！成功啟動 {success_count}/{count} 個瀏覽器")
         
         return success_count
     
@@ -2342,6 +2388,10 @@ class MainController:
                     driver.quit()
                 except Exception:
                     pass
+        
+        # 停止所有 proxy 伺服器
+        logger.info("正在停止所有 Proxy 伺服器...")
+        LocalProxyServerManager.stop_all_servers()
         
         game_state_manager.cleanup_all()
         logger.info("清理完成")
