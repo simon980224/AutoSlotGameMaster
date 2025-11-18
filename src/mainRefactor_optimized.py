@@ -829,7 +829,7 @@ class LocalProxyServerManager:
             if local_port in self._proxy_servers:
                 server = self._proxy_servers[local_port]
                 server.stop()
-                self.logger.info(f"已停止本機 Proxy 伺服器: {Constants.PROXY_SERVER_BIND_HOST}:{local_port}")
+                self.logger.debug(f"已停止 Proxy 伺服器: 埠 {local_port}")
                 del self._proxy_servers[local_port]
                 if local_port in self._proxy_threads:
                     del self._proxy_threads[local_port]
@@ -838,7 +838,7 @@ class LocalProxyServerManager:
         """停止所有 proxy 伺服器"""
         with self._lock:
             if self._proxy_servers:
-                self.logger.info(f"清理 {len(self._proxy_servers)} 個 Proxy 中繼伺服器")
+                server_count = len(self._proxy_servers)
                 # 複製鍵列表以避免在迭代時修改字典
                 ports = list(self._proxy_servers.keys())
         
@@ -1088,7 +1088,7 @@ class BrowserManager:
             if driver:
                 with suppress(Exception):
                     driver.quit()
-                self.logger.info(f"瀏覽器 #{index} 已關閉")
+                self.logger.debug(f"瀏覽器 #{index} 已關閉")
 
 
 # ============================================================================
@@ -1134,7 +1134,7 @@ class SyncBrowserOperator:
         Returns:
             所有操作的結果列表
         """
-        self.logger.info(f"\n=== 同步執行: {operation_name} ===")
+        # 不在這裡輸出標題,由調用方決定是否需要
         
         total = len(browser_contexts)
         results: List[OperationResult] = [OperationResult(False)] * total
@@ -1183,7 +1183,10 @@ class SyncBrowserOperator:
                 self.logger.error(f"{operation_name} 執行超時")
         
         success_count = sum(1 for r in results if r.success)
-        self.logger.info(f"✓ {operation_name} 完成: {success_count}/{total} 成功\n")
+        if success_count == total:
+            self.logger.info(f"✓ {operation_name} 完成 ({success_count}/{total})")
+        else:
+            self.logger.warning(f"⚠ {operation_name} 部分完成 ({success_count}/{total})")
         
         return results
     
@@ -1375,8 +1378,6 @@ class SyncBrowserOperator:
             # 調整視窗大小和位置
             context.driver.set_window_size(width, height)
             context.driver.set_window_position(x, y)
-            
-            self.logger.info(f"瀏覽器 #{index} 已調整至 {width}x{height}，位置: ({x}, {y})")
             return True
         
         return self.execute_sync(
@@ -1577,21 +1578,39 @@ class AutoSlotGameApp:
         self.rules: List[BetRule] = []
         self.browser_contexts: List[BrowserContext] = []
     
+    def _print_step(self, step: Any, title: str) -> None:
+        """輸出步驟標題。
+        
+        Args:
+            step: 步驟編號
+            title: 步驟標題
+        """
+        self.logger.info("")
+        self.logger.info(f"【步驟 {step}】{title}")
+        self.logger.info("-" * 50)
+    
     def load_configurations(self) -> None:
         """載入所有配置檔案。
         
         Raises:
             ConfigurationError: 配置載入失敗
         """
-        self.logger.info("=== 載入配置檔案 ===")
+        self.logger.info("\n" + "=" * 60)
+        self.logger.info("  金富翁遊戲自動化系統 v4.0")
+        self.logger.info("=" * 60)
+        self.logger.info("")
+        self.logger.info("正在載入配置...")
         
         # 讀取使用者憑證（包含 proxy 資訊）
         self.credentials = self.config_reader.read_user_credentials()
-        self.logger.info(f"載入 {len(self.credentials)} 個使用者帳號")
         
         # 讀取下注規則
         self.rules = self.config_reader.read_bet_rules()
-        self.logger.info(f"載入 {len(self.rules)} 條下注規則")
+        
+        self.logger.info(
+            f"✓ 配置載入完成: {len(self.credentials)} 個帳號, "
+            f"{len(self.rules)} 條規則"
+        )
     
     def prompt_browser_count(self) -> int:
         """提示使用者輸入要開啟的瀏覽器數量。
@@ -1607,15 +1626,15 @@ class AutoSlotGameApp:
         while True:
             try:
                 self.logger.info("")
-                self.logger.info("="*50)
-                print(f"請輸入要開啟的瀏覽器數量 (1-{max_browsers}): ", end="", flush=True)
+                print(f"\n請輸入要開啟的瀏覽器數量 (1-{max_browsers}): ", end="", flush=True)
                 user_input = input().strip()
                 browser_count = int(user_input)
                 
                 if 1 <= browser_count <= max_browsers:
+                    self.logger.info(f"\n✓ 將開啟 {browser_count} 個瀏覽器")
                     return browser_count
                 else:
-                    self.logger.warning(f"請輸入 1 到 {max_browsers} 之間的數字")
+                    self.logger.warning(f"⚠ 請輸入 1-{max_browsers} 之間的數字")
                     
             except ValueError:
                 self.logger.warning("請輸入有效的數字")
@@ -1632,8 +1651,7 @@ class AutoSlotGameApp:
         Returns:
             Proxy 埠號列表
         """
-        self.logger.info("")
-        self.logger.info("=== 步驟 1: 啟動 Proxy 中繼伺服器 ===")
+        self._print_step(1, "啟動 Proxy 中繼伺服器")
         proxy_ports: List[Optional[int]] = []
         
         for i in range(browser_count):
@@ -1652,20 +1670,15 @@ class AutoSlotGameApp:
                             password=':'.join(parts[3:])
                         )
                         
-                        self.logger.info(
-                            f"[{i+1}/{browser_count}] 正在配置 Proxy: "
-                            f"{proxy_info.host}:***"
-                        )
-                        
                         local_proxy_port = self.proxy_manager.start_proxy_server(proxy_info)
                         
                         if local_proxy_port:
                             self.logger.info(
-                                f"[{i+1}/{browser_count}] ✓ Proxy 中繼已啟動於埠 {local_proxy_port}"
+                                f"[{i+1}/{browser_count}] ✓ Proxy 中繼已啟動: {proxy_info.host}:{proxy_info.port} -> 本機埠 {local_proxy_port}"
                             )
                         else:
                             self.logger.warning(
-                                f"[{i+1}/{browser_count}] Proxy 啟動失敗,將不使用 Proxy"
+                                f"[{i+1}/{browser_count}] ⚠ Proxy 啟動失敗,將直連網路"
                             )
                     else:
                         self.logger.warning(f"[{i+1}/{browser_count}] Proxy 格式錯誤: {credential.proxy}")
@@ -1675,7 +1688,8 @@ class AutoSlotGameApp:
             
             proxy_ports.append(local_proxy_port)
         
-        self.logger.info("✓ 所有 Proxy 中繼伺服器已啟動\n")
+        active_count = sum(1 for p in proxy_ports if p is not None)
+        self.logger.info(f"✓ Proxy 伺服器啟動完成 ({active_count}/{len(proxy_ports)})")
         return proxy_ports
     
     def create_browser_instances(
@@ -1692,8 +1706,7 @@ class AutoSlotGameApp:
         Returns:
             瀏覽器上下文列表
         """
-        self.logger.info("")
-        self.logger.info("=== 步驟 2: 建立瀏覽器實例 ===")
+        self._print_step(2, "建立瀏覽器實例")
         
         browser_results: List[Optional[BrowserContext]] = [None] * browser_count
         
@@ -1718,7 +1731,7 @@ class AutoSlotGameApp:
                     proxy_port=proxy_port
                 )
                 
-                proxy_info = f" (使用 Proxy: 埠 {proxy_port})" if proxy_port else " (無 Proxy)"
+                proxy_info = f" [Proxy: 埠 {proxy_port}]" if proxy_port else " [直連]"
                 self.logger.info(f"[{index+1}/{browser_count}] ✓ 瀏覽器建立成功{proxy_info}")
                 
                 return index, context
@@ -1747,7 +1760,10 @@ class AutoSlotGameApp:
         # 過濾成功建立的瀏覽器
         contexts = [ctx for ctx in browser_results if ctx is not None]
         
-        self.logger.info(f"\n✓ 成功建立 {len(contexts)} 個瀏覽器實例")
+        if len(contexts) == browser_count:
+            self.logger.info(f"✓ 瀏覽器建立完成 ({len(contexts)}/{browser_count})")
+        else:
+            self.logger.warning(f"⚠ 部分瀏覽器建立失敗 ({len(contexts)}/{browser_count})")
         return contexts
     
     def run(self) -> None:
@@ -1756,16 +1772,12 @@ class AutoSlotGameApp:
         Raises:
             Exception: 執行過程中的錯誤
         """
-        self.logger.info("=== 金富翁遊戲自動化系統啟動 ===")
-        
         try:
             # 載入配置
             self.load_configurations()
             
             # 詢問瀏覽器數量
             browser_count = self.prompt_browser_count()
-            self.logger.info(f"\n將開啟 {browser_count} 個瀏覽器實例")
-            self.logger.info("="*50 + "\n")
             
             # 設定 Proxy 伺服器
             proxy_ports = self.setup_proxy_servers(browser_count)
@@ -1777,10 +1789,7 @@ class AutoSlotGameApp:
                 raise BrowserCreationError("沒有成功建立任何瀏覽器實例")
             
             # 步驟 3: 導航到登入頁面
-            self.logger.info("")
-            self.logger.info("="*50)
-            self.logger.info("步驟 3: 導航到登入頁面")
-            self.logger.info("="*50)
+            self._print_step(3, "導航到登入頁面")
             login_results = self.browser_operator.navigate_to_login_page(
                 self.browser_contexts
             )
@@ -1788,39 +1797,33 @@ class AutoSlotGameApp:
             time.sleep(2)  # 等待頁面載入
             
             # 步驟 4: 執行登入操作
-            self.logger.info("")
-            self.logger.info("="*50)
-            self.logger.info("步驟 4: 執行登入操作")
-            self.logger.info("="*50)
+            self._print_step(4, "執行登入操作")
             
             # 為每個使用者執行登入
+            success_logins = 0
             for i, (context, credential) in enumerate(zip(self.browser_contexts, self.credentials), 1):
-                self.logger.info(f"正在登入使用者 {i}/{len(self.credentials)}: {credential.username}")
                 result = self.browser_operator.perform_login(context, credential)
-                if not result.success:
-                    self.logger.error(f"使用者 {credential.username} 登入失敗: {result.message}")
+                if result.success:
+                    success_logins += 1
                 time.sleep(1)  # 間隔避免過快請求
             
-            self.logger.info("")
-            self.logger.info("所有使用者登入操作已完成")
+            total_logins = len(self.browser_contexts)
+            if success_logins == total_logins:
+                self.logger.info(f"✓ 登入完成 ({success_logins}/{total_logins})")
+            else:
+                self.logger.warning(f"⚠ 部分登入失敗 ({success_logins}/{total_logins})")
             time.sleep(5)  # 等待登入後的頁面跳轉
             
             # 步驟 5: 導航到遊戲頁面
-            self.logger.info("")
-            self.logger.info("="*50)
-            self.logger.info("步驟 5: 導航到遊戲頁面")
-            self.logger.info("="*50)
+            self._print_step(5, "導航到遊戲頁面")
             game_results = self.browser_operator.navigate_to_game_page(
                 self.browser_contexts
             )
             
             time.sleep(3)  # 等待遊戲頁面載入
             
-            # 步驟 5.5: 調整瀏覽器視窗大小和排列
-            self.logger.info("")
-            self.logger.info("="*50)
-            self.logger.info("調整瀏覽器視窗大小和排列 (600x400, 4x3)")
-            self.logger.info("="*50)
+            # 調整視窗
+            self._print_step("5+", "調整視窗排列 (600x400)")
             resize_results = self.browser_operator.resize_and_arrange_all(
                 self.browser_contexts,
                 width=600,
@@ -1831,22 +1834,15 @@ class AutoSlotGameApp:
             time.sleep(1)  # 等待視窗調整完成
             
             # TODO: 步驟 6: 圖片檢測與遊戲流程
-            self.logger.info("")
-            self.logger.info("="*50)
-            self.logger.info("步驟 6: 圖片檢測與遊戲流程 (TODO)")
-            self.logger.info("="*50)
-            self.logger.info("待實現功能：")
-            self.logger.info("  1. 切換到遊戲 iframe")
-            self.logger.info("  2. 取得 Canvas 座標")
-            self.logger.info("  3. 檢測 lobby_login.png 圖片")
-            self.logger.info("  4. 點擊開始遊戲按鈕")
-            self.logger.info("  5. 檢測 lobby_confirm.png 圖片")
-            self.logger.info("  6. 點擊確認按鈕")
-            self.logger.info("  7. 進入遊戲控制模式")
-            self.logger.info("")
+            self._print_step(6, "圖片檢測與遊戲流程 [開發中]")
+            self.logger.info(
+                "待實現: iframe切換 → Canvas定位 → 圖片檢測 → "
+                "自動點擊 → 遊戲控制"
+            )
             
             # 暫停,讓使用者可以觀察
-            print("已完成登入和導航流程，按 Enter 鍵關閉所有瀏覽器...", flush=True)
+            self.logger.info("")
+            print("\n按 Enter 鍵關閉所有瀏覽器...", flush=True)
             input()
             
         except KeyboardInterrupt:
@@ -1859,20 +1855,19 @@ class AutoSlotGameApp:
     
     def cleanup(self) -> None:
         """清理所有資源"""
-        self.logger.info("")
-        self.logger.info("=== 清理資源 ===")
+        self.logger.info("\n" + "-" * 60)
+        self.logger.info("正在清理資源...")
         
         # 關閉所有瀏覽器
         if self.browser_contexts:
-            self.logger.info("正在關閉所有瀏覽器...")
             self.browser_operator.close_all(self.browser_contexts)
             self.browser_contexts.clear()
-            self.logger.info("✓ 所有瀏覽器已關閉")
         
         # 停止所有 Proxy 伺服器
         self.proxy_manager.stop_all_servers()
         
-        self.logger.info("=== 系統結束 ===")
+        self.logger.info("✓ 清理完成")
+        self.logger.info("=" * 60)
 
 
 # ============================================================================
