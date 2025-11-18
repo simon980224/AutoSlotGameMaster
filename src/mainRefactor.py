@@ -787,6 +787,100 @@ class SimpleProxyServer:
             server_socket.close()
 
 
+class SyncBrowserOperator:
+    """同步瀏覽器操作器。
+    
+    對多個瀏覽器實例同步執行相同的操作。
+    """
+    
+    @staticmethod
+    def execute_sync(browsers: List[Dict[str, Any]], operation_func, operation_name: str) -> List[Any]:
+        """同步執行操作到所有瀏覽器。
+        
+        Args:
+            browsers: 瀏覽器實例列表
+            operation_func: 操作函式,接受參數 (browser_info, index, total)
+            operation_name: 操作名稱(用於日誌)
+            
+        Returns:
+            所有操作的結果列表
+        """
+        logger = logging.getLogger("AutoSlotGame")
+        logger.info(f"\n=== 同步執行: {operation_name} ===")
+        
+        results = [None] * len(browsers)
+        threads = []
+        
+        def execute_operation(index: int, browser_info: Dict[str, Any]) -> None:
+            """在執行緒中執行操作"""
+            try:
+                logger.info(f"[{index+1}/{len(browsers)}] 開始 {operation_name} (帳號: {browser_info['credential'].username})")
+                result = operation_func(browser_info, index + 1, len(browsers))
+                results[index] = result
+                logger.info(f"[{index+1}/{len(browsers)}] ✓ {operation_name} 完成")
+            except Exception as e:
+                logger.error(f"[{index+1}/{len(browsers)}] {operation_name} 失敗: {e}")
+                results[index] = None
+        
+        # 啟動所有執行緒
+        for i, browser_info in enumerate(browsers):
+            thread = threading.Thread(
+                target=execute_operation,
+                args=(i, browser_info)
+            )
+            thread.start()
+            threads.append(thread)
+        
+        # 等待所有執行緒完成
+        for thread in threads:
+            thread.join()
+        
+        success_count = sum(1 for r in results if r is not None)
+        logger.info(f"✓ {operation_name} 完成: {success_count}/{len(browsers)} 成功\n")
+        
+        return results
+    
+    @staticmethod
+    def navigate_all(browsers: List[Dict[str, Any]], url: str) -> List[bool]:
+        """同步導航所有瀏覽器到指定 URL。
+        
+        Args:
+            browsers: 瀏覽器實例列表
+            url: 目標 URL
+            
+        Returns:
+            操作結果列表
+        """
+        def navigate_operation(browser_info: Dict[str, Any], index: int, total: int) -> bool:
+            driver = browser_info['driver']
+            driver.get(url)
+            return True
+        
+        return SyncBrowserOperator.execute_sync(
+            browsers, 
+            navigate_operation, 
+            f"導航到 {url}"
+        )
+    
+    @staticmethod
+    def close_all(browsers: List[Dict[str, Any]]) -> None:
+        """同步關閉所有瀏覽器。
+        
+        Args:
+            browsers: 瀏覽器實例列表
+        """
+        def close_operation(browser_info: Dict[str, Any], index: int, total: int) -> bool:
+            driver = browser_info['driver']
+            driver.quit()
+            return True
+        
+        SyncBrowserOperator.execute_sync(
+            browsers,
+            close_operation,
+            "關閉瀏覽器"
+        )
+
+
 class LocalProxyServerManager:
     """本機 Proxy 中繼伺服器管理器。
     
@@ -918,58 +1012,81 @@ def main() -> None:
         logger.info(f"\n將開啟 {browser_count} 個瀏覽器實例")
         logger.info("="*50 + "\n")
         
-        # 建立瀏覽器實例
+        # 步驟 1: 同步啟動所有 Proxy 中繼伺服器
+        logger.info("=== 步驟 1: 啟動 Proxy 中繼伺服器 ===")
+        proxy_ports = []
         for i in range(browser_count):
+            credential = credentials[i]
+            local_proxy_port = None
+            
+            if credential.proxy:
+                logger.info(f"[{i+1}/{browser_count}] 正在配置 Proxy: {credential.proxy.split(':')[0]}:***")
+                local_proxy_port = LocalProxyServerManager.start_proxy_server(credential.proxy)
+                
+                if local_proxy_port:
+                    logger.info(f"[{i+1}/{browser_count}] ✓ Proxy 中繼已啟動於埠 {local_proxy_port}")
+                else:
+                    logger.warning(f"[{i+1}/{browser_count}] Proxy 啟動失敗,將不使用 Proxy")
+            
+            proxy_ports.append(local_proxy_port)
+        
+        logger.info("✓ 所有 Proxy 中繼伺服器已啟動\n")
+        
+        # 步驟 2: 同步建立所有瀏覽器實例
+        logger.info("=== 步驟 2: 建立瀏覽器實例 ===")
+        browser_threads = []
+        browser_results = [None] * browser_count
+        
+        def create_browser_instance(index: int, credential: UserCredential, proxy_port: Optional[int]) -> None:
+            """在執行緒中建立瀏覽器實例"""
             try:
-                credential = credentials[i]
-                logger.info(f"[{i+1}/{browser_count}] 正在建立瀏覽器 (帳號: {credential.username})")
+                logger.info(f"[{index+1}/{browser_count}] 正在建立瀏覽器 (帳號: {credential.username})")
+                driver = BrowserManager.create_webdriver(local_proxy_port=proxy_port)
                 
-                local_proxy_port = None
-                
-                # 如果使用者有設定 Proxy,則啟動本機 Proxy 中繼
-                if credential.proxy:
-                    logger.info(f"[{i+1}/{browser_count}] 正在配置 Proxy: {credential.proxy.split(':')[0]}:***")
-                    local_proxy_port = LocalProxyServerManager.start_proxy_server(credential.proxy)
-                    
-                    if local_proxy_port:
-                        logger.info(f"[{i+1}/{browser_count}] ✓ Proxy 中繼已啟動於埠 {local_proxy_port}")
-                    else:
-                        logger.warning(f"[{i+1}/{browser_count}] Proxy 啟動失敗,將不使用 Proxy")
-                
-                # 建立瀏覽器 (如果有 Proxy 則使用)
-                driver = BrowserManager.create_webdriver(local_proxy_port=local_proxy_port)
-                
-                drivers.append({
+                browser_results[index] = {
                     'driver': driver,
                     'credential': credential,
-                    'index': i + 1,
-                    'proxy_port': local_proxy_port
-                })
+                    'index': index + 1,
+                    'proxy_port': proxy_port
+                }
                 
-                proxy_info = f" (使用 Proxy: 埠 {local_proxy_port})" if local_proxy_port else " (無 Proxy)"
-                logger.info(f"[{i+1}/{browser_count}] ✓ 瀏覽器建立成功{proxy_info}")
+                proxy_info = f" (使用 Proxy: 埠 {proxy_port})" if proxy_port else " (無 Proxy)"
+                logger.info(f"[{index+1}/{browser_count}] ✓ 瀏覽器建立成功{proxy_info}")
                 
             except Exception as e:
-                logger.error(f"[{i+1}/{browser_count}] 建立瀏覽器失敗: {e}")
-                continue
+                logger.error(f"[{index+1}/{browser_count}] 建立瀏覽器失敗: {e}")
+                browser_results[index] = None
+        
+        # 啟動所有瀏覽器建立執行緒
+        for i in range(browser_count):
+            thread = threading.Thread(
+                target=create_browser_instance,
+                args=(i, credentials[i], proxy_ports[i])
+            )
+            thread.start()
+            browser_threads.append(thread)
+        
+        # 等待所有執行緒完成
+        for thread in browser_threads:
+            thread.join()
+        
+        # 收集成功建立的瀏覽器
+        drivers = [result for result in browser_results if result is not None]
         
         logger.info(f"\n✓ 成功建立 {len(drivers)} 個瀏覽器實例")
         
         # TODO: 在這裡實作後續的自動化邏輯
         # 例如: 登入、遊戲操作等
         
+        # 示範同步操作: 導航到測試頁面
+        SyncBrowserOperator.navigate_all(drivers, "https://api.ipify.org")
+        
         # 暫停,讓使用者可以觀察
         input("\n按 Enter 鍵關閉所有瀏覽器...")
         
-        # 關閉所有瀏覽器
+        # 同步關閉所有瀏覽器
         logger.info("\n正在關閉所有瀏覽器...")
-        for browser_info in drivers:
-            try:
-                browser_info['driver'].quit()
-                logger.info(f"✓ 已關閉瀏覽器 (帳號: {browser_info['credential'].username})")
-            except Exception as e:
-                logger.warning(f"關閉瀏覽器時發生錯誤: {e}")
-        
+        SyncBrowserOperator.close_all(drivers)
         logger.info("✓ 所有瀏覽器已關閉")
     except KeyboardInterrupt:
         logger.warning("使用者中斷程式執行")
