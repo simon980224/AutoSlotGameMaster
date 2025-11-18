@@ -10,10 +10,250 @@ Python: 3.8+
 
 import logging
 import sys
-from typing import Optional
+from typing import Optional, List, Dict, Tuple
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from pathlib import Path
+from dataclasses import dataclass
 import requests
 import threading
+
+
+@dataclass
+class UserCredential:
+    """使用者憑證資料結構。"""
+    username: str
+    password: str
+    proxy: str
+
+
+@dataclass
+class BetRule:
+    """下注規則資料結構。"""
+    amount: float
+    duration: int  # 分鐘
+
+
+@dataclass
+class ProxyInfo:
+    """Proxy 資訊資料結構。"""
+    host: str
+    port: int
+    username: str
+    password: str
+    
+    def to_url(self) -> str:
+        """轉換為 Proxy URL 格式。
+        
+        Returns:
+            格式化的 Proxy URL
+        """
+        return f"http://{self.username}:{self.password}@{self.host}:{self.port}"
+
+
+class ConfigReader:
+    """配置檔案讀取器。
+    
+    讀取並解析系統所需的各種配置檔案。
+    
+    Attributes:
+        lib_path: 配置檔案所在目錄路徑
+        logger: 日誌記錄器
+    """
+    
+    def __init__(self, lib_path: str = None) -> None:
+        """初始化配置讀取器。
+        
+        Args:
+            lib_path: 配置檔案目錄路徑,預設為專案的 lib 目錄
+        """
+        if lib_path is None:
+            # 預設使用專案根目錄下的 lib 資料夾
+            project_root = Path(__file__).parent.parent
+            lib_path = project_root / "lib"
+        
+        self.lib_path = Path(lib_path)
+        self.logger = logging.getLogger("AutoSlotGame")
+    
+    def read_user_credentials(self, filename: str = "user_credentials.txt") -> List[UserCredential]:
+        """讀取使用者憑證檔案。
+        
+        檔案格式: 帳號,密碼,proxy (首行為標題)
+        
+        Args:
+            filename: 檔案名稱
+            
+        Returns:
+            使用者憑證列表
+        """
+        file_path = self.lib_path / filename
+        credentials = []
+        
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+                
+                # 跳過標題行
+                for line in lines[1:]:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    
+                    parts = line.split(',')
+                    if len(parts) >= 3:
+                        credentials.append(UserCredential(
+                            username=parts[0].strip(),
+                            password=parts[1].strip(),
+                            proxy=parts[2].strip()
+                        ))
+            
+            self.logger.info(f"成功讀取 {len(credentials)} 筆使用者憑證")
+            return credentials
+            
+        except FileNotFoundError:
+            self.logger.error(f"找不到檔案: {file_path}")
+            return []
+        except Exception as e:
+            self.logger.error(f"讀取使用者憑證失敗: {e}")
+            return []
+    
+    def read_bet_rules(self, filename: str = "user_rules.txt") -> List[BetRule]:
+        """讀取下注規則檔案。
+        
+        檔案格式: 金額:時間(分鐘) (首行為標題)
+        
+        Args:
+            filename: 檔案名稱
+            
+        Returns:
+            下注規則列表
+        """
+        file_path = self.lib_path / filename
+        rules = []
+        
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+                
+                # 跳過標題行
+                for line in lines[1:]:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    
+                    parts = line.split(':')
+                    if len(parts) >= 2:
+                        try:
+                            amount = float(parts[0].strip())
+                            duration = int(parts[1].strip())
+                            rules.append(BetRule(amount=amount, duration=duration))
+                        except ValueError as e:
+                            self.logger.warning(f"無法解析規則行: {line} - {e}")
+            
+            self.logger.info(f"成功讀取 {len(rules)} 條下注規則")
+            return rules
+            
+        except FileNotFoundError:
+            self.logger.error(f"找不到檔案: {file_path}")
+            return []
+        except Exception as e:
+            self.logger.error(f"讀取下注規則失敗: {e}")
+            return []
+    
+    def read_proxies(self, filename: str = "user_proxys.txt") -> List[ProxyInfo]:
+        """讀取 Proxy 列表檔案。
+        
+        檔案格式: host:port:username:password
+        
+        Args:
+            filename: 檔案名稱
+            
+        Returns:
+            Proxy 資訊列表
+        """
+        file_path = self.lib_path / filename
+        proxies = []
+        
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    
+                    parts = line.split(':')
+                    if len(parts) >= 4:
+                        try:
+                            proxies.append(ProxyInfo(
+                                host=parts[0].strip(),
+                                port=int(parts[1].strip()),
+                                username=parts[2].strip(),
+                                password=parts[3].strip()
+                            ))
+                        except ValueError as e:
+                            self.logger.warning(f"無法解析 Proxy 行: {line} - {e}")
+            
+            self.logger.info(f"成功讀取 {len(proxies)} 個 Proxy")
+            return proxies
+            
+        except FileNotFoundError:
+            self.logger.error(f"找不到檔案: {file_path}")
+            return []
+        except Exception as e:
+            self.logger.error(f"讀取 Proxy 列表失敗: {e}")
+            return []
+    
+    def read_user_data(self, filename: str = "用戶資料.txt") -> List[Dict[str, str]]:
+        """讀取用戶資料檔案(舊格式相容)。
+        
+        檔案格式: 帳號:密碼:IP:port:user:password (首行為標題)
+        
+        Args:
+            filename: 檔案名稱
+            
+        Returns:
+            用戶資料字典列表
+        """
+        file_path = self.lib_path / filename
+        users = []
+        
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+                
+                # 跳過標題行
+                for line in lines[1:]:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    
+                    parts = line.split(',')
+                    if len(parts) >= 2:
+                        # 解析 proxy 部分
+                        proxy_parts = parts[1].split(':') if len(parts) > 1 else []
+                        
+                        user_data = {
+                            'username': parts[0].strip(),
+                            'password': parts[1].strip() if len(parts) > 1 else '',
+                        }
+                        
+                        # 如果有 proxy 資訊
+                        if len(proxy_parts) >= 4:
+                            user_data['proxy_host'] = proxy_parts[0].strip()
+                            user_data['proxy_port'] = proxy_parts[1].strip()
+                            user_data['proxy_user'] = proxy_parts[2].strip()
+                            user_data['proxy_pass'] = proxy_parts[3].strip()
+                        
+                        users.append(user_data)
+            
+            self.logger.info(f"成功讀取 {len(users)} 筆用戶資料")
+            return users
+            
+        except FileNotFoundError:
+            self.logger.error(f"找不到檔案: {file_path}")
+            return []
+        except Exception as e:
+            self.logger.error(f"讀取用戶資料失敗: {e}")
+            return []
 
 
 class ColoredFormatter(logging.Formatter):
@@ -248,6 +488,17 @@ def main() -> None:
     logger.info("=== 金富翁遊戲自動化系統啟動 ===")
     
     try:
+        # 讀取配置檔案
+        config_reader = ConfigReader()
+        
+        # 讀取使用者憑證
+        credentials = config_reader.read_user_credentials()
+        logger.info(f"載入 {len(credentials)} 個使用者帳號")
+        
+        # 讀取下注規則
+        rules = config_reader.read_bet_rules()
+        logger.info(f"載入 {len(rules)} 條下注規則")
+        
         # 示範:啟動 Proxy 伺服器
         proxy_server = SimpleProxyServer(host="127.0.0.1", port=8888)
         if proxy_server.start():
