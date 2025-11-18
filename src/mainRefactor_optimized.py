@@ -23,15 +23,12 @@ import select
 import base64
 import time
 from typing import Optional, List, Dict, Tuple, Any, Callable, Protocol
-from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from dataclasses import dataclass, field
 from contextlib import contextmanager, suppress
 from concurrent.futures import ThreadPoolExecutor, as_completed, Future
-from enum import Enum, auto
+from enum import Enum
 import threading
-import abc
-import requests
 
 # Selenium WebDriver 相關
 from selenium import webdriver
@@ -50,10 +47,8 @@ from webdriver_manager.chrome import ChromeDriverManager
 class Constants:
     """系統常量"""
     DEFAULT_LIB_PATH = "lib"
-    DEFAULT_CREDENTIALS_FILE = "user_credentials.txt"
-    DEFAULT_RULES_FILE = "user_rules.txt"
-    DEFAULT_PROXIES_FILE = "user_proxys.txt"
-    DEFAULT_USER_DATA_FILE = "用戶資料.txt"
+    DEFAULT_CREDENTIALS_FILE = "用戶資料.txt"
+    DEFAULT_RULES_FILE = "用戶規則.txt"
     
     DEFAULT_PROXY_START_PORT = 9000
     DEFAULT_TIMEOUT_SECONDS = 30
@@ -328,10 +323,6 @@ class ConfigReaderProtocol(Protocol):
     def read_bet_rules(self, filename: str) -> List[BetRule]:
         """讀取下注規則"""
         ...
-    
-    def read_proxies(self, filename: str) -> List[ProxyInfo]:
-        """讀取 Proxy 列表"""
-        ...
 
 
 class ConfigReader:
@@ -411,7 +402,8 @@ class ConfigReader:
     ) -> List[UserCredential]:
         """讀取使用者憑證檔案。
         
-        檔案格式: 帳號,密碼,proxy (首行為標題)
+        檔案格式: 帳號,密碼,IP:port:user:password (首行為標題)
+        第三欄為 proxy 資訊，格式為 host:port:username:password
         
         Args:
             filename: 檔案名稱
@@ -435,7 +427,8 @@ class ConfigReader:
                 
                 username = parts[0]
                 password = parts[1]
-                proxy = parts[2] if len(parts) >= 3 else None
+                # 第三欄是 proxy 資訊，格式為 host:port:username:password
+                proxy = parts[2] if len(parts) >= 3 and parts[2] else None
                 
                 credentials.append(UserCredential(
                     username=username,
@@ -489,53 +482,6 @@ class ConfigReader:
         
         self.logger.info(f"成功讀取 {len(rules)} 條下注規則")
         return rules
-    
-    def read_proxies(
-        self, 
-        filename: str = Constants.DEFAULT_PROXIES_FILE
-    ) -> List[ProxyInfo]:
-        """讀取 Proxy 列表檔案。
-        
-        檔案格式: host:port:username:password
-        
-        Args:
-            filename: 檔案名稱
-            
-        Returns:
-            Proxy 資訊列表
-            
-        Raises:
-            ConfigurationError: 讀取或解析失敗
-        """
-        proxies = []
-        lines = self._read_file_lines(filename, skip_header=False)
-        
-        for line_num, line in enumerate(lines, start=1):
-            try:
-                parts = line.split(':')
-                
-                if len(parts) < 4:
-                    self.logger.warning(f"第 {line_num} 行格式不完整,已跳過: {line}")
-                    continue
-                
-                host = parts[0].strip()
-                port = int(parts[1].strip())
-                username = parts[2].strip()
-                password = ':'.join(parts[3:]).strip()  # 處理密碼中可能包含的冒號
-                
-                proxies.append(ProxyInfo(
-                    host=host,
-                    port=port,
-                    username=username,
-                    password=password
-                ))
-                
-            except (ValueError, IndexError) as e:
-                self.logger.warning(f"第 {line_num} 行無法解析: {e}")
-                continue
-        
-        self.logger.info(f"成功讀取 {len(proxies)} 個 Proxy")
-        return proxies
 
 
 # ============================================================================
@@ -1398,6 +1344,48 @@ class SyncBrowserOperator:
             timeout=timeout
         )
     
+    def resize_and_arrange_all(
+        self,
+        browser_contexts: List[BrowserContext],
+        width: int = 600,
+        height: int = 400,
+        columns: int = 4,
+        timeout: Optional[float] = None
+    ) -> List[OperationResult]:
+        """調整所有瀏覽器視窗大小並進行排列。
+        
+        Args:
+            browser_contexts: 瀏覽器上下文列表
+            width: 視窗寬度
+            height: 視窗高度
+            columns: 每行視窗數量（預設4列）
+            timeout: 超時時間
+            
+        Returns:
+            操作結果列表
+        """
+        def resize_and_position_operation(context: BrowserContext, index: int, total: int) -> bool:
+            # 計算視窗位置 (4x3 排列)
+            row = (index - 1) // columns
+            col = (index - 1) % columns
+            
+            x = col * width
+            y = row * height
+            
+            # 調整視窗大小和位置
+            context.driver.set_window_size(width, height)
+            context.driver.set_window_position(x, y)
+            
+            self.logger.info(f"瀏覽器 #{index} 已調整至 {width}x{height}，位置: ({x}, {y})")
+            return True
+        
+        return self.execute_sync(
+            browser_contexts,
+            resize_and_position_operation,
+            f"調整視窗大小為 {width}x{height} 並進行 {columns}列排列",
+            timeout=timeout
+        )
+    
     def close_all(
         self,
         browser_contexts: List[BrowserContext],
@@ -1586,7 +1574,6 @@ class AutoSlotGameApp:
         
         self.credentials: List[UserCredential] = []
         self.rules: List[BetRule] = []
-        self.proxies: List[ProxyInfo] = []
         self.browser_contexts: List[BrowserContext] = []
     
     def load_configurations(self) -> None:
@@ -1597,22 +1584,13 @@ class AutoSlotGameApp:
         """
         self.logger.info("=== 載入配置檔案 ===")
         
-        # 讀取使用者憑證
+        # 讀取使用者憑證（包含 proxy 資訊）
         self.credentials = self.config_reader.read_user_credentials()
         self.logger.info(f"載入 {len(self.credentials)} 個使用者帳號")
         
         # 讀取下注規則
         self.rules = self.config_reader.read_bet_rules()
         self.logger.info(f"載入 {len(self.rules)} 條下注規則")
-        
-        # 讀取 Proxy 列表
-        try:
-            self.proxies = self.config_reader.read_proxies()
-            if self.proxies:
-                self.logger.info(f"載入 {len(self.proxies)} 個 Proxy")
-        except ConfigurationError as e:
-            self.logger.warning(f"Proxy 配置載入失敗: {e}")
-            self.proxies = []
     
     def prompt_browser_count(self) -> int:
         """提示使用者輸入要開啟的瀏覽器數量。
@@ -1835,6 +1813,20 @@ class AutoSlotGameApp:
             )
             
             time.sleep(3)  # 等待遊戲頁面載入
+            
+            # 步驟 5.5: 調整瀏覽器視窗大小和排列
+            self.logger.info("")
+            self.logger.info("="*50)
+            self.logger.info("調整瀏覽器視窗大小和排列 (600x400, 4x3)")
+            self.logger.info("="*50)
+            resize_results = self.browser_operator.resize_and_arrange_all(
+                self.browser_contexts,
+                width=600,
+                height=400,
+                columns=4
+            )
+            
+            time.sleep(1)  # 等待視窗調整完成
             
             # TODO: 步驟 6: 圖片檢測與遊戲流程
             self.logger.info("")
