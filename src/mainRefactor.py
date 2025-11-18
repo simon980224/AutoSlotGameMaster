@@ -23,22 +23,20 @@ import select
 import base64
 import time
 from typing import Optional, List, Dict, Tuple, Any, Callable, Protocol
-from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from dataclasses import dataclass, field
 from contextlib import contextmanager, suppress
 from concurrent.futures import ThreadPoolExecutor, as_completed, Future
-from enum import Enum, auto
+from enum import Enum
 import threading
-import abc
-import requests
 
 # Selenium WebDriver 相關
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.webdriver import WebDriver
-from selenium.common.exceptions import WebDriverException
+from selenium.common.exceptions import WebDriverException, NoSuchElementException
+from selenium.webdriver.common.by import By
 from webdriver_manager.chrome import ChromeDriverManager
 
 
@@ -49,10 +47,8 @@ from webdriver_manager.chrome import ChromeDriverManager
 class Constants:
     """系統常量"""
     DEFAULT_LIB_PATH = "lib"
-    DEFAULT_CREDENTIALS_FILE = "user_credentials.txt"
-    DEFAULT_RULES_FILE = "user_rules.txt"
-    DEFAULT_PROXIES_FILE = "user_proxys.txt"
-    DEFAULT_USER_DATA_FILE = "用戶資料.txt"
+    DEFAULT_CREDENTIALS_FILE = "用戶資料.txt"
+    DEFAULT_RULES_FILE = "用戶規則.txt"
     
     DEFAULT_PROXY_START_PORT = 9000
     DEFAULT_TIMEOUT_SECONDS = 30
@@ -64,6 +60,17 @@ class Constants:
     PROXY_SERVER_BIND_HOST = "127.0.0.1"
     PROXY_BUFFER_SIZE = 4096
     PROXY_SELECT_TIMEOUT = 1.0
+    
+    # URL 配置
+    LOGIN_PAGE = "https://m.jfw-win.com/#/login?redirect=%2Fhome%2Fpage"
+    GAME_PAGE = "https://m.jfw-win.com/#/home/loding?game_code=egyptian-mythology&factory_code=ATG&state=true&name=%E6%88%B0%E7%A5%9E%E8%B3%BD%E7%89%B9"
+    
+    # 頁面元素選擇器
+    USERNAME_INPUT = "//input[@placeholder='請輸入帳號']"
+    PASSWORD_INPUT = "//input[@placeholder='請輸入密碼']"
+    LOGIN_BUTTON = "//div[contains(@class, 'login-btn')]//span[text()='立即登入']/.."
+    GAME_IFRAME = "gameFrame-0"
+    GAME_CANVAS = "GameCanvas"
 
 
 # ============================================================================
@@ -316,10 +323,6 @@ class ConfigReaderProtocol(Protocol):
     def read_bet_rules(self, filename: str) -> List[BetRule]:
         """讀取下注規則"""
         ...
-    
-    def read_proxies(self, filename: str) -> List[ProxyInfo]:
-        """讀取 Proxy 列表"""
-        ...
 
 
 class ConfigReader:
@@ -399,7 +402,8 @@ class ConfigReader:
     ) -> List[UserCredential]:
         """讀取使用者憑證檔案。
         
-        檔案格式: 帳號,密碼,proxy (首行為標題)
+        檔案格式: 帳號,密碼,IP:port:user:password (首行為標題)
+        第三欄為 proxy 資訊，格式為 host:port:username:password
         
         Args:
             filename: 檔案名稱
@@ -423,7 +427,9 @@ class ConfigReader:
                 
                 username = parts[0]
                 password = parts[1]
-                proxy = parts[2] if len(parts) >= 3 else None
+                # 第三欄是 proxy 資訊，格式為 host:port:username:password
+                # 如果第三欄不存在或為空字串，則 proxy 為 None（不使用 proxy）
+                proxy = parts[2] if len(parts) >= 3 and parts[2].strip() else None
                 
                 credentials.append(UserCredential(
                     username=username,
@@ -477,53 +483,6 @@ class ConfigReader:
         
         self.logger.info(f"成功讀取 {len(rules)} 條下注規則")
         return rules
-    
-    def read_proxies(
-        self, 
-        filename: str = Constants.DEFAULT_PROXIES_FILE
-    ) -> List[ProxyInfo]:
-        """讀取 Proxy 列表檔案。
-        
-        檔案格式: host:port:username:password
-        
-        Args:
-            filename: 檔案名稱
-            
-        Returns:
-            Proxy 資訊列表
-            
-        Raises:
-            ConfigurationError: 讀取或解析失敗
-        """
-        proxies = []
-        lines = self._read_file_lines(filename, skip_header=False)
-        
-        for line_num, line in enumerate(lines, start=1):
-            try:
-                parts = line.split(':')
-                
-                if len(parts) < 4:
-                    self.logger.warning(f"第 {line_num} 行格式不完整,已跳過: {line}")
-                    continue
-                
-                host = parts[0].strip()
-                port = int(parts[1].strip())
-                username = parts[2].strip()
-                password = ':'.join(parts[3:]).strip()  # 處理密碼中可能包含的冒號
-                
-                proxies.append(ProxyInfo(
-                    host=host,
-                    port=port,
-                    username=username,
-                    password=password
-                ))
-                
-            except (ValueError, IndexError) as e:
-                self.logger.warning(f"第 {line_num} 行無法解析: {e}")
-                continue
-        
-        self.logger.info(f"成功讀取 {len(proxies)} 個 Proxy")
-        return proxies
 
 
 # ============================================================================
@@ -871,16 +830,16 @@ class LocalProxyServerManager:
             if local_port in self._proxy_servers:
                 server = self._proxy_servers[local_port]
                 server.stop()
-                self.logger.info(f"已停止本機 Proxy 伺服器: {Constants.PROXY_SERVER_BIND_HOST}:{local_port}")
+                self.logger.debug(f"已停止 Proxy 伺服器: 埠 {local_port}")
                 del self._proxy_servers[local_port]
                 if local_port in self._proxy_threads:
                     del self._proxy_threads[local_port]
     
     def stop_all_servers(self) -> None:
         """停止所有 proxy 伺服器"""
+        ports = []
         with self._lock:
             if self._proxy_servers:
-                self.logger.info(f"清理 {len(self._proxy_servers)} 個 Proxy 中繼伺服器")
                 # 複製鍵列表以避免在迭代時修改字典
                 ports = list(self._proxy_servers.keys())
         
@@ -937,6 +896,12 @@ class BrowserManager:
         chrome_options.add_argument("--disable-popup-blocking")
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--no-sandbox")
+        
+        # 背景執行優化設定
+        chrome_options.add_argument("--disable-backgrounding-occluded-windows")
+        chrome_options.add_argument("--disable-renderer-backgrounding")
+        chrome_options.add_argument("--disable-background-timer-throttling")
+        chrome_options.add_argument("--disable-ipc-flooding-protection")
         
         # Chrome 131+ 優化設定
         chrome_options.add_argument("--disable-features=NetworkTimeServiceQuerying")
@@ -1124,7 +1089,7 @@ class BrowserManager:
             if driver:
                 with suppress(Exception):
                     driver.quit()
-                self.logger.info(f"瀏覽器 #{index} 已關閉")
+                self.logger.debug(f"瀏覽器 #{index} 已關閉")
 
 
 # ============================================================================
@@ -1170,7 +1135,7 @@ class SyncBrowserOperator:
         Returns:
             所有操作的結果列表
         """
-        self.logger.info(f"\n=== 同步執行: {operation_name} ===")
+        # 不在這裡輸出標題,由調用方決定是否需要
         
         total = len(browser_contexts)
         results: List[OperationResult] = [OperationResult(False)] * total
@@ -1219,7 +1184,10 @@ class SyncBrowserOperator:
                 self.logger.error(f"{operation_name} 執行超時")
         
         success_count = sum(1 for r in results if r.success)
-        self.logger.info(f"✓ {operation_name} 完成: {success_count}/{total} 成功\n")
+        if success_count == total:
+            self.logger.info(f"✓ {operation_name} 完成 ({success_count}/{total})")
+        else:
+            self.logger.warning(f"⚠ {operation_name} 部分完成 ({success_count}/{total})")
         
         return results
     
@@ -1239,14 +1207,168 @@ class SyncBrowserOperator:
         Returns:
             操作結果列表
         """
-        def navigate_operation(context: BrowserContext, index: int, total: int) -> bool:
+        def navigate_operation(context: BrowserContext, index: int, total: int) -> str:
             context.driver.get(url)
-            return True
+            return context.driver.current_url
         
         return self.execute_sync(
             browser_contexts,
             navigate_operation,
             f"導航到 {url}",
+            timeout=timeout
+        )
+    
+    def navigate_to_login_page(
+        self,
+        browser_contexts: List[BrowserContext],
+        timeout: Optional[float] = None
+    ) -> List[OperationResult]:
+        """同步導航所有瀏覽器到登入頁面。
+        
+        Args:
+            browser_contexts: 瀏覽器上下文列表
+            timeout: 超時時間
+            
+        Returns:
+            操作結果列表
+        """
+        return self.navigate_all(browser_contexts, Constants.LOGIN_PAGE, timeout)
+    
+    def navigate_to_game_page(
+        self,
+        browser_contexts: List[BrowserContext],
+        timeout: Optional[float] = None
+    ) -> List[OperationResult]:
+        """同步導航所有瀏覽器到遊戲頁面。
+        
+        Args:
+            browser_contexts: 瀏覽器上下文列表
+            timeout: 超時時間
+            
+        Returns:
+            操作結果列表
+        """
+        return self.navigate_all(browser_contexts, Constants.GAME_PAGE, timeout)
+    
+    def perform_login_all(
+        self,
+        browser_contexts: List[BrowserContext],
+        timeout: Optional[float] = None
+    ) -> List[OperationResult]:
+        """同步執行所有瀏覽器的登入操作。
+        
+        Args:
+            browser_contexts: 瀏覽器上下文列表
+            timeout: 超時時間
+            
+        Returns:
+            操作結果列表
+        """
+        def login_operation(context: BrowserContext, index: int, total: int) -> bool:
+            driver = context.driver
+            credential = context.credential
+            
+            # 輸入帳號
+            username_input = driver.find_element(By.XPATH, Constants.USERNAME_INPUT)
+            username_input.clear()
+            username_input.send_keys(credential.username)
+            
+            # 輸入密碼
+            password_input = driver.find_element(By.XPATH, Constants.PASSWORD_INPUT)
+            password_input.clear()
+            password_input.send_keys(credential.password)
+            
+            # 點擊登入按鈕
+            login_button = driver.find_element(By.XPATH, Constants.LOGIN_BUTTON)
+            login_button.click()
+            
+            time.sleep(5)  # 等待登入完成
+            return True
+        
+        return self.execute_sync(
+            browser_contexts,
+            login_operation,
+            "登入操作",
+            timeout=timeout
+        )
+    
+    def press_space_all(
+        self,
+        browser_contexts: List[BrowserContext],
+        timeout: Optional[float] = None
+    ) -> List[OperationResult]:
+        """同步在所有瀏覽器中按下空白鍵。
+        
+        Args:
+            browser_contexts: 瀏覽器上下文列表
+            timeout: 超時時間
+            
+        Returns:
+            操作結果列表
+        """
+        def press_space_operation(context: BrowserContext, index: int, total: int) -> bool:
+            # 按下空白鍵
+            context.driver.execute_cdp_cmd("Input.dispatchKeyEvent", {
+                "type": "keyDown",
+                "key": " ",
+                "code": "Space",
+                "windowsVirtualKeyCode": 32,
+                "nativeVirtualKeyCode": 32
+            })
+            # 釋放空白鍵
+            context.driver.execute_cdp_cmd("Input.dispatchKeyEvent", {
+                "type": "keyUp",
+                "key": " ",
+                "code": "Space",
+                "windowsVirtualKeyCode": 32,
+                "nativeVirtualKeyCode": 32
+            })
+            return True
+        
+        return self.execute_sync(
+            browser_contexts,
+            press_space_operation,
+            "按下空白鍵",
+            timeout=timeout
+        )
+    
+    def resize_and_arrange_all(
+        self,
+        browser_contexts: List[BrowserContext],
+        width: int = 600,
+        height: int = 400,
+        columns: int = 4,
+        timeout: Optional[float] = None
+    ) -> List[OperationResult]:
+        """調整所有瀏覽器視窗大小並進行排列。
+        
+        Args:
+            browser_contexts: 瀏覽器上下文列表
+            width: 視窗寬度
+            height: 視窗高度
+            columns: 每行視窗數量（預設4列）
+            timeout: 超時時間
+            
+        Returns:
+            操作結果列表
+        """
+        def resize_and_position_operation(context: BrowserContext, index: int, total: int) -> bool:
+            # 計算視窗位置 (4x3 排列)
+            row = (index - 1) // columns
+            col = (index - 1) % columns
+            
+            x = col * width
+            y = row * height
+            
+            # 調整視窗大小和位置
+            context.driver.set_window_size(width, height)
+            context.driver.set_window_position(x, y)
+            return True
+        
+        return self.execute_sync(
+            browser_contexts,
+            resize_and_position_operation,
+            f"調整視窗大小為 {width}x{height} 並進行 {columns}列排列",
             timeout=timeout
         )
     
@@ -1274,6 +1396,134 @@ class SyncBrowserOperator:
             "關閉瀏覽器",
             timeout=timeout
         )
+
+
+# ============================================================================
+# 遊戲控制中心
+# ============================================================================
+
+class GameControlCenter:
+    """遊戲控制中心（基礎版本）。
+    
+    提供基本的指令接收框架，具體功能待實現。
+    """
+    
+    def __init__(
+        self,
+        browser_contexts: List[BrowserContext],
+        browser_operator: SyncBrowserOperator,
+        logger: Optional[logging.Logger] = None
+    ):
+        """初始化控制中心。
+        
+        Args:
+            browser_contexts: 瀏覽器上下文列表
+            browser_operator: 瀏覽器操作器
+            logger: 日誌記錄器
+        """
+        self.browser_contexts = browser_contexts
+        self.browser_operator = browser_operator
+        self.logger = logger or LoggerFactory.get_logger()
+        self.running = False
+        self.game_running = False  # 遊戲運行狀態
+    
+    def show_help(self) -> None:
+        """顯示幫助信息"""
+        help_text = """
+╔══════════════════════════════════════════════════════════
+║                   遊戲控制中心 - 指令說明                  
+╠
+║  遊戲控制：
+║    start     - 開始遊戲（按空白鍵
+║    pause     - 暫停遊戲
+║
+║  系統控制：
+║    help      - 顯示此幫助信息
+║    quit      - 退出控制中心
+╚══════════════════════════════════════════════════════════
+"""
+        self.logger.info(help_text)
+    
+    def process_command(self, command: str) -> bool:
+        """處理用戶指令。
+        
+        Args:
+            command: 用戶輸入的指令
+            
+        Returns:
+            是否繼續運行（False 表示退出）
+        """
+        command = command.strip().lower()
+        
+        if not command:
+            return True
+        
+        try:
+            if command == 'quit':
+                self.logger.info("正在退出控制中心...")
+                return False
+            
+            elif command == 'help':
+                self.show_help()
+            
+            elif command == 'start':
+                if self.game_running:
+                    self.logger.warning("遊戲已經在運行中")
+                else:
+                    self.logger.info("執行指令: 開始遊戲（按空白鍵）")
+                    results = self.browser_operator.press_space_all(self.browser_contexts)
+                    success_count = sum(1 for r in results if r.success)
+                    if success_count > 0:
+                        self.game_running = True
+                        self.logger.info(f"✓ 遊戲已開始: {success_count}/{len(results)} 個瀏覽器")
+                    else:
+                        self.logger.error("開始遊戲失敗")
+            
+            elif command == 'pause':
+                if not self.game_running:
+                    self.logger.warning("遊戲尚未開始")
+                else:
+                    self.game_running = False
+                    self.logger.info("✓ 遊戲已暫停")
+            
+            else:
+                self.logger.warning(f"未知指令: {command}")
+                self.logger.info("輸入 'help' 查看可用指令")
+        
+        except Exception as e:
+            self.logger.error(f"執行指令時發生錯誤: {e}")
+        
+        return True
+    
+    def start(self) -> None:
+        """啟動控制中心"""
+        self.running = True
+        self.logger.info("")
+        self.logger.info("="*50)
+        self.logger.info("遊戲控制中心已啟動")
+        self.logger.info("="*50)
+        self.show_help()
+        
+        try:
+            while self.running:
+                try:
+                    print("\n請輸入指令 > ", end="", flush=True)
+                    command = input().strip()
+                    if not self.process_command(command):
+                        break
+                except EOFError:
+                    self.logger.info("\n檢測到 EOF，退出控制中心")
+                    break
+                except KeyboardInterrupt:
+                    self.logger.info("\n用戶中斷，退出控制中心")
+                    break
+        finally:
+            self.running = False
+            self.logger.info("控制中心已停止")
+    
+    def stop(self) -> None:
+        """停止控制中心"""
+        self.running = False
 
 
 # ============================================================================
@@ -1311,8 +1561,18 @@ class AutoSlotGameApp:
         
         self.credentials: List[UserCredential] = []
         self.rules: List[BetRule] = []
-        self.proxies: List[ProxyInfo] = []
         self.browser_contexts: List[BrowserContext] = []
+    
+    def _print_step(self, step: Any, title: str) -> None:
+        """輸出步驟標題。
+        
+        Args:
+            step: 步驟編號
+            title: 步驟標題
+        """
+        self.logger.info("")
+        self.logger.info(f"【步驟 {step}】{title}")
+        self.logger.info("-" * 50)
     
     def load_configurations(self) -> None:
         """載入所有配置檔案。
@@ -1320,24 +1580,22 @@ class AutoSlotGameApp:
         Raises:
             ConfigurationError: 配置載入失敗
         """
-        self.logger.info("=== 載入配置檔案 ===")
+        self.logger.info("\n" + "=" * 60)
+        self.logger.info("  金富翁遊戲自動化系統 v4.0")
+        self.logger.info("=" * 60)
+        self.logger.info("")
+        self.logger.info("正在載入配置...")
         
-        # 讀取使用者憑證
+        # 讀取使用者憑證（包含 proxy 資訊）
         self.credentials = self.config_reader.read_user_credentials()
-        self.logger.info(f"載入 {len(self.credentials)} 個使用者帳號")
         
         # 讀取下注規則
         self.rules = self.config_reader.read_bet_rules()
-        self.logger.info(f"載入 {len(self.rules)} 條下注規則")
         
-        # 讀取 Proxy 列表
-        try:
-            self.proxies = self.config_reader.read_proxies()
-            if self.proxies:
-                self.logger.info(f"載入 {len(self.proxies)} 個 Proxy")
-        except ConfigurationError as e:
-            self.logger.warning(f"Proxy 配置載入失敗: {e}")
-            self.proxies = []
+        self.logger.info(
+            f"✓ 配置載入完成: {len(self.credentials)} 個帳號, "
+            f"{len(self.rules)} 條規則"
+        )
     
     def prompt_browser_count(self) -> int:
         """提示使用者輸入要開啟的瀏覽器數量。
@@ -1350,17 +1608,18 @@ class AutoSlotGameApp:
         if max_browsers == 0:
             raise ConfigurationError("沒有可用的使用者憑證")
         
-        self.logger.info("\n" + "="*50)
-        
         while True:
             try:
-                user_input = input(f"請輸入要開啟的瀏覽器數量 (1-{max_browsers}): ").strip()
+                self.logger.info("")
+                print(f"\n請輸入要開啟的瀏覽器數量 (1-{max_browsers}): ", end="", flush=True)
+                user_input = input().strip()
                 browser_count = int(user_input)
                 
                 if 1 <= browser_count <= max_browsers:
+                    self.logger.info(f"\n✓ 將開啟 {browser_count} 個瀏覽器")
                     return browser_count
                 else:
-                    self.logger.warning(f"請輸入 1 到 {max_browsers} 之間的數字")
+                    self.logger.warning(f"⚠ 請輸入 1-{max_browsers} 之間的數字")
                     
             except ValueError:
                 self.logger.warning("請輸入有效的數字")
@@ -1369,7 +1628,7 @@ class AutoSlotGameApp:
                 raise KeyboardInterrupt()
     
     def setup_proxy_servers(self, browser_count: int) -> List[Optional[int]]:
-        """設定 Proxy 中繼伺服器。
+        """設定 Proxy 中繼伺服器（同步啟動）。
         
         Args:
             browser_count: 瀏覽器數量
@@ -1377,11 +1636,14 @@ class AutoSlotGameApp:
         Returns:
             Proxy 埠號列表
         """
-        self.logger.info("\n=== 步驟 1: 啟動 Proxy 中繼伺服器 ===")
-        proxy_ports: List[Optional[int]] = []
+        self._print_step(1, "啟動 Proxy 中繼伺服器")
+        proxy_ports: List[Optional[int]] = [None] * browser_count
         
-        for i in range(browser_count):
-            credential = self.credentials[i]
+        def start_single_proxy_server(
+            index: int,
+            credential: UserCredential
+        ) -> Tuple[int, Optional[int]]:
+            """在執行緒中啟動單個 Proxy 伺服器"""
             local_proxy_port = None
             
             if credential.proxy:
@@ -1396,30 +1658,45 @@ class AutoSlotGameApp:
                             password=':'.join(parts[3:])
                         )
                         
-                        self.logger.info(
-                            f"[{i+1}/{browser_count}] 正在配置 Proxy: "
-                            f"{proxy_info.host}:***"
-                        )
-                        
                         local_proxy_port = self.proxy_manager.start_proxy_server(proxy_info)
                         
                         if local_proxy_port:
                             self.logger.info(
-                                f"[{i+1}/{browser_count}] ✓ Proxy 中繼已啟動於埠 {local_proxy_port}"
+                                f"[{index+1}/{browser_count}] ✓ Proxy 中繼已啟動: {proxy_info.host}:{proxy_info.port} -> 本機埠 {local_proxy_port}"
                             )
                         else:
                             self.logger.warning(
-                                f"[{i+1}/{browser_count}] Proxy 啟動失敗,將不使用 Proxy"
+                                f"[{index+1}/{browser_count}] ⚠ Proxy 啟動失敗,將直連網路"
                             )
                     else:
-                        self.logger.warning(f"[{i+1}/{browser_count}] Proxy 格式錯誤: {credential.proxy}")
+                        self.logger.warning(f"[{index+1}/{browser_count}] Proxy 格式錯誤: {credential.proxy}")
                         
                 except Exception as e:
-                    self.logger.error(f"[{i+1}/{browser_count}] Proxy 設定失敗: {e}")
+                    self.logger.error(f"[{index+1}/{browser_count}] Proxy 設定失敗: {e}")
+            else:
+                # 沒有設定 proxy，將使用直連
+                self.logger.info(f"[{index+1}/{browser_count}] 使用直連網路（未設定 Proxy）")
             
-            proxy_ports.append(local_proxy_port)
+            return index, local_proxy_port
         
-        self.logger.info("✓ 所有 Proxy 中繼伺服器已啟動\n")
+        # 使用執行緒池同步啟動所有 Proxy 伺服器
+        with ThreadPoolExecutor(max_workers=Constants.MAX_THREAD_WORKERS) as executor:
+            futures = []
+            for i in range(browser_count):
+                future = executor.submit(
+                    start_single_proxy_server,
+                    i,
+                    self.credentials[i]
+                )
+                futures.append(future)
+            
+            # 收集結果
+            for future in as_completed(futures):
+                index, local_proxy_port = future.result()
+                proxy_ports[index] = local_proxy_port
+        
+        active_count = sum(1 for p in proxy_ports if p is not None)
+        self.logger.info(f"✓ Proxy 伺服器啟動完成 ({active_count}/{len(proxy_ports)})")
         return proxy_ports
     
     def create_browser_instances(
@@ -1436,7 +1713,7 @@ class AutoSlotGameApp:
         Returns:
             瀏覽器上下文列表
         """
-        self.logger.info("\n=== 步驟 2: 建立瀏覽器實例 ===")
+        self._print_step(2, "建立瀏覽器實例")
         
         browser_results: List[Optional[BrowserContext]] = [None] * browser_count
         
@@ -1461,7 +1738,7 @@ class AutoSlotGameApp:
                     proxy_port=proxy_port
                 )
                 
-                proxy_info = f" (使用 Proxy: 埠 {proxy_port})" if proxy_port else " (無 Proxy)"
+                proxy_info = f" [Proxy: 埠 {proxy_port}]" if proxy_port else " [直連]"
                 self.logger.info(f"[{index+1}/{browser_count}] ✓ 瀏覽器建立成功{proxy_info}")
                 
                 return index, context
@@ -1490,7 +1767,10 @@ class AutoSlotGameApp:
         # 過濾成功建立的瀏覽器
         contexts = [ctx for ctx in browser_results if ctx is not None]
         
-        self.logger.info(f"\n✓ 成功建立 {len(contexts)} 個瀏覽器實例")
+        if len(contexts) == browser_count:
+            self.logger.info(f"✓ 瀏覽器建立完成 ({len(contexts)}/{browser_count})")
+        else:
+            self.logger.warning(f"⚠ 部分瀏覽器建立失敗 ({len(contexts)}/{browser_count})")
         return contexts
     
     def run(self) -> None:
@@ -1499,16 +1779,12 @@ class AutoSlotGameApp:
         Raises:
             Exception: 執行過程中的錯誤
         """
-        self.logger.info("=== 金富翁遊戲自動化系統啟動 ===")
-        
         try:
             # 載入配置
             self.load_configurations()
             
             # 詢問瀏覽器數量
             browser_count = self.prompt_browser_count()
-            self.logger.info(f"\n將開啟 {browser_count} 個瀏覽器實例")
-            self.logger.info("="*50 + "\n")
             
             # 設定 Proxy 伺服器
             proxy_ports = self.setup_proxy_servers(browser_count)
@@ -1519,17 +1795,56 @@ class AutoSlotGameApp:
             if not self.browser_contexts:
                 raise BrowserCreationError("沒有成功建立任何瀏覽器實例")
             
-            # TODO: 在這裡實作後續的自動化邏輯
-            # 例如: 登入、遊戲操作等
-            
-            # 示範同步操作: 導航到測試頁面
-            self.browser_operator.navigate_all(
-                self.browser_contexts,
-                "https://api.ipify.org"
+            # 步驟 3: 導航到登入頁面
+            self._print_step(3, "導航到登入頁面")
+            login_results = self.browser_operator.navigate_to_login_page(
+                self.browser_contexts
             )
             
-            # 暫停,讓使用者可以觀察
-            input("\n按 Enter 鍵關閉所有瀏覽器...")
+            time.sleep(2)  # 等待頁面載入
+            
+            # 步驟 4: 執行登入操作（同步）
+            self._print_step(4, "執行登入操作")
+            login_results = self.browser_operator.perform_login_all(
+                self.browser_contexts
+            )
+            
+            time.sleep(3)  # 等待登入後的頁面跳轉
+            
+            # 步驟 5: 導航到遊戲頁面
+            self._print_step(5, "導航到遊戲頁面")
+            game_results = self.browser_operator.navigate_to_game_page(
+                self.browser_contexts
+            )
+            
+            time.sleep(3)  # 等待遊戲頁面載入
+            
+            # 調整視窗
+            self._print_step("5+", "調整視窗排列 (600x400)")
+            resize_results = self.browser_operator.resize_and_arrange_all(
+                self.browser_contexts,
+                width=600,
+                height=400,
+                columns=4
+            )
+            
+            time.sleep(1)  # 等待視窗調整完成
+            
+            # TODO: 圖片檢測與遊戲流程 (待實現)
+            # 1. iframe 切換到遊戲畫面
+            # 2. 定位 Canvas 元素
+            # 3. 圖片辨識與檢測
+            # 4. 自動點擊操作
+            # 5. 遊戲狀態監控
+            
+            # 步驟 6: 啟動遊戲控制中心
+            self._print_step(6, "啟動遊戲控制中心")
+            control_center = GameControlCenter(
+                browser_contexts=self.browser_contexts,
+                browser_operator=self.browser_operator,
+                logger=self.logger
+            )
+            control_center.start()
             
         except KeyboardInterrupt:
             self.logger.warning("\n使用者中斷程式執行")
@@ -1541,19 +1856,19 @@ class AutoSlotGameApp:
     
     def cleanup(self) -> None:
         """清理所有資源"""
-        self.logger.info("\n=== 清理資源 ===")
+        self.logger.info("\n" + "-" * 60)
+        self.logger.info("正在清理資源...")
         
         # 關閉所有瀏覽器
         if self.browser_contexts:
-            self.logger.info("正在關閉所有瀏覽器...")
             self.browser_operator.close_all(self.browser_contexts)
             self.browser_contexts.clear()
-            self.logger.info("✓ 所有瀏覽器已關閉")
         
         # 停止所有 Proxy 伺服器
         self.proxy_manager.stop_all_servers()
         
-        self.logger.info("=== 系統結束 ===")
+        self.logger.info("✓ 清理完成")
+        self.logger.info("=" * 60)
 
 
 # ============================================================================
