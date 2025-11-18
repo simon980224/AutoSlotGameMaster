@@ -1358,6 +1358,46 @@ class SyncBrowserOperator:
                 message=f"[{username}] {error_msg}"
             )
     
+    def press_space_all(
+        self,
+        browser_contexts: List[BrowserContext],
+        timeout: Optional[float] = None
+    ) -> List[OperationResult]:
+        """同步在所有瀏覽器中按下空白鍵。
+        
+        Args:
+            browser_contexts: 瀏覽器上下文列表
+            timeout: 超時時間
+            
+        Returns:
+            操作結果列表
+        """
+        def press_space_operation(context: BrowserContext, index: int, total: int) -> bool:
+            # 按下空白鍵
+            context.driver.execute_cdp_cmd("Input.dispatchKeyEvent", {
+                "type": "keyDown",
+                "key": " ",
+                "code": "Space",
+                "windowsVirtualKeyCode": 32,
+                "nativeVirtualKeyCode": 32
+            })
+            # 釋放空白鍵
+            context.driver.execute_cdp_cmd("Input.dispatchKeyEvent", {
+                "type": "keyUp",
+                "key": " ",
+                "code": "Space",
+                "windowsVirtualKeyCode": 32,
+                "nativeVirtualKeyCode": 32
+            })
+            return True
+        
+        return self.execute_sync(
+            browser_contexts,
+            press_space_operation,
+            "按下空白鍵",
+            timeout=timeout
+        )
+    
     def close_all(
         self,
         browser_contexts: List[BrowserContext],
@@ -1382,6 +1422,132 @@ class SyncBrowserOperator:
             "關閉瀏覽器",
             timeout=timeout
         )
+
+
+# ============================================================================
+# 遊戲控制中心
+# ============================================================================
+
+class GameControlCenter:
+    """遊戲控制中心（基礎版本）。
+    
+    提供基本的指令接收框架，具體功能待實現。
+    """
+    
+    def __init__(
+        self,
+        browser_contexts: List[BrowserContext],
+        browser_operator: SyncBrowserOperator,
+        logger: Optional[logging.Logger] = None
+    ):
+        """初始化控制中心。
+        
+        Args:
+            browser_contexts: 瀏覽器上下文列表
+            browser_operator: 瀏覽器操作器
+            logger: 日誌記錄器
+        """
+        self.browser_contexts = browser_contexts
+        self.browser_operator = browser_operator
+        self.logger = logger or LoggerFactory.get_logger()
+        self.running = False
+        self.game_running = False  # 遊戲運行狀態
+    
+    def show_help(self) -> None:
+        """顯示幫助信息"""
+        help_text = """
+╔══════════════════════════════════════════════════════════
+║                   遊戲控制中心 - 指令說明                  
+╠
+║  遊戲控制：
+║    start     - 開始遊戲（按空白鍵
+║    pause     - 暫停遊戲
+║
+║  系統控制：
+║    help      - 顯示此幫助信息
+║    quit      - 退出控制中心
+╚══════════════════════════════════════════════════════════
+"""
+        print(help_text)
+    
+    def process_command(self, command: str) -> bool:
+        """處理用戶指令。
+        
+        Args:
+            command: 用戶輸入的指令
+            
+        Returns:
+            是否繼續運行（False 表示退出）
+        """
+        command = command.strip().lower()
+        
+        if not command:
+            return True
+        
+        try:
+            if command == 'quit':
+                self.logger.info("正在退出控制中心...")
+                return False
+            
+            elif command == 'help':
+                self.show_help()
+            
+            elif command == 'start':
+                if self.game_running:
+                    self.logger.warning("遊戲已經在運行中")
+                else:
+                    self.logger.info("執行指令: 開始遊戲（按空白鍵）")
+                    results = self.browser_operator.press_space_all(self.browser_contexts)
+                    success_count = sum(1 for r in results if r.success)
+                    if success_count > 0:
+                        self.game_running = True
+                        self.logger.info(f"✓ 遊戲已開始: {success_count}/{len(results)} 個瀏覽器")
+                    else:
+                        self.logger.error("開始遊戲失敗")
+            
+            elif command == 'pause':
+                if not self.game_running:
+                    self.logger.warning("遊戲尚未開始")
+                else:
+                    self.game_running = False
+                    self.logger.info("✓ 遊戲已暫停")
+            
+            else:
+                self.logger.warning(f"未知指令: {command}")
+                self.logger.info("輸入 'help' 查看可用指令")
+        
+        except Exception as e:
+            self.logger.error(f"執行指令時發生錯誤: {e}")
+        
+        return True
+    
+    def start(self) -> None:
+        """啟動控制中心"""
+        self.running = True
+        self.logger.info("\n" + "="*50)
+        self.logger.info("遊戲控制中心已啟動")
+        self.logger.info("="*50)
+        self.show_help()
+        
+        try:
+            while self.running:
+                try:
+                    command = input("\n請輸入指令 > ").strip()
+                    if not self.process_command(command):
+                        break
+                except EOFError:
+                    self.logger.info("\n檢測到 EOF，退出控制中心")
+                    break
+                except KeyboardInterrupt:
+                    self.logger.info("\n用戶中斷，退出控制中心")
+                    break
+        finally:
+            self.running = False
+            self.logger.info("控制中心已停止")
+    
+    def stop(self) -> None:
+        """停止控制中心"""
+        self.running = False
 
 
 # ============================================================================
@@ -1651,7 +1817,7 @@ class AutoSlotGameApp:
                 time.sleep(1)  # 間隔避免過快請求
             
             self.logger.info("\n所有使用者登入操作已完成")
-            time.sleep(3)  # 等待登入後的頁面跳轉
+            time.sleep(5)  # 等待登入後的頁面跳轉
             
             # 步驟 5: 導航到遊戲頁面
             self.logger.info("\n" + "="*50)
