@@ -1456,7 +1456,7 @@ class GameControlCenter:
 ║    quit      - 退出控制中心
 ╚══════════════════════════════════════════════════════════
 """
-        print(help_text)
+        self.logger.info(help_text)
     
     def process_command(self, command: str) -> bool:
         """處理用戶指令。
@@ -1521,7 +1521,8 @@ class GameControlCenter:
         try:
             while self.running:
                 try:
-                    command = input("\n請輸入指令 > ").strip()
+                    print("\n請輸入指令 > ", end="", flush=True)
+                    command = input().strip()
                     if not self.process_command(command):
                         break
                 except EOFError:
@@ -1607,7 +1608,8 @@ class AutoSlotGameApp:
             try:
                 self.logger.info("")
                 self.logger.info("="*50)
-                user_input = input(f"請輸入要開啟的瀏覽器數量 (1-{max_browsers}): ").strip()
+                print(f"請輸入要開啟的瀏覽器數量 (1-{max_browsers}): ", end="", flush=True)
+                user_input = input().strip()
                 browser_count = int(user_input)
                 
                 if 1 <= browser_count <= max_browsers:
@@ -1793,7 +1795,7 @@ class AutoSlotGameApp:
             
             # 為每個使用者執行登入
             for i, (context, credential) in enumerate(zip(self.browser_contexts, self.credentials), 1):
-                self.logger.info(f"\n正在登入使用者 {i}/{len(self.credentials)}: {credential.username}")
+                self.logger.info(f"正在登入使用者 {i}/{len(self.credentials)}: {credential.username}")
                 result = self.browser_operator.perform_login(context, credential)
                 if not result.success:
                     self.logger.error(f"使用者 {credential.username} 登入失敗: {result.message}")
@@ -1844,7 +1846,8 @@ class AutoSlotGameApp:
             self.logger.info("")
             
             # 暫停,讓使用者可以觀察
-            input("已完成登入和導航流程，按 Enter 鍵關閉所有瀏覽器...")
+            print("已完成登入和導航流程，按 Enter 鍵關閉所有瀏覽器...", flush=True)
+            input()
             
         except KeyboardInterrupt:
             self.logger.warning("\n使用者中斷程式執行")
