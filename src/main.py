@@ -61,6 +61,9 @@ last_canvas_rect = None
 _template_capture_lock = threading.Lock()
 _template_capturing = {}
 
+# ChromeDriver 安裝鎖（確保同一時間只有一個執行緒安裝 ChromeDriver）
+_chromedriver_install_lock = threading.Lock()
+
 
 # ==================== 自定義異常類別 ====================
 
@@ -1220,9 +1223,25 @@ class BrowserManager:
             BrowserError: 當創建失敗時
         """
         try:
-            # 使用 WebDriver Manager 自動下載並管理 ChromeDriver
-            logger.info("正在使用 WebDriver Manager 取得 ChromeDriver...")
-            service = Service(ChromeDriverManager().install())
+            # 優先使用專案目錄下的 ChromeDriver,避免多執行緒安裝衝突
+            project_root = Path(__file__).parent.parent
+            chromedriver_path = None
+            
+            # 根據作業系統選擇對應的 chromedriver
+            if platform.system() == "Windows":
+                local_driver = project_root / "chromedriver.exe"
+            else:
+                local_driver = project_root / "chromedriver"
+            
+            if local_driver.exists():
+                chromedriver_path = str(local_driver)
+                logger.info(f"使用本地 ChromeDriver: {chromedriver_path}")
+                service = Service(chromedriver_path)
+            else:
+                # 如果本地沒有,才使用 WebDriver Manager(加鎖避免衝突)
+                with _chromedriver_install_lock:
+                    logger.info("正在使用 WebDriver Manager 取得 ChromeDriver...")
+                    service = Service(ChromeDriverManager().install())
             
             chrome_options = BrowserManager.create_chrome_options(local_proxy_port)
             
@@ -2406,8 +2425,27 @@ class MainController:
                     logger.error(f"[{credential.username}] Proxy 伺服器啟動失敗")
                     return
                 
-                # 創建瀏覽器(使用本地 proxy)
-                driver = BrowserManager.create_webdriver(local_proxy_port)
+                # 創建瀏覽器(使用本地 proxy),添加重試機制
+                max_retries = 3
+                driver = None
+                last_error = None
+                
+                for attempt in range(max_retries):
+                    try:
+                        driver = BrowserManager.create_webdriver(local_proxy_port)
+                        break  # 成功則跳出循環
+                    except Exception as e:
+                        last_error = e
+                        if attempt < max_retries - 1:
+                            wait_time = 3 * (attempt + 1)  # 3, 6, 9 秒
+                            logger.warning(f"[{credential.username}] 瀏覽器創建失敗(嘗試 {attempt + 1}/{max_retries}),{wait_time}秒後重試...")
+                            time.sleep(wait_time)
+                        else:
+                            logger.error(f"[{credential.username}] 瀏覽器創建失敗(已達最大重試次數): {e}")
+                            raise
+                
+                if not driver:
+                    raise BrowserError(f"創建瀏覽器失敗: {last_error}")
                 
                 # 登入
                 if LoginManager.login_with_retry(driver, credential):
@@ -2429,7 +2467,7 @@ class MainController:
             thread = threading.Thread(target=launch_worker, args=(i,), daemon=True)
             threads.append(thread)
             thread.start()
-            time.sleep(1)  # 錯開啟動時間
+            time.sleep(2)  # 錯開啟動時間，避免同時安裝 ChromeDriver
         
         logger.info("\n等待所有瀏覽器啟動完成...")
         for thread in threads:
@@ -2437,6 +2475,19 @@ class MainController:
         
         success_count = sum(1 for d in self.drivers if d is not None)
         logger.info(f"\n完成！成功啟動 {success_count}/{count} 個瀏覽器")
+        
+        if success_count == 0:
+            logger.error("\n===== 啟動失敗診斷 =====")
+            logger.error("所有瀏覽器都啟動失敗,可能的原因:")
+            logger.error("1. Chrome 瀏覽器版本與 ChromeDriver 不相容")
+            logger.error("2. ChromeDriver 檔案損壞或權限不足")
+            logger.error("3. Proxy 連線問題")
+            logger.error("\n建議解決方案:")
+            logger.error("1. 更新 Chrome 瀏覽器到最新版本")
+            logger.error("2. 刪除 C:\\Users\\Administrator\\.wdm 目錄下的快取")
+            logger.error("3. 確認專案目錄下的 chromedriver.exe 存在且可執行")
+            logger.error("4. 使用管理員權限執行程式")
+            logger.error("========================\n")
         
         return success_count
     
