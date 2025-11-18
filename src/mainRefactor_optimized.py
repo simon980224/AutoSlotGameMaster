@@ -38,7 +38,8 @@ from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.webdriver import WebDriver
-from selenium.common.exceptions import WebDriverException
+from selenium.common.exceptions import WebDriverException, NoSuchElementException
+from selenium.webdriver.common.by import By
 from webdriver_manager.chrome import ChromeDriverManager
 
 
@@ -64,6 +65,17 @@ class Constants:
     PROXY_SERVER_BIND_HOST = "127.0.0.1"
     PROXY_BUFFER_SIZE = 4096
     PROXY_SELECT_TIMEOUT = 1.0
+    
+    # URL 配置
+    LOGIN_PAGE = "https://m.jfw-win.com/#/login?redirect=%2Fhome%2Fpage"
+    GAME_PAGE = "https://m.jfw-win.com/#/home/loding?game_code=egyptian-mythology&factory_code=ATG&state=true&name=%E6%88%B0%E7%A5%9E%E8%B3%BD%E7%89%B9"
+    
+    # 頁面元素選擇器
+    USERNAME_INPUT = "//input[@placeholder='請輸入帳號']"
+    PASSWORD_INPUT = "//input[@placeholder='請輸入密碼']"
+    LOGIN_BUTTON = "//div[contains(@class, 'login-btn')]//span[text()='立即登入']/.."
+    GAME_IFRAME = "gameFrame-0"
+    GAME_CANVAS = "GameCanvas"
 
 
 # ============================================================================
@@ -938,6 +950,12 @@ class BrowserManager:
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--no-sandbox")
         
+        # 背景執行優化設定
+        chrome_options.add_argument("--disable-backgrounding-occluded-windows")
+        chrome_options.add_argument("--disable-renderer-backgrounding")
+        chrome_options.add_argument("--disable-background-timer-throttling")
+        chrome_options.add_argument("--disable-ipc-flooding-protection")
+        
         # Chrome 131+ 優化設定
         chrome_options.add_argument("--disable-features=NetworkTimeServiceQuerying")
         chrome_options.add_argument("--dns-prefetch-disable")
@@ -1239,9 +1257,9 @@ class SyncBrowserOperator:
         Returns:
             操作結果列表
         """
-        def navigate_operation(context: BrowserContext, index: int, total: int) -> bool:
+        def navigate_operation(context: BrowserContext, index: int, total: int) -> str:
             context.driver.get(url)
-            return True
+            return context.driver.current_url
         
         return self.execute_sync(
             browser_contexts,
@@ -1249,6 +1267,96 @@ class SyncBrowserOperator:
             f"導航到 {url}",
             timeout=timeout
         )
+    
+    def navigate_to_login_page(
+        self,
+        browser_contexts: List[BrowserContext],
+        timeout: Optional[float] = None
+    ) -> List[OperationResult]:
+        """同步導航所有瀏覽器到登入頁面。
+        
+        Args:
+            browser_contexts: 瀏覽器上下文列表
+            timeout: 超時時間
+            
+        Returns:
+            操作結果列表
+        """
+        return self.navigate_all(browser_contexts, Constants.LOGIN_PAGE, timeout)
+    
+    def navigate_to_game_page(
+        self,
+        browser_contexts: List[BrowserContext],
+        timeout: Optional[float] = None
+    ) -> List[OperationResult]:
+        """同步導航所有瀏覽器到遊戲頁面。
+        
+        Args:
+            browser_contexts: 瀏覽器上下文列表
+            timeout: 超時時間
+            
+        Returns:
+            操作結果列表
+        """
+        return self.navigate_all(browser_contexts, Constants.GAME_PAGE, timeout)
+    
+    def perform_login(
+        self,
+        browser_context: BrowserContext,
+        credential: UserCredential
+    ) -> OperationResult:
+        """執行登入操作（針對單一瀏覽器）。
+        
+        Args:
+            browser_context: 瀏覽器上下文
+            credential: 使用者憑證
+            
+        Returns:
+            操作結果
+        """
+        driver = browser_context.driver
+        username = credential.username
+        logger_instance = LoggerFactory.get_logger()
+        
+        try:
+            logger_instance.info(f"[{username}] 開始登入...")
+            
+            # 輸入帳號
+            username_input = driver.find_element(By.XPATH, Constants.USERNAME_INPUT)
+            username_input.clear()
+            username_input.send_keys(credential.username)
+            
+            # 輸入密碼
+            password_input = driver.find_element(By.XPATH, Constants.PASSWORD_INPUT)
+            password_input.clear()
+            password_input.send_keys(credential.password)
+            
+            # 點擊登入按鈕
+            login_button = driver.find_element(By.XPATH, Constants.LOGIN_BUTTON)
+            login_button.click()
+            
+            time.sleep(5)
+            
+            logger_instance.info(f"[{username}] 登入成功")
+            return OperationResult(
+                success=True,
+                message=f"[{username}] 登入成功"
+            )
+            
+        except NoSuchElementException as e:
+            error_msg = f"找不到登入元素: {str(e)}"
+            logger_instance.error(f"[{username}] {error_msg}")
+            return OperationResult(
+                success=False,
+                message=f"[{username}] {error_msg}"
+            )
+        except Exception as e:
+            error_msg = f"登入過程發生錯誤: {str(e)}"
+            logger_instance.error(f"[{username}] {error_msg}")
+            return OperationResult(
+                success=False,
+                message=f"[{username}] {error_msg}"
+            )
     
     def close_all(
         self,
@@ -1519,17 +1627,57 @@ class AutoSlotGameApp:
             if not self.browser_contexts:
                 raise BrowserCreationError("沒有成功建立任何瀏覽器實例")
             
-            # TODO: 在這裡實作後續的自動化邏輯
-            # 例如: 登入、遊戲操作等
-            
-            # 示範同步操作: 導航到測試頁面
-            self.browser_operator.navigate_all(
-                self.browser_contexts,
-                "https://api.ipify.org"
+            # 步驟 3: 導航到登入頁面
+            self.logger.info("\n" + "="*50)
+            self.logger.info("步驟 3: 導航到登入頁面")
+            self.logger.info("="*50)
+            login_results = self.browser_operator.navigate_to_login_page(
+                self.browser_contexts
             )
             
+            time.sleep(2)  # 等待頁面載入
+            
+            # 步驟 4: 執行登入操作
+            self.logger.info("\n" + "="*50)
+            self.logger.info("步驟 4: 執行登入操作")
+            self.logger.info("="*50)
+            
+            # 為每個使用者執行登入
+            for i, (context, credential) in enumerate(zip(self.browser_contexts, self.credentials), 1):
+                self.logger.info(f"\n正在登入使用者 {i}/{len(self.credentials)}: {credential.username}")
+                result = self.browser_operator.perform_login(context, credential)
+                if not result.success:
+                    self.logger.error(f"使用者 {credential.username} 登入失敗: {result.message}")
+                time.sleep(1)  # 間隔避免過快請求
+            
+            self.logger.info("\n所有使用者登入操作已完成")
+            time.sleep(3)  # 等待登入後的頁面跳轉
+            
+            # 步驟 5: 導航到遊戲頁面
+            self.logger.info("\n" + "="*50)
+            self.logger.info("步驟 5: 導航到遊戲頁面")
+            self.logger.info("="*50)
+            game_results = self.browser_operator.navigate_to_game_page(
+                self.browser_contexts
+            )
+            
+            time.sleep(3)  # 等待遊戲頁面載入
+            
+            # TODO: 步驟 6: 圖片檢測與遊戲流程
+            self.logger.info("\n" + "="*50)
+            self.logger.info("步驟 6: 圖片檢測與遊戲流程 (TODO)")
+            self.logger.info("="*50)
+            self.logger.info("待實現功能：")
+            self.logger.info("  1. 切換到遊戲 iframe")
+            self.logger.info("  2. 取得 Canvas 座標")
+            self.logger.info("  3. 檢測 lobby_login.png 圖片")
+            self.logger.info("  4. 點擊開始遊戲按鈕")
+            self.logger.info("  5. 檢測 lobby_confirm.png 圖片")
+            self.logger.info("  6. 點擊確認按鈕")
+            self.logger.info("  7. 進入遊戲控制模式")
+            
             # 暫停,讓使用者可以觀察
-            input("\n按 Enter 鍵關閉所有瀏覽器...")
+            input("\n\n已完成登入和導航流程，按 Enter 鍵關閉所有瀏覽器...")
             
         except KeyboardInterrupt:
             self.logger.warning("\n使用者中斷程式執行")
