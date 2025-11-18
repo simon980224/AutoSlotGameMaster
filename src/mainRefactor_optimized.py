@@ -1524,7 +1524,8 @@ class GameControlCenter:
     def start(self) -> None:
         """啟動控制中心"""
         self.running = True
-        self.logger.info("\n" + "="*50)
+        self.logger.info("")
+        self.logger.info("="*50)
         self.logger.info("遊戲控制中心已啟動")
         self.logger.info("="*50)
         self.show_help()
@@ -1624,10 +1625,10 @@ class AutoSlotGameApp:
         if max_browsers == 0:
             raise ConfigurationError("沒有可用的使用者憑證")
         
-        self.logger.info("\n" + "="*50)
-        
         while True:
             try:
+                self.logger.info("")
+                self.logger.info("="*50)
                 user_input = input(f"請輸入要開啟的瀏覽器數量 (1-{max_browsers}): ").strip()
                 browser_count = int(user_input)
                 
@@ -1651,7 +1652,8 @@ class AutoSlotGameApp:
         Returns:
             Proxy 埠號列表
         """
-        self.logger.info("\n=== 步驟 1: 啟動 Proxy 中繼伺服器 ===")
+        self.logger.info("")
+        self.logger.info("=== 步驟 1: 啟動 Proxy 中繼伺服器 ===")
         proxy_ports: List[Optional[int]] = []
         
         for i in range(browser_count):
@@ -1710,7 +1712,8 @@ class AutoSlotGameApp:
         Returns:
             瀏覽器上下文列表
         """
-        self.logger.info("\n=== 步驟 2: 建立瀏覽器實例 ===")
+        self.logger.info("")
+        self.logger.info("=== 步驟 2: 建立瀏覽器實例 ===")
         
         browser_results: List[Optional[BrowserContext]] = [None] * browser_count
         
@@ -1794,7 +1797,8 @@ class AutoSlotGameApp:
                 raise BrowserCreationError("沒有成功建立任何瀏覽器實例")
             
             # 步驟 3: 導航到登入頁面
-            self.logger.info("\n" + "="*50)
+            self.logger.info("")
+            self.logger.info("="*50)
             self.logger.info("步驟 3: 導航到登入頁面")
             self.logger.info("="*50)
             login_results = self.browser_operator.navigate_to_login_page(
@@ -1804,7 +1808,8 @@ class AutoSlotGameApp:
             time.sleep(2)  # 等待頁面載入
             
             # 步驟 4: 執行登入操作
-            self.logger.info("\n" + "="*50)
+            self.logger.info("")
+            self.logger.info("="*50)
             self.logger.info("步驟 4: 執行登入操作")
             self.logger.info("="*50)
             
@@ -1816,11 +1821,13 @@ class AutoSlotGameApp:
                     self.logger.error(f"使用者 {credential.username} 登入失敗: {result.message}")
                 time.sleep(1)  # 間隔避免過快請求
             
-            self.logger.info("\n所有使用者登入操作已完成")
+            self.logger.info("")
+            self.logger.info("所有使用者登入操作已完成")
             time.sleep(5)  # 等待登入後的頁面跳轉
             
             # 步驟 5: 導航到遊戲頁面
-            self.logger.info("\n" + "="*50)
+            self.logger.info("")
+            self.logger.info("="*50)
             self.logger.info("步驟 5: 導航到遊戲頁面")
             self.logger.info("="*50)
             game_results = self.browser_operator.navigate_to_game_page(
@@ -1830,7 +1837,8 @@ class AutoSlotGameApp:
             time.sleep(3)  # 等待遊戲頁面載入
             
             # TODO: 步驟 6: 圖片檢測與遊戲流程
-            self.logger.info("\n" + "="*50)
+            self.logger.info("")
+            self.logger.info("="*50)
             self.logger.info("步驟 6: 圖片檢測與遊戲流程 (TODO)")
             self.logger.info("="*50)
             self.logger.info("待實現功能：")
@@ -1841,9 +1849,10 @@ class AutoSlotGameApp:
             self.logger.info("  5. 檢測 lobby_confirm.png 圖片")
             self.logger.info("  6. 點擊確認按鈕")
             self.logger.info("  7. 進入遊戲控制模式")
+            self.logger.info("")
             
             # 暫停,讓使用者可以觀察
-            input("\n\n已完成登入和導航流程，按 Enter 鍵關閉所有瀏覽器...")
+            input("已完成登入和導航流程，按 Enter 鍵關閉所有瀏覽器...")
             
         except KeyboardInterrupt:
             self.logger.warning("\n使用者中斷程式執行")
@@ -1855,7 +1864,8 @@ class AutoSlotGameApp:
     
     def cleanup(self) -> None:
         """清理所有資源"""
-        self.logger.info("\n=== 清理資源 ===")
+        self.logger.info("")
+        self.logger.info("=== 清理資源 ===")
         
         # 關閉所有瀏覽器
         if self.browser_contexts:
