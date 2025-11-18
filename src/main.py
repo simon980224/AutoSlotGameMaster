@@ -25,6 +25,9 @@ import tempfile
 import threading
 import time
 import zipfile
+import socket
+import select
+import base64
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
@@ -90,6 +93,192 @@ class ImageDetectionError(GameAutomationError):
 class GameControlError(GameAutomationError):
     """遊戲控制錯誤異常"""
     pass
+
+
+# ==================== SimpleProxyServer 類別 ====================
+
+
+class SimpleProxyServer:
+    """
+    簡易 HTTP Proxy 伺服器 (使用 Python 內建模組)
+    將帶認證的遠端 proxy 轉換為本地無需認證的 proxy
+    """
+    
+    def __init__(self, local_port: int, upstream_proxy: str):
+        """
+        Args:
+            local_port: 本地監聽端口
+            upstream_proxy: 上游 proxy,格式 "ip:port:username:password"
+        """
+        self.local_port = local_port
+        self.upstream_proxy = self.parse_proxy(upstream_proxy)
+        self.running = False
+        
+    def parse_proxy(self, proxy_string: str) -> dict:
+        """解析 proxy 字串"""
+        parts = proxy_string.split(':')
+        ip = parts[0]
+        port = int(parts[1])
+        remaining = ':'.join(parts[2:])
+        last_colon_index = remaining.rfind(':')
+        username = remaining[:last_colon_index]
+        password = remaining[last_colon_index + 1:]
+        
+        return {
+            'host': ip,
+            'port': port,
+            'username': username,
+            'password': password,
+            'url': f"http://{username}:{password}@{ip}:{port}"
+        }
+    
+    def handle_client(self, client_socket: socket.socket) -> None:
+        """處理客戶端連接"""
+        try:
+            # 接收客戶端請求
+            request = client_socket.recv(4096)
+            if not request:
+                return
+            
+            # 解析請求
+            first_line = request.split(b'\r\n')[0].decode('utf-8', errors='ignore')
+            
+            # 使用 requests 透過上游 proxy 發送請求
+            try:
+                # 簡單處理 CONNECT 請求 (HTTPS)
+                if first_line.startswith('CONNECT'):
+                    # 建立到上游 proxy 的連接
+                    upstream_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    upstream_socket.connect((self.upstream_proxy['host'], self.upstream_proxy['port']))
+                    
+                    # 構建帶認證的 CONNECT 請求
+                    auth_string = f"{self.upstream_proxy['username']}:{self.upstream_proxy['password']}"
+                    auth_bytes = auth_string.encode('utf-8')
+                    auth_b64 = base64.b64encode(auth_bytes).decode('ascii')
+                    
+                    # 修改請求,添加認證頭
+                    request_lines = request.split(b'\r\n')
+                    auth_header = f"Proxy-Authorization: Basic {auth_b64}\r\n".encode('utf-8')
+                    
+                    # 重建請求
+                    new_request = request_lines[0] + b'\r\n' + auth_header
+                    for line in request_lines[1:]:
+                        new_request += line + b'\r\n'
+                    
+                    # 發送帶認證的 CONNECT 請求到上游 proxy
+                    upstream_socket.send(new_request)
+                    
+                    # 等待上游 proxy 回應
+                    response = upstream_socket.recv(4096)
+                    if b'200' in response:
+                        # 告訴客戶端連接成功
+                        client_socket.send(b'HTTP/1.1 200 Connection Established\r\n\r\n')
+                        
+                        # 雙向轉發數據
+                        self.forward_data(client_socket, upstream_socket)
+                    else:
+                        client_socket.send(b'HTTP/1.1 502 Bad Gateway\r\n\r\n')
+                        upstream_socket.close()
+                    
+                else:
+                    # 處理普通 HTTP 請求
+                    # 添加 Proxy 認證頭
+                    auth_string = f"{self.upstream_proxy['username']}:{self.upstream_proxy['password']}"
+                    auth_bytes = auth_string.encode('utf-8')
+                    auth_b64 = base64.b64encode(auth_bytes).decode('ascii')
+                    
+                    request_lines = request.split(b'\r\n')
+                    auth_header = f"Proxy-Authorization: Basic {auth_b64}\r\n".encode('utf-8')
+                    
+                    # 重建請求
+                    new_request = request_lines[0] + b'\r\n' + auth_header
+                    for line in request_lines[1:]:
+                        new_request += line + b'\r\n'
+                    
+                    # 透過上游 proxy 發送
+                    upstream_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    upstream_socket.connect((self.upstream_proxy['host'], self.upstream_proxy['port']))
+                    upstream_socket.send(new_request)
+                    
+                    # 接收回應並轉發給客戶端
+                    response = upstream_socket.recv(4096)
+                    while response:
+                        client_socket.send(response)
+                        response = upstream_socket.recv(4096)
+                    
+                    upstream_socket.close()
+                    
+            except Exception:
+                try:
+                    client_socket.send(b'HTTP/1.1 502 Bad Gateway\r\n\r\n')
+                except:
+                    pass
+                
+        except Exception:
+            pass
+        finally:
+            try:
+                client_socket.close()
+            except:
+                pass
+    
+    def forward_data(self, source: socket.socket, destination: socket.socket) -> None:
+        """雙向轉發數據"""
+        try:
+            while True:
+                ready_sockets, _, _ = select.select([source, destination], [], [], 1)
+                
+                if not ready_sockets:
+                    continue
+                    
+                for sock in ready_sockets:
+                    try:
+                        data = sock.recv(4096)
+                        if not data:
+                            return
+                        
+                        if sock is source:
+                            destination.send(data)
+                        else:
+                            source.send(data)
+                    except:
+                        return
+                        
+        except Exception:
+            pass  # 靜默處理斷線錯誤
+    
+    def start(self) -> None:
+        """啟動 proxy 伺服器"""
+        self.running = True
+        server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        
+        try:
+            server_socket.bind(('127.0.0.1', self.local_port))
+            server_socket.listen(5)
+            
+            while self.running:
+                try:
+                    server_socket.settimeout(1.0)
+                    client_socket, address = server_socket.accept()
+                    
+                    # 在新線程中處理客戶端
+                    client_thread = threading.Thread(
+                        target=self.handle_client,
+                        args=(client_socket,)
+                    )
+                    client_thread.daemon = True
+                    client_thread.start()
+                    
+                except socket.timeout:
+                    continue
+                except KeyboardInterrupt:
+                    break
+                    
+        except Exception as e:
+            raise Exception(f"伺服器啟動失敗: {e}")
+        finally:
+            server_socket.close()
 
 
 # ==================== 日誌配置 ====================
@@ -497,12 +686,6 @@ class LocalProxyServerManager:
             BrowserError: 當啟動失敗時
         """
         try:
-            # 動態匯入 SimpleProxyServer
-            import sys
-            import os
-            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-            from simple_proxy_server import SimpleProxyServer
-            
             # 建立 proxy 伺服器實例
             server = SimpleProxyServer(local_port, upstream_proxy)
             
@@ -2514,7 +2697,7 @@ class MainController:
     
     def start_repeat_space(self, min_interval: float, max_interval: float) -> bool:
         """
-        開始重複按空白鍵功能（控制所有瀏覽器）
+        開始重複按空白鍵功能（控制所有瀏覽器，每個瀏覽器獨立隨機間隔）
         這個函式會阻塞當前執行緒，直到使用者輸入 'p' 為止
         
         Args:
@@ -2541,63 +2724,103 @@ class MainController:
         if sys.platform == 'win32':
             import msvcrt
         
-        logger.info(f"開始重複按空白鍵（間隔 {min_interval}~{max_interval} 秒）")
+        logger.info(f"開始重複按空白鍵（每個瀏覽器獨立隨機間隔 {min_interval}~{max_interval} 秒）")
         logger.info("輸入 'p' + Enter 可暫停並返回指令選單")
         logger.info("輸入其他內容會繼續運行")
         
         self.repeat_space_running = True
-        press_count = 0
         input_buffer = ""
         
-        try:
+        # 為每個瀏覽器建立獨立的執行緒
+        browser_threads = []
+        browser_press_counts = {}  # 記錄每個瀏覽器的按鍵次數
+        
+        def browser_worker(driver):
+            """每個瀏覽器獨立的按鍵執行緒"""
+            username = game_state_manager.get_username(driver) or "未知"
+            press_count = 0
+            
             while self.repeat_space_running:
-                # 對所有瀏覽器按空白鍵
-                for driver in self.drivers:
-                    if driver is not None and self.repeat_space_running:
-                        try:
-                            controller = GameController(driver)
-                            controller.send_space()
-                            username = game_state_manager.get_username(driver) or "未知"
-                            logger.debug(f"[{username}] 已按空白鍵")
-                        except Exception as e:
-                            username = game_state_manager.get_username(driver) or "未知"
-                            logger.warning(f"[{username}] 按空白鍵失敗: {e}")
-                
-                press_count += 1
-                logger.info(f"已完成第 {press_count} 次按鍵")
-                
-                # 計算隨機間隔
-                wait_time = random.uniform(min_interval, max_interval)
-                logger.info(f"等待 {wait_time:.1f} 秒後再次按鍵...")
-                
-                # 每 0.1 秒檢查一次輸入
-                sleep_step = 0.1
-                total_slept = 0
-                while total_slept < wait_time and self.repeat_space_running:
-                    # Windows 系統檢查鍵盤輸入
-                    if sys.platform == 'win32' and msvcrt.kbhit():
-                        char = msvcrt.getch().decode('utf-8', errors='ignore').lower()
-                        if char == '\r' or char == '\n':
-                            # Enter 鍵：處理緩衝區的內容
-                            if input_buffer.strip() == 'p':
-                                logger.info("收到 'p' 輸入，停止重複按鍵")
-                                self.repeat_space_running = False
-                                input_buffer = ""
-                                break
-                            elif input_buffer.strip():
-                                logger.info(f"收到 '{input_buffer.strip()}' 輸入，繼續轉動")
-                            input_buffer = ""
-                        else:
-                            # 累積字元到緩衝區
-                            input_buffer += char
+                try:
+                    # 按空白鍵
+                    controller = GameController(driver)
+                    controller.send_space()
+                    press_count += 1
+                    browser_press_counts[username] = press_count
                     
-                    time.sleep(sleep_step)
-                    total_slept += sleep_step
+                    # 計算此瀏覽器本次的隨機間隔
+                    wait_time = random.uniform(min_interval, max_interval)
+                    logger.info(f"[{username}] 已按空白鍵（第 {press_count} 次），等待 {wait_time:.1f} 秒後再次按鍵")
+                    
+                    # 分段休眠，以便及時響應停止信號
+                    sleep_step = 0.1
+                    total_slept = 0
+                    while total_slept < wait_time and self.repeat_space_running:
+                        time.sleep(sleep_step)
+                        total_slept += sleep_step
+                        
+                except Exception as e:
+                    logger.warning(f"[{username}] 按空白鍵失敗: {e}")
+                    # 發生錯誤時也等待一下再重試
+                    time.sleep(1)
+        
+        # 為每個有效的瀏覽器啟動執行緒
+        for driver in self.drivers:
+            if driver is not None:
+                username = game_state_manager.get_username(driver) or "未知"
+                browser_press_counts[username] = 0
+                thread = threading.Thread(target=browser_worker, args=(driver,), daemon=True)
+                browser_threads.append(thread)
+                thread.start()
+                logger.info(f"[{username}] 已啟動獨立按鍵執行緒")
+        
+        # 主執行緒負責檢查輸入並顯示進度
+        try:
+            last_report_time = time.time()
+            while self.repeat_space_running:
+                # 每 0.1 秒檢查一次輸入
+                time.sleep(0.1)
+                
+                # Windows 系統檢查鍵盤輸入
+                if sys.platform == 'win32' and msvcrt.kbhit():
+                    char = msvcrt.getch().decode('utf-8', errors='ignore').lower()
+                    if char == '\r' or char == '\n':
+                        # Enter 鍵：處理緩衝區的內容
+                        if input_buffer.strip() == 'p':
+                            logger.info("收到 'p' 輸入，停止重複按鍵")
+                            self.repeat_space_running = False
+                            input_buffer = ""
+                            break
+                        elif input_buffer.strip():
+                            logger.info(f"收到 '{input_buffer.strip()}' 輸入，繼續轉動")
+                        input_buffer = ""
+                    else:
+                        # 累積字元到緩衝區
+                        input_buffer += char
+                
+                # 每 10 秒報告一次各瀏覽器的按鍵統計
+                current_time = time.time()
+                if current_time - last_report_time >= 10:
+                    logger.info("--- 按鍵統計 ---")
+                    for username, count in browser_press_counts.items():
+                        logger.info(f"  [{username}] 已按 {count} 次")
+                    last_report_time = current_time
         
         except KeyboardInterrupt:
             logger.info("\n偵測到中斷訊號，停止重複按鍵")
         finally:
             self.repeat_space_running = False
+            
+            # 等待所有執行緒結束
+            logger.info("等待所有瀏覽器執行緒停止...")
+            for thread in browser_threads:
+                thread.join(timeout=2)
+            
+            # 顯示最終統計
+            logger.info("=== 最終按鍵統計 ===")
+            for username, count in browser_press_counts.items():
+                logger.info(f"  [{username}] 總共按了 {count} 次空白鍵")
+            
             logger.info("重複按鍵功能已停止，返回指令選單")
         
         return True
