@@ -936,8 +936,8 @@ class BrowserManager:
     ) -> WebDriver:
         """建立 WebDriver 實例。
         
-        優先使用 WebDriver Manager 自動管理驅動程式，
-        若失敗則嘗試使用專案內的驅動程式檔案作為備援。
+        優先使用專案內的驅動程式檔案，
+        若失敗則嘗試使用 WebDriver Manager 自動管理作為備援。
         
         Args:
             local_proxy_port: 本機 proxy 中繼埠號（可選）
@@ -952,33 +952,40 @@ class BrowserManager:
         driver = None
         errors = []
         
-        # 方法 1: 使用 WebDriver Manager 自動管理
+        # 方法 1: 優先使用專案內的驅動程式檔案
         try:
-            self.logger.info("正在使用 WebDriver Manager 取得 ChromeDriver...")
-            service = Service(ChromeDriverManager().install())
-            self.logger.info("正在啟動 Chrome 瀏覽器...")
-            driver = webdriver.Chrome(service=service, options=chrome_options)
+            self.logger.info("正在使用專案內驅動程式...")
+            driver = self._create_webdriver_with_local_driver(chrome_options)
             
             # 取得 Chrome 版本
             with suppress(Exception):
                 chrome_version = driver.capabilities.get('browserVersion', 'unknown')
                 self.logger.info(f"Chrome 版本: {chrome_version}")
             
-            self.logger.info("✓ 瀏覽器實例已建立 (使用 WebDriver Manager)")
+            self.logger.info("✓ 瀏覽器實例已建立 (使用本機驅動程式)")
             
         except Exception as e:
-            errors.append(f"WebDriver Manager: {e}")
-            self.logger.warning(f"WebDriver Manager 失敗: {e}")
-            self.logger.info("嘗試使用專案內驅動程式作為備援...")
+            errors.append(f"本機驅動程式: {e}")
+            self.logger.warning(f"本機驅動程式失敗: {e}")
+            self.logger.info("嘗試使用 WebDriver Manager 作為備援...")
             
-            # 方法 2: 使用專案內的驅動程式檔案
+            # 方法 2: 使用 WebDriver Manager 自動管理
             try:
-                driver = self._create_webdriver_with_local_driver(chrome_options)
-                self.logger.info("✓ 瀏覽器實例已建立 (使用本機驅動程式)")
+                self.logger.info("正在使用 WebDriver Manager 取得 ChromeDriver...")
+                service = Service(ChromeDriverManager().install())
+                self.logger.info("正在啟動 Chrome 瀏覽器...")
+                driver = webdriver.Chrome(service=service, options=chrome_options)
+                
+                # 取得 Chrome 版本
+                with suppress(Exception):
+                    chrome_version = driver.capabilities.get('browserVersion', 'unknown')
+                    self.logger.info(f"Chrome 版本: {chrome_version}")
+                
+                self.logger.info("✓ 瀏覽器實例已建立 (使用 WebDriver Manager)")
                 
             except Exception as e2:
-                errors.append(f"本機驅動程式: {e2}")
-                self.logger.error(f"本機驅動程式也失敗: {e2}")
+                errors.append(f"WebDriver Manager: {e2}")
+                self.logger.error(f"WebDriver Manager 也失敗: {e2}")
         
         if driver is None:
             error_msg = "無法建立瀏覽器實例。\n" + "\n".join(f"- {err}" for err in errors)
