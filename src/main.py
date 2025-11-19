@@ -1223,8 +1223,14 @@ class BrowserManager:
             BrowserError: 當創建失敗時
         """
         try:
-            # 優先使用專案目錄下的 ChromeDriver,避免多執行緒安裝衝突
-            project_root = Path(__file__).parent.parent
+            # 取得正確的專案根目錄
+            if getattr(sys, 'frozen', False):
+                # 打包後的 exe，_MEIPASS 是 PyInstaller 解壓縮的臨時目錄
+                project_root = Path(sys._MEIPASS)
+            else:
+                # 原始 Python 腳本
+                project_root = Path(__file__).parent.parent
+            
             chromedriver_path = None
             
             # 根據作業系統選擇對應的 chromedriver
@@ -1239,6 +1245,8 @@ class BrowserManager:
                 service = Service(chromedriver_path)
             else:
                 # 如果本地沒有,才使用 WebDriver Manager(加鎖避免衝突)
+                logger.info(f"ChromeDriver 不存在於: {local_driver}")
+                logger.info(f"專案根目錄: {project_root}")
                 with _chromedriver_install_lock:
                     logger.info("正在使用 WebDriver Manager 取得 ChromeDriver...")
                     service = Service(ChromeDriverManager().install())
