@@ -808,7 +808,7 @@ class LocalProxyServerManager:
                 self._proxy_threads[local_port] = server_thread
             
             # 等待伺服器啟動
-            time.sleep(0.5)
+            time.sleep(1)
             
             self.logger.info(
                 f"啟動本機 Proxy 中繼: {Constants.PROXY_SERVER_BIND_HOST}:{local_port} "
@@ -1808,7 +1808,7 @@ class AutoSlotGameApp:
                 self.browser_contexts
             )
             
-            time.sleep(2)  # 等待頁面載入
+            time.sleep(3)  # 等待頁面載入
             
             # 步驟 4: 執行登入操作（同步）
             self._print_step(4, "執行登入操作")
@@ -1835,7 +1835,7 @@ class AutoSlotGameApp:
                 columns=4
             )
             
-            time.sleep(1)  # 等待視窗調整完成
+            time.sleep(3)  # 等待視窗調整完成
             
             # TODO: 圖片檢測與遊戲流程 (待實現)
             # 1. iframe 切換到遊戲畫面
