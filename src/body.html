@@ -1,0 +1,25 @@
+<body>
+   <div id="logo" style="display: none;"><img src="https://play.godeezone2.com/images/logos/atg.png" style="width: 10%;"></div>
+   <div id="loadingMsg" style="display: none;">load bundle : slotFramework path : prefabs/view/SlotTableViewL_v2</div>
+   <div id="orientation">
+      <div class="icon"></div>
+   </div>
+   <div class="blur"></div>
+   <div id="swipe">
+      <div class="swipe"></div>
+      <div class="fullscreen-icon"></div>
+   </div>
+   <div id="GameWrapper" class="desktop">
+      <div id="GameDiv" cc_exact_fit_screen="true" style="display: flex; justify-content: center; align-items: center; transform: rotate(0deg); margin: 0px auto; width: 540px; height: 720px; top: 0px; left: 0px;">
+         <div id="Cocos3dGameContainer" style="width: 100%; height: 100%;">
+            <canvas id="GameCanvas" oncontextmenu="event.preventDefault()" tabindex="99" width="1080" height="1440"></canvas>
+         </div>
+      </div>
+      <div id="version"></div>
+   </div>
+   <script>// 為了pc的觸控螢幕做hack
+      if(document.documentElement&&document.documentElement.ontouchstart==undefined){
+        document.documentElement.ontouchstart=()=>{};
+      }
+   </script><script src="./app.js"></script><script src="src/polyfills.bundle.js" charset="utf-8"></script><script src="src/system.bundle.js" charset="utf-8"></script><script src="src/import-map.json" type="systemjs-importmap" charset="utf-8"></script><script>System.import("./index.js").catch(function(o){console.error(o)})</script>
+</body>
