@@ -1568,40 +1568,6 @@ class ImageDetector:
         except Exception as e:
             self.logger.error(f"瀏覽器圖片檢測失敗: {e}")
             return None
-    
-    def click_at_position(self, driver: WebDriver, x: int, y: int) -> None:
-        """在指定座標執行點擊。
-        
-        Args:
-            driver: WebDriver 實例
-            x: X 座標
-            y: Y 座標
-            
-        Raises:
-            ImageDetectionError: 點擊失敗
-        """
-        try:
-            # TODO: 使用 CDP 或 JavaScript 在 Canvas 上的指定座標執行點擊
-            # 這裡需要根據實際的遊戲框架來實現
-            # 暫時使用 JavaScript 模擬點擊
-            script = f"""
-                var element = document.elementFromPoint({x}, {y});
-                if (element) {{
-                    var evt = new MouseEvent('click', {{
-                        bubbles: true,
-                        cancelable: true,
-                        view: window,
-                        clientX: {x},
-                        clientY: {y}
-                    }});
-                    element.dispatchEvent(evt);
-                }}
-            """
-            driver.execute_script(script)
-            self.logger.info(f"已在座標 ({x}, {y}) 執行點擊")
-            
-        except Exception as e:
-            raise ImageDetectionError(f"點擊失敗: {e}") from e
 
 
 # ============================================================================
