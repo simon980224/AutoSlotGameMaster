@@ -39,6 +39,12 @@ from selenium.common.exceptions import WebDriverException, NoSuchElementExceptio
 from selenium.webdriver.common.by import By
 from webdriver_manager.chrome import ChromeDriverManager
 
+# 圖片處理相關
+import cv2
+import numpy as np
+from PIL import Image
+import io
+
 
 # ============================================================================
 # 常量定義
@@ -71,6 +77,14 @@ class Constants:
     LOGIN_BUTTON = "//div[contains(@class, 'login-btn')]//span[text()='立即登入']/.."
     GAME_IFRAME = "gameFrame-0"
     GAME_CANVAS = "GameCanvas"
+    
+    # 圖片檢測配置
+    IMAGE_DIR = "img"
+    LOBBY_LOGIN = "lobby_login.png"
+    LOBBY_CONFIRM = "lobby_confirm.png"
+    MATCH_THRESHOLD = 0.8  # 圖片匹配閾值
+    DETECTION_INTERVAL = 1.0  # 檢測間隔（秒）
+    MAX_DETECTION_ATTEMPTS = 60  # 最大檢測次數
 
 
 # ============================================================================
@@ -196,6 +210,11 @@ class BrowserCreationError(AutoSlotGameError):
 
 class ProxyServerError(AutoSlotGameError):
     """Proxy 伺服器錯誤"""
+    pass
+
+
+class ImageDetectionError(AutoSlotGameError):
+    """圖片檢測錯誤"""
     pass
 
 
@@ -1406,6 +1425,186 @@ class SyncBrowserOperator:
 
 
 # ============================================================================
+# 圖片檢測器
+# ============================================================================
+
+class ImageDetector:
+    """圖片檢測器。
+    
+    提供螢幕截圖、圖片比對和座標定位功能。
+    """
+    
+    def __init__(self, logger: Optional[logging.Logger] = None):
+        """初始化圖片檢測器"""
+        self.logger = logger or LoggerFactory.get_logger()
+        
+        # 取得專案根目錄
+        if getattr(sys, 'frozen', False):
+            self.project_root = Path(sys.executable).resolve().parent
+        else:
+            self.project_root = Path(__file__).resolve().parent.parent
+        
+        self.image_dir = self.project_root / Constants.IMAGE_DIR
+        
+        # 確保圖片目錄存在
+        self.image_dir.mkdir(parents=True, exist_ok=True)
+    
+    def get_template_path(self, template_name: str) -> Path:
+        """取得模板圖片路徑。
+        
+        Args:
+            template_name: 模板圖片檔名
+            
+        Returns:
+            模板圖片完整路徑
+        """
+        return self.image_dir / template_name
+    
+    def template_exists(self, template_name: str) -> bool:
+        """檢查模板圖片是否存在。
+        
+        Args:
+            template_name: 模板圖片檔名
+            
+        Returns:
+            是否存在
+        """
+        return self.get_template_path(template_name).exists()
+    
+    def capture_screenshot(self, driver: WebDriver, save_path: Optional[Path] = None) -> np.ndarray:
+        """截取瀏覽器畫面。
+        
+        Args:
+            driver: WebDriver 實例
+            save_path: 儲存路徑（可選）
+            
+        Returns:
+            OpenCV 格式的圖片陣列 (BGR)
+            
+        Raises:
+            ImageDetectionError: 截圖失敗
+        """
+        try:
+            # 取得截圖（base64 格式）
+            screenshot_base64 = driver.get_screenshot_as_base64()
+            
+            # 解碼並轉換為 OpenCV 格式
+            screenshot_bytes = base64.b64decode(screenshot_base64)
+            image = Image.open(io.BytesIO(screenshot_bytes))
+            image_cv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+            
+            # 如果指定了儲存路徑，則儲存圖片
+            if save_path:
+                save_path.parent.mkdir(parents=True, exist_ok=True)
+                cv2.imwrite(str(save_path), image_cv)
+                self.logger.info(f"截圖已儲存: {save_path}")
+            
+            return image_cv
+            
+        except Exception as e:
+            raise ImageDetectionError(f"截圖失敗: {e}") from e
+    
+    def match_template(self, screenshot: np.ndarray, template_path: Path, threshold: float = Constants.MATCH_THRESHOLD) -> Optional[Tuple[int, int, float]]:
+        """在截圖中尋找模板圖片。
+        
+        Args:
+            screenshot: 截圖（OpenCV 格式）
+            template_path: 模板圖片路徑
+            threshold: 匹配閾值（0-1）
+            
+        Returns:
+            如果找到: (x, y, confidence) - 中心座標和信心度
+            如果未找到: None
+            
+        Raises:
+            ImageDetectionError: 檢測失敗
+        """
+        try:
+            if not template_path.exists():
+                raise FileNotFoundError(f"模板圖片不存在: {template_path}")
+            
+            # 讀取模板圖片
+            template = cv2.imread(str(template_path))
+            if template is None:
+                raise ImageDetectionError(f"無法讀取模板圖片: {template_path}")
+            
+            # 取得模板尺寸
+            template_h, template_w = template.shape[:2]
+            
+            # 執行模板匹配
+            result = cv2.matchTemplate(screenshot, template, cv2.TM_CCOEFF_NORMED)
+            min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
+            
+            # 檢查是否超過閾值
+            if max_val >= threshold:
+                # 計算中心座標
+                center_x = max_loc[0] + template_w // 2
+                center_y = max_loc[1] + template_h // 2
+                return (center_x, center_y, max_val)
+            
+            return None
+            
+        except FileNotFoundError:
+            raise
+        except Exception as e:
+            raise ImageDetectionError(f"圖片匹配失敗: {e}") from e
+    
+    def detect_in_browser(self, driver: WebDriver, template_name: str, threshold: float = Constants.MATCH_THRESHOLD) -> Optional[Tuple[int, int, float]]:
+        """在瀏覽器中檢測模板圖片。
+        
+        Args:
+            driver: WebDriver 實例
+            template_name: 模板圖片檔名
+            threshold: 匹配閾值
+            
+        Returns:
+            如果找到: (x, y, confidence)
+            如果未找到: None
+        """
+        try:
+            screenshot = self.capture_screenshot(driver)
+            template_path = self.get_template_path(template_name)
+            return self.match_template(screenshot, template_path, threshold)
+        except Exception as e:
+            self.logger.error(f"瀏覽器圖片檢測失敗: {e}")
+            return None
+    
+    def click_at_position(self, driver: WebDriver, x: int, y: int) -> None:
+        """在指定座標執行點擊。
+        
+        Args:
+            driver: WebDriver 實例
+            x: X 座標
+            y: Y 座標
+            
+        Raises:
+            ImageDetectionError: 點擊失敗
+        """
+        try:
+            # TODO: 使用 CDP 或 JavaScript 在 Canvas 上的指定座標執行點擊
+            # 這裡需要根據實際的遊戲框架來實現
+            # 暫時使用 JavaScript 模擬點擊
+            script = f"""
+                var element = document.elementFromPoint({x}, {y});
+                if (element) {{
+                    var evt = new MouseEvent('click', {{
+                        bubbles: true,
+                        cancelable: true,
+                        view: window,
+                        clientX: {x},
+                        clientY: {y}
+                    }});
+                    element.dispatchEvent(evt);
+                }}
+            """
+            driver.execute_script(script)
+            self.logger.info(f"已在座標 ({x}, {y}) 執行點擊")
+            
+        except Exception as e:
+            raise ImageDetectionError(f"點擊失敗: {e}") from e
+
+
+# ============================================================================
 # 遊戲控制中心
 # ============================================================================
 
@@ -1569,6 +1768,7 @@ class AutoSlotGameApp:
         self.credentials: List[UserCredential] = []
         self.rules: List[BetRule] = []
         self.browser_contexts: List[BrowserContext] = []
+        self.image_detector = ImageDetector(logger=self.logger)
     
     def _print_step(self, step: Any, title: str) -> None:
         """輸出步驟標題。
@@ -1837,13 +2037,12 @@ class AutoSlotGameApp:
             
             time.sleep(3)  # 等待視窗調整完成
             
-            # TODO: 圖片檢測與遊戲流程 (待實現)
-            # - 圖片辨識與檢測
-            # - 自動點擊操作
-            # - 遊戲狀態監控
+            # 步驟 6: 圖片檢測與遊戲流程
+            self._print_step(6, "圖片檢測與遊戲流程")
+            self._execute_image_detection_flow()
             
-            # 步驟 6: 啟動遊戲控制中心
-            self._print_step(6, "啟動遊戲控制中心")
+            # 步驟 7: 啟動遊戲控制中心
+            self._print_step(7, "啟動遊戲控制中心")
             control_center = GameControlCenter(
                 browser_contexts=self.browser_contexts,
                 browser_operator=self.browser_operator,
@@ -1858,6 +2057,303 @@ class AutoSlotGameApp:
             raise
         finally:
             self.cleanup()
+    
+    def _execute_image_detection_flow(self) -> None:
+        """執行圖片檢測流程。
+        
+        包含 lobby_login 和 lobby_confirm 的檢測與處理。
+        """
+        if not self.browser_contexts:
+            self.logger.error("沒有可用的瀏覽器實例")
+            return
+        
+        # 使用第一個瀏覽器作為參考
+        reference_browser = self.browser_contexts[0]
+        
+        # 階段 1: 處理 lobby_login
+        self.logger.info("\n" + "=" * 60)
+        self.logger.info("階段 1: 檢測 lobby_login")
+        self.logger.info("=" * 60)
+        
+        self._handle_lobby_login(reference_browser)
+        
+        # 階段 2: 處理 lobby_confirm
+        self.logger.info("\n" + "=" * 60)
+        self.logger.info("階段 2: 檢測 lobby_confirm")
+        self.logger.info("=" * 60)
+        
+        self._handle_lobby_confirm(reference_browser)
+        
+        self.logger.info("\n" + "=" * 60)
+        self.logger.info("✓ 圖片檢測流程完成，準備進入遊戲控制中心")
+        self.logger.info("=" * 60)
+    
+    def _handle_lobby_login(self, reference_browser: BrowserContext) -> None:
+        """處理 lobby_login 的檢測與點擊。
+        
+        Args:
+            reference_browser: 參考瀏覽器
+        """
+        template_name = Constants.LOBBY_LOGIN
+        
+        # 1. 檢查模板是否存在
+        if not self.image_detector.template_exists(template_name):
+            self.logger.warning(f"⚠ 模板圖片 '{template_name}' 不存在")
+            self._prompt_capture_template(reference_browser, template_name, "lobby_login")
+        else:
+            self.logger.info(f"✓ 找到模板圖片: {template_name}")
+        
+        # 2. 持續檢測直到找到圖片
+        self.logger.info("正在檢測 lobby_login (靜默檢測中)...")
+        detection_results = self._continuous_detect_until_found(template_name, "lobby_login")
+        
+        # 3. 自動執行點擊
+        self._auto_click("lobby_login", detection_results)
+        
+        # 4. 等待 lobby_login 消失
+        self._wait_for_image_disappear(template_name)
+        self.logger.info("✓ lobby_login 已消失")
+    
+    def _handle_lobby_confirm(self, reference_browser: BrowserContext) -> None:
+        """處理 lobby_confirm 的檢測與點擊。
+        
+        Args:
+            reference_browser: 參考瀏覽器
+        """
+        template_name = Constants.LOBBY_CONFIRM
+        
+        # 1. 檢查模板是否存在
+        if not self.image_detector.template_exists(template_name):
+            self.logger.warning(f"⚠ 模板圖片 '{template_name}' 不存在")
+            self._prompt_capture_template(reference_browser, template_name, "lobby_confirm")
+        else:
+            self.logger.info(f"✓ 找到模板圖片: {template_name}")
+        
+        # 2. 持續檢測直到找到圖片
+        self.logger.info("正在檢測 lobby_confirm (靜默檢測中)...")
+        detection_results = self._continuous_detect_until_found(template_name, "lobby_confirm")
+        
+        # 3. 自動執行點擊
+        self._auto_click("lobby_confirm", detection_results)
+        
+        # 4. 等待 lobby_confirm 消失
+        self._wait_for_image_disappear(template_name)
+        self.logger.info("✓ lobby_confirm 已消失")
+    
+    def _prompt_capture_template(self, reference_browser: BrowserContext, template_name: str, display_name: str) -> None:
+        """提示用戶截取模板圖片。
+        
+        Args:
+            reference_browser: 參考瀏覽器
+            template_name: 模板檔名
+            display_name: 顯示名稱
+        """
+        self.logger.info(f"\n請準備截取 '{display_name}' 的參考圖片")
+        print(f"\n按 Enter 鍵截取第一個瀏覽器的畫面作為 '{display_name}' 模板...", end="", flush=True)
+        
+        try:
+            input()
+            
+            # 截取並儲存模板
+            template_path = self.image_detector.get_template_path(template_name)
+            self.image_detector.capture_screenshot(reference_browser.driver, template_path)
+            self.logger.info(f"✓ 模板圖片已建立: {template_path}")
+            
+        except (EOFError, KeyboardInterrupt):
+            self.logger.warning("\n用戶取消截圖")
+            raise
+    
+    def _handle_image_not_found(self, reference_browser: BrowserContext, template_name: str, display_name: str) -> None:
+        """處理圖片未檢測到的情況，提供選項讓用戶重新截圖或跳過。
+        
+        Args:
+            reference_browser: 參考瀏覽器
+            template_name: 模板檔名
+            display_name: 顯示名稱
+        """
+        self.logger.info(f"\n當前模板圖片可能與實際畫面不符")
+        self.logger.info(f"選項:")
+        self.logger.info(f"  1. 重新截取 '{display_name}' 模板圖片")
+        self.logger.info(f"  2. 等待並重新檢測")
+        self.logger.info(f"  3. 跳過此階段")
+        
+        while True:
+            try:
+                print(f"\n請選擇 (1/2/3): ", end="", flush=True)
+                choice = input().strip()
+                
+                if choice == "1":
+                    # 重新截取模板
+                    self.logger.info(f"\n準備重新截取 '{display_name}' 模板")
+                    self._prompt_capture_template(reference_browser, template_name, display_name)
+                    
+                    # 重新檢測
+                    self.logger.info(f"\n使用新模板重新檢測...")
+                    detection_results = self._detect_in_all_browsers(template_name)
+                    found_count = sum(1 for result in detection_results if result is not None)
+                    
+                    if found_count > 0:
+                        self.logger.info(f"✓ 檢測到 {found_count}/{len(self.browser_contexts)} 個瀏覽器中有 {display_name}")
+                        self._prompt_user_click(display_name, detection_results)
+                        self.logger.info(f"等待 {display_name} 消失...")
+                        self._wait_for_image_disappear(template_name)
+                        self.logger.info(f"✓ {display_name} 已消失")
+                        return
+                    else:
+                        self.logger.warning(f"⚠ 仍未檢測到 {display_name}，請重新選擇")
+                        continue
+                
+                elif choice == "2":
+                    # 等待並重新檢測
+                    self.logger.info(f"\n等待 {display_name} 出現...")
+                    self.logger.info("持續檢測中（每3秒檢測一次，按 Ctrl+C 可中斷）...")
+                    
+                    try:
+                        max_wait_attempts = 20  # 最多等待 60 秒
+                        for attempt in range(max_wait_attempts):
+                            time.sleep(3)
+                            detection_results = self._detect_in_all_browsers(template_name)
+                            found_count = sum(1 for result in detection_results if result is not None)
+                            
+                            if found_count > 0:
+                                self.logger.info(f"✓ 檢測到 {found_count}/{len(self.browser_contexts)} 個瀏覽器中有 {display_name}")
+                                self._prompt_user_click(display_name, detection_results)
+                                self.logger.info(f"等待 {display_name} 消失...")
+                                self._wait_for_image_disappear(template_name)
+                                self.logger.info(f"✓ {display_name} 已消失")
+                                return
+                            
+                            if (attempt + 1) % 5 == 0:
+                                self.logger.info(f"檢測進度: {attempt + 1}/{max_wait_attempts} 次，仍未找到...")
+                        
+                        self.logger.warning(f"⚠ 等待超時，未檢測到 {display_name}")
+                        continue
+                        
+                    except KeyboardInterrupt:
+                        self.logger.info("\n用戶中斷等待")
+                        continue
+                
+                elif choice == "3":
+                    # 跳過此階段
+                    self.logger.info(f"✓ 跳過 {display_name} 檢測階段")
+                    return
+                
+                else:
+                    self.logger.warning("⚠ 無效的選擇，請輸入 1、2 或 3")
+                    continue
+                    
+            except (EOFError, KeyboardInterrupt):
+                self.logger.warning("\n用戶中斷操作")
+                raise
+    
+    def _continuous_detect_until_found(self, template_name: str, display_name: str) -> List[Optional[Tuple[int, int, float]]]:
+        """持續檢測直到在所有瀏覽器中找到圖片。
+        
+        Args:
+            template_name: 模板圖片檔名
+            display_name: 顯示名稱
+            
+        Returns:
+            檢測結果列表 (每個元素為 None 或 (x, y, confidence))
+        """
+        attempt = 0
+        
+        while True:
+            attempt += 1
+            detection_results = self._detect_in_all_browsers(template_name, silent=True)
+            found_count = sum(1 for result in detection_results if result is not None)
+            
+            if found_count > 0:
+                # 顯示最終找到的座標
+                for i, result in enumerate(detection_results, 1):
+                    if result:
+                        x, y, confidence = result
+                        self.logger.info(f"[{i}/{len(self.browser_contexts)}] ✓ 找到圖片 - 座標: ({x}, {y}), 信心度: {confidence:.2f}")
+                return detection_results
+            
+            # 每 20 次檢測顯示一次進度
+            if attempt % 20 == 0:
+                self.logger.info(f"持續檢測中... (第 {attempt} 次，loading 中請稍候)")
+            
+            time.sleep(Constants.DETECTION_INTERVAL)
+    
+    def _detect_in_all_browsers(self, template_name: str, silent: bool = False) -> List[Optional[Tuple[int, int, float]]]:
+        """在所有瀏覽器中檢測模板圖片。
+        
+        Args:
+            template_name: 模板圖片檔名
+            silent: 是否靜默模式(不輸出log)
+            
+        Returns:
+            檢測結果列表 (每個元素為 None 或 (x, y, confidence))
+        """
+        results: List[Optional[Tuple[int, int, float]]] = []
+        
+        for i, context in enumerate(self.browser_contexts, 1):
+            try:
+                result = self.image_detector.detect_in_browser(
+                    context.driver,
+                    template_name
+                )
+                
+                if result and not silent:
+                    x, y, confidence = result
+                    self.logger.info(f"[{i}/{len(self.browser_contexts)}] ✓ 找到圖片 - 座標: ({x}, {y}), 信心度: {confidence:.2f}")
+                
+                results.append(result)
+                
+            except Exception as e:
+                if not silent:
+                    self.logger.error(f"[{i}/{len(self.browser_contexts)}] 檢測失敗: {e}")
+                results.append(None)
+        
+        return results
+    
+    def _auto_click(self, display_name: str, detection_results: List[Optional[Tuple[int, int, float]]]) -> None:
+        """自動執行點擊操作。
+        
+        Args:
+            display_name: 顯示名稱
+            detection_results: 檢測結果列表
+        """
+        self.logger.info(f"✓ 找到 '{display_name}'，自動執行點擊操作")
+        
+        # TODO: 在所有瀏覽器中執行點擊
+        # 這裡需要實現在 Canvas 中的實際點擊邏輯
+        # 暫時只記錄座標
+        click_count = sum(1 for result in detection_results if result is not None)
+        self.logger.info(f"[TODO] 將在 {click_count} 個瀏覽器中執行點擊 (實際點擊功能待實現)")
+    
+    def _wait_for_image_disappear(self, template_name: str) -> None:
+        """持續等待圖片在所有瀏覽器中消失。
+        
+        Args:
+            template_name: 模板圖片檔名
+        """
+        attempt = 0
+        
+        while True:
+            attempt += 1
+            
+            # 檢測所有瀏覽器
+            still_present = []
+            for i, context in enumerate(self.browser_contexts, 1):
+                try:
+                    result = self.image_detector.detect_in_browser(
+                        context.driver,
+                        template_name
+                    )
+                    if result:
+                        still_present.append(i)
+                except Exception as e:
+                    self.logger.debug(f"瀏覽器 {i} 檢測失敗: {e}")
+            
+            # 如果所有瀏覽器都沒有找到圖片，則返回
+            if not still_present:
+                return
+            
+            # 等待後再次檢測
+            time.sleep(Constants.DETECTION_INTERVAL)
     
     def cleanup(self) -> None:
         """清理所有資源"""
