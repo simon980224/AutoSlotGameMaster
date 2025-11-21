@@ -1,5 +1,5 @@
 """
-金富翁遊戲自動化系統 - 優化版本
+金富翁遊戲自動化系統 - 重構版本
 
 採用最佳實踐重構:
 - 完整型別提示
@@ -440,7 +440,7 @@ class ConfigReader:
                 parts = [p.strip() for p in line.split(',')]
                 
                 if len(parts) < 2:
-                    self.logger.warning(f"第 {line_num} 行格式不完整,已跳過: {line}")
+                    self.logger.warning(f"第 {line_num} 行格式不完整 已跳過 {line}")
                     continue
                 
                 username = parts[0]
@@ -456,7 +456,7 @@ class ConfigReader:
                 ))
                 
             except ValueError as e:
-                self.logger.warning(f"第 {line_num} 行資料無效: {e}")
+                self.logger.warning(f"第 {line_num} 行資料無效 {e}")
                 continue
         
         self.logger.info(f"成功讀取 {len(credentials)} 筆使用者憑證")
@@ -487,7 +487,7 @@ class ConfigReader:
                 parts = line.split(':')
                 
                 if len(parts) < 2:
-                    self.logger.warning(f"第 {line_num} 行格式不完整,已跳過: {line}")
+                    self.logger.warning(f"第 {line_num} 行格式不完整 已跳過 {line}")
                     continue
                 
                 amount = float(parts[0].strip())
@@ -496,7 +496,7 @@ class ConfigReader:
                 rules.append(BetRule(amount=amount, duration=duration))
                 
             except (ValueError, IndexError) as e:
-                self.logger.warning(f"第 {line_num} 行無法解析: {e}")
+                self.logger.warning(f"第 {line_num} 行無法解析 {e}")
                 continue
         
         self.logger.info(f"成功讀取 {len(rules)} 條下注規則")
@@ -759,7 +759,7 @@ class SimpleProxyServer:
                     break
                 except Exception as e:
                     if self.running:
-                        self.logger.error(f"接受連接時發生錯誤: {e}")
+                        self.logger.error(f"接受連接時發生錯誤 {e}")
                     
         except Exception as e:
             raise ProxyServerError(f"Proxy 伺服器啟動失敗: {e}") from e
@@ -815,7 +815,7 @@ class LocalProxyServerManager:
                 try:
                     server.start()
                 except Exception as e:
-                    self.logger.error(f"Proxy 伺服器執行失敗 (埠 {local_port}): {e}")
+                    self.logger.error(f"Proxy 伺服器執行失敗 埠 {local_port} {e}")
             
             server_thread = threading.Thread(target=run_server, daemon=True)
             server_thread.start()
@@ -835,7 +835,7 @@ class LocalProxyServerManager:
             return local_port
             
         except Exception as e:
-            self.logger.error(f"啟動本機 Proxy 伺服器失敗: {e}")
+            self.logger.error(f"啟動本機 Proxy 伺服器失敗 {e}")
             return None
     
     def stop_proxy_server(self, local_port: int) -> None:
@@ -907,7 +907,7 @@ class BrowserManager:
         if local_proxy_port:
             proxy_address = f"http://{Constants.PROXY_SERVER_BIND_HOST}:{local_proxy_port}"
             chrome_options.add_argument(f"--proxy-server={proxy_address}")
-            logger.info(f"已設定本機 Proxy 中繼: {proxy_address}")
+            logger.info(f"已設定本機 Proxy 中繼 {proxy_address}")
         
         # 基本設定
         chrome_options.add_argument("--disable-blink-features=AutomationControlled")
@@ -972,38 +972,38 @@ class BrowserManager:
         
         # 方法 1: 優先使用專案內的驅動程式檔案
         try:
-            self.logger.info("正在使用專案內驅動程式...")
+            self.logger.info("正在使用專案內驅動程式")
             driver = self._create_webdriver_with_local_driver(chrome_options)
             
             # 取得 Chrome 版本
             with suppress(Exception):
                 chrome_version = driver.capabilities.get('browserVersion', 'unknown')
-                self.logger.info(f"Chrome 版本: {chrome_version}")
+                self.logger.info(f"Chrome 版本 {chrome_version}")
             
-            self.logger.info("✓ 瀏覽器實例已建立 (使用本機驅動程式)")
+            self.logger.info("瀏覽器實例已建立 使用本機驅動程式")
             
         except Exception as e:
             errors.append(f"本機驅動程式: {e}")
-            self.logger.warning(f"本機驅動程式失敗: {e}")
-            self.logger.info("嘗試使用 WebDriver Manager 作為備援...")
+            self.logger.warning(f"本機驅動程式失敗 {e}")
+            self.logger.info("嘗試使用 WebDriver Manager 作為備援")
             
             # 方法 2: 使用 WebDriver Manager 自動管理
             try:
-                self.logger.info("正在使用 WebDriver Manager 取得 ChromeDriver...")
+                self.logger.info("正在使用 WebDriver Manager 取得 ChromeDriver")
                 service = Service(ChromeDriverManager().install())
-                self.logger.info("正在啟動 Chrome 瀏覽器...")
+                self.logger.info("正在啟動 Chrome 瀏覽器")
                 driver = webdriver.Chrome(service=service, options=chrome_options)
                 
                 # 取得 Chrome 版本
                 with suppress(Exception):
                     chrome_version = driver.capabilities.get('browserVersion', 'unknown')
-                    self.logger.info(f"Chrome 版本: {chrome_version}")
+                    self.logger.info(f"Chrome 版本 {chrome_version}")
                 
-                self.logger.info("✓ 瀏覽器實例已建立 (使用 WebDriver Manager)")
+                self.logger.info("瀏覽器實例已建立 使用 WebDriver Manager")
                 
             except Exception as e2:
                 errors.append(f"WebDriver Manager: {e2}")
-                self.logger.error(f"WebDriver Manager 也失敗: {e2}")
+                self.logger.error(f"WebDriver Manager 也失敗 {e2}")
         
         if driver is None:
             error_msg = "無法建立瀏覽器實例。\n" + "\n".join(f"- {err}" for err in errors)
@@ -1015,7 +1015,7 @@ class BrowserManager:
             driver.set_script_timeout(Constants.DEFAULT_SCRIPT_TIMEOUT)
             driver.implicitly_wait(Constants.DEFAULT_IMPLICIT_WAIT)
         except Exception as e:
-            self.logger.warning(f"設定超時參數失敗: {e}")
+            self.logger.warning(f"設定超時參數失敗 {e}")
         
         # 網路優化
         try:
@@ -1027,9 +1027,9 @@ class BrowserManager:
                 "latency": 0
             })
         except Exception as e:
-            self.logger.warning(f"網路優化設定失敗: {e}")
+            self.logger.warning(f"網路優化設定失敗 {e}")
         
-        self.logger.info("✓ 瀏覽器設定完成")
+        self.logger.info("瀏覽器設定完成")
         return driver
     
     def _create_webdriver_with_local_driver(self, chrome_options: Options) -> WebDriver:
@@ -1065,7 +1065,7 @@ class BrowserManager:
                 f"請確保 {driver_filename} 存在於專案根目錄"
             )
         
-        self.logger.info(f"使用本機驅動程式: {driver_path}")
+        self.logger.info(f"使用本機驅動程式 {driver_path}")
         
         # 確保驅動程式有執行權限 (Unix-like 系統)
         if system in ["darwin", "linux"]:
@@ -1169,8 +1169,8 @@ class SyncBrowserOperator:
             """在執行緒中執行操作"""
             try:
                 self.logger.info(
-                    f"[{index+1}/{total}] 開始 {operation_name} "
-                    f"(帳號: {context.credential.username})"
+                    f"瀏覽器 {index+1}/{total} 開始 {operation_name} "
+                    f"帳號 {context.credential.username}"
                 )
                 
                 result_data = operation_func(context, index + 1, total)
@@ -1180,11 +1180,11 @@ class SyncBrowserOperator:
                     message=f"{operation_name} 成功"
                 )
                 
-                self.logger.info(f"[{index+1}/{total}] ✓ {operation_name} 完成")
+                self.logger.info(f"瀏覽器 {index+1}/{total} {operation_name} 完成")
                 return index, result
                 
             except Exception as e:
-                self.logger.error(f"[{index+1}/{total}] {operation_name} 失敗: {e}")
+                self.logger.error(f"瀏覽器 {index+1}/{total} {operation_name} 失敗 {e}")
                 result = OperationResult(
                     success=False,
                     error=e,
@@ -1210,9 +1210,9 @@ class SyncBrowserOperator:
         
         success_count = sum(1 for r in results if r.success)
         if success_count == total:
-            self.logger.info(f"✓ {operation_name} 完成 ({success_count}/{total})")
+            self.logger.info(f"{operation_name} 完成 {success_count}/{total}")
         else:
-            self.logger.warning(f"⚠ {operation_name} 部分完成 ({success_count}/{total})")
+            self.logger.warning(f"{operation_name} 部分完成 {success_count}/{total}")
         
         return results
     
@@ -1496,7 +1496,7 @@ class ImageDetector:
             if save_path:
                 save_path.parent.mkdir(parents=True, exist_ok=True)
                 cv2.imwrite(str(save_path), image_cv)
-                self.logger.info(f"截圖已儲存: {save_path}")
+                self.logger.info(f"截圖已儲存 {save_path}")
             
             return image_cv
             
@@ -1565,7 +1565,7 @@ class ImageDetector:
             template_path = self.get_template_path(template_name)
             return self.match_template(screenshot, template_path, threshold)
         except Exception as e:
-            self.logger.error(f"瀏覽器圖片檢測失敗: {e}")
+            self.logger.error(f"瀏覽器圖片檢測失敗 {e}")
             return None
 
 
@@ -1601,17 +1601,15 @@ class GameControlCenter:
     def show_help(self) -> None:
         """顯示幫助信息"""
         help_text = """
-╔══════════════════════════════════════════════════════════
-║                   遊戲控制中心 - 指令說明                  
-╠
-║  遊戲控制：
-║    start     - 開始遊戲（按空白鍵
-║    pause     - 暫停遊戲
-║
-║  系統控制：
-║    help      - 顯示此幫助信息
-║    quit      - 退出控制中心
-╚══════════════════════════════════════════════════════════
+遊戲控制中心 指令說明
+
+遊戲控制
+  s         開始遊戲 按空白鍵
+  p         暫停遊戲
+
+系統控制
+  h         顯示此幫助信息
+  q         退出控制中心
 """
         self.logger.info(help_text)
     
@@ -1630,39 +1628,39 @@ class GameControlCenter:
             return True
         
         try:
-            if command == 'quit':
-                self.logger.info("正在退出控制中心...")
+            if command == 'q':
+                self.logger.info("正在退出控制中心")
                 return False
             
-            elif command == 'help':
+            elif command == 'h':
                 self.show_help()
             
-            elif command == 'start':
+            elif command == 's':
                 if self.game_running:
                     self.logger.warning("遊戲已經在運行中")
                 else:
-                    self.logger.info("執行指令: 開始遊戲（按空白鍵）")
+                    self.logger.info("執行指令 開始遊戲 按空白鍵")
                     results = self.browser_operator.press_space_all(self.browser_contexts)
                     success_count = sum(1 for r in results if r.success)
                     if success_count > 0:
                         self.game_running = True
-                        self.logger.info(f"✓ 遊戲已開始: {success_count}/{len(results)} 個瀏覽器")
+                        self.logger.info(f"遊戲已開始 {success_count}/{len(results)} 個瀏覽器")
                     else:
                         self.logger.error("開始遊戲失敗")
             
-            elif command == 'pause':
+            elif command == 'p':
                 if not self.game_running:
                     self.logger.warning("遊戲尚未開始")
                 else:
                     self.game_running = False
-                    self.logger.info("✓ 遊戲已暫停")
+                    self.logger.info("遊戲已暫停")
             
             else:
-                self.logger.warning(f"未知指令: {command}")
-                self.logger.info("輸入 'help' 查看可用指令")
+                self.logger.warning(f"未知指令 {command}")
+                self.logger.info("輸入 'h' 查看可用指令")
         
         except Exception as e:
-            self.logger.error(f"執行指令時發生錯誤: {e}")
+            self.logger.error(f"執行指令時發生錯誤 {e}")
         
         return True
     
@@ -1670,9 +1668,8 @@ class GameControlCenter:
         """啟動控制中心"""
         self.running = True
         self.logger.info("")
-        self.logger.info("="*50)
         self.logger.info("遊戲控制中心已啟動")
-        self.logger.info("="*50)
+        self.logger.info("")
         self.show_help()
         
         try:
@@ -1683,10 +1680,10 @@ class GameControlCenter:
                     if not self.process_command(command):
                         break
                 except EOFError:
-                    self.logger.info("\n檢測到 EOF，退出控制中心")
+                    self.logger.info("檢測到 EOF 退出控制中心")
                     break
                 except KeyboardInterrupt:
-                    self.logger.info("\n用戶中斷，退出控制中心")
+                    self.logger.info("用戶中斷 退出控制中心")
                     break
         finally:
             self.running = False
@@ -1743,8 +1740,8 @@ class AutoSlotGameApp:
             title: 步驟標題
         """
         self.logger.info("")
-        self.logger.info(f"【步驟 {step}】{title}")
-        self.logger.info("-" * 50)
+        self.logger.info(f"步驟 {step} {title}")
+        self.logger.info("")
     
     def load_configurations(self) -> None:
         """載入所有配置檔案。
@@ -1752,11 +1749,11 @@ class AutoSlotGameApp:
         Raises:
             ConfigurationError: 配置載入失敗
         """
-        self.logger.info("\n" + "=" * 60)
-        self.logger.info("  金富翁遊戲自動化系統 v4.0")
-        self.logger.info("=" * 60)
         self.logger.info("")
-        self.logger.info("正在載入配置...")
+        self.logger.info("金富翁遊戲自動化系統 v4.0")
+        self.logger.info("")
+        self.logger.info("")
+        self.logger.info("正在載入配置")
         
         # 讀取使用者憑證（包含 proxy 資訊）
         self.credentials = self.config_reader.read_user_credentials()
@@ -1765,7 +1762,7 @@ class AutoSlotGameApp:
         self.rules = self.config_reader.read_bet_rules()
         
         self.logger.info(
-            f"✓ 配置載入完成: {len(self.credentials)} 個帳號, "
+            f"配置載入完成 {len(self.credentials)} 個帳號 "
             f"{len(self.rules)} 條規則"
         )
     
@@ -1788,15 +1785,15 @@ class AutoSlotGameApp:
                 browser_count = int(user_input)
                 
                 if 1 <= browser_count <= max_browsers:
-                    self.logger.info(f"\n✓ 將開啟 {browser_count} 個瀏覽器")
+                    self.logger.info(f"將開啟 {browser_count} 個瀏覽器")
                     return browser_count
                 else:
-                    self.logger.warning(f"⚠ 請輸入 1-{max_browsers} 之間的數字")
+                    self.logger.warning(f"請輸入 1 到 {max_browsers} 之間的數字")
                     
             except ValueError:
                 self.logger.warning("請輸入有效的數字")
             except (EOFError, KeyboardInterrupt):
-                self.logger.warning("\n使用者取消輸入")
+                self.logger.warning("使用者取消輸入")
                 raise KeyboardInterrupt()
     
     def setup_proxy_servers(self, browser_count: int) -> List[Optional[int]]:
@@ -1834,20 +1831,20 @@ class AutoSlotGameApp:
                         
                         if local_proxy_port:
                             self.logger.info(
-                                f"[{index+1}/{browser_count}] ✓ Proxy 中繼已啟動: {proxy_info.host}:{proxy_info.port} -> 本機埠 {local_proxy_port}"
+                                f"瀏覽器 {index+1}/{browser_count} Proxy 中繼已啟動 {proxy_info.host}:{proxy_info.port} 本機埠 {local_proxy_port}"
                             )
                         else:
                             self.logger.warning(
-                                f"[{index+1}/{browser_count}] ⚠ Proxy 啟動失敗,將直連網路"
+                                f"瀏覽器 {index+1}/{browser_count} Proxy 啟動失敗 將直連網路"
                             )
                     else:
-                        self.logger.warning(f"[{index+1}/{browser_count}] Proxy 格式錯誤: {credential.proxy}")
+                        self.logger.warning(f"瀏覽器 {index+1}/{browser_count} Proxy 格式錯誤 {credential.proxy}")
                         
                 except Exception as e:
-                    self.logger.error(f"[{index+1}/{browser_count}] Proxy 設定失敗: {e}")
+                    self.logger.error(f"瀏覽器 {index+1}/{browser_count} Proxy 設定失敗 {e}")
             else:
                 # 沒有設定 proxy，將使用直連
-                self.logger.info(f"[{index+1}/{browser_count}] 使用直連網路（未設定 Proxy）")
+                self.logger.info(f"瀏覽器 {index+1}/{browser_count} 使用直連網路 未設定 Proxy")
             
             return index, local_proxy_port
         
@@ -1868,7 +1865,7 @@ class AutoSlotGameApp:
                 proxy_ports[index] = local_proxy_port
         
         active_count = sum(1 for p in proxy_ports if p is not None)
-        self.logger.info(f"✓ Proxy 伺服器啟動完成 ({active_count}/{len(proxy_ports)})")
+        self.logger.info(f"Proxy 伺服器啟動完成 {active_count}/{len(proxy_ports)}")
         return proxy_ports
     
     def create_browser_instances(
@@ -1897,8 +1894,8 @@ class AutoSlotGameApp:
             """在執行緒中建立瀏覽器實例"""
             try:
                 self.logger.info(
-                    f"[{index+1}/{browser_count}] 正在建立瀏覽器 "
-                    f"(帳號: {credential.username})"
+                    f"瀏覽器 {index+1}/{browser_count} 正在建立瀏覽器 "
+                    f"帳號 {credential.username}"
                 )
                 
                 driver = self.browser_manager.create_webdriver(local_proxy_port=proxy_port)
@@ -1910,13 +1907,13 @@ class AutoSlotGameApp:
                     proxy_port=proxy_port
                 )
                 
-                proxy_info = f" [Proxy: 埠 {proxy_port}]" if proxy_port else " [直連]"
-                self.logger.info(f"[{index+1}/{browser_count}] ✓ 瀏覽器建立成功{proxy_info}")
+                proxy_info = f" Proxy 埠 {proxy_port}" if proxy_port else " 直連"
+                self.logger.info(f"瀏覽器 {index+1}/{browser_count} 瀏覽器建立成功{proxy_info}")
                 
                 return index, context
                 
             except Exception as e:
-                self.logger.error(f"[{index+1}/{browser_count}] 建立瀏覽器失敗: {e}")
+                self.logger.error(f"瀏覽器 {index+1}/{browser_count} 建立瀏覽器失敗 {e}")
                 return index, None
         
         # 使用執行緒池建立瀏覽器
@@ -1940,9 +1937,9 @@ class AutoSlotGameApp:
         contexts = [ctx for ctx in browser_results if ctx is not None]
         
         if len(contexts) == browser_count:
-            self.logger.info(f"✓ 瀏覽器建立完成 ({len(contexts)}/{browser_count})")
+            self.logger.info(f"瀏覽器建立完成 {len(contexts)}/{browser_count}")
         else:
-            self.logger.warning(f"⚠ 部分瀏覽器建立失敗 ({len(contexts)}/{browser_count})")
+            self.logger.warning(f"部分瀏覽器建立失敗 {len(contexts)}/{browser_count}")
         return contexts
     
     def run(self) -> None:
@@ -2016,9 +2013,9 @@ class AutoSlotGameApp:
             control_center.start()
             
         except KeyboardInterrupt:
-            self.logger.warning("\n使用者中斷程式執行")
+            self.logger.warning("使用者中斷程式執行")
         except Exception as e:
-            self.logger.error(f"系統發生錯誤: {e}", exc_info=True)
+            self.logger.error(f"系統發生錯誤 {e}", exc_info=True)
             raise
         finally:
             self.cleanup()
@@ -2036,22 +2033,22 @@ class AutoSlotGameApp:
         reference_browser = self.browser_contexts[0]
         
         # 階段 1: 處理 lobby_login
-        self.logger.info("\n" + "=" * 60)
-        self.logger.info("階段 1: 檢測 lobby_login")
-        self.logger.info("=" * 60)
+        self.logger.info("")
+        self.logger.info("階段 1 檢測 lobby_login")
+        self.logger.info("")
         
         self._handle_lobby_login(reference_browser)
         
         # 階段 2: 處理 lobby_confirm
-        self.logger.info("\n" + "=" * 60)
-        self.logger.info("階段 2: 檢測 lobby_confirm")
-        self.logger.info("=" * 60)
+        self.logger.info("")
+        self.logger.info("階段 2 檢測 lobby_confirm")
+        self.logger.info("")
         
         self._handle_lobby_confirm(reference_browser)
         
-        self.logger.info("\n" + "=" * 60)
-        self.logger.info("✓ 圖片檢測流程完成，準備進入遊戲控制中心")
-        self.logger.info("=" * 60)
+        self.logger.info("")
+        self.logger.info("圖片檢測流程完成 準備進入遊戲控制中心")
+        self.logger.info("")
     
     def _handle_lobby_login(self, reference_browser: BrowserContext) -> None:
         """處理 lobby_login 的檢測與點擊。
@@ -2063,13 +2060,13 @@ class AutoSlotGameApp:
         
         # 1. 檢查模板是否存在
         if not self.image_detector.template_exists(template_name):
-            self.logger.warning(f"⚠ 模板圖片 '{template_name}' 不存在")
+            self.logger.warning(f"模板圖片 {template_name} 不存在")
             self._prompt_capture_template(reference_browser, template_name, "lobby_login")
         else:
-            self.logger.info(f"✓ 找到模板圖片: {template_name}")
+            self.logger.info(f"找到模板圖片 {template_name}")
         
         # 2. 持續檢測直到找到圖片
-        self.logger.info("正在檢測 lobby_login (靜默檢測中)...")
+        self.logger.info("正在檢測 lobby_login 靜默檢測中")
         detection_results = self._continuous_detect_until_found(template_name, "lobby_login")
         
         # 3. 自動執行點擊
@@ -2077,7 +2074,7 @@ class AutoSlotGameApp:
         
         # 4. 等待 lobby_login 消失
         self._wait_for_image_disappear(template_name)
-        self.logger.info("✓ lobby_login 已消失")
+        self.logger.info("lobby_login 已消失")
     
     def _handle_lobby_confirm(self, reference_browser: BrowserContext) -> None:
         """處理 lobby_confirm 的檢測與點擊。
@@ -2089,13 +2086,13 @@ class AutoSlotGameApp:
         
         # 1. 檢查模板是否存在
         if not self.image_detector.template_exists(template_name):
-            self.logger.warning(f"⚠ 模板圖片 '{template_name}' 不存在")
+            self.logger.warning(f"模板圖片 {template_name} 不存在")
             self._prompt_capture_template(reference_browser, template_name, "lobby_confirm")
         else:
-            self.logger.info(f"✓ 找到模板圖片: {template_name}")
+            self.logger.info(f"找到模板圖片 {template_name}")
         
         # 2. 持續檢測直到找到圖片
-        self.logger.info("正在檢測 lobby_confirm (靜默檢測中)...")
+        self.logger.info("正在檢測 lobby_confirm 靜默檢測中")
         detection_results = self._continuous_detect_until_found(template_name, "lobby_confirm")
         
         # 3. 自動執行點擊
@@ -2103,7 +2100,7 @@ class AutoSlotGameApp:
         
         # 4. 等待 lobby_confirm 消失
         self._wait_for_image_disappear(template_name)
-        self.logger.info("✓ lobby_confirm 已消失")
+        self.logger.info("lobby_confirm 已消失")
     
     def _prompt_capture_template(self, reference_browser: BrowserContext, template_name: str, display_name: str) -> None:
         """提示用戶截取模板圖片。
@@ -2113,8 +2110,8 @@ class AutoSlotGameApp:
             template_name: 模板檔名
             display_name: 顯示名稱
         """
-        self.logger.info(f"\n請準備截取 '{display_name}' 的參考圖片")
-        print(f"\n按 Enter 鍵截取第一個瀏覽器的畫面作為 '{display_name}' 模板...", end="", flush=True)
+        self.logger.info(f"請準備截取 {display_name} 的參考圖片")
+        print(f"按 Enter 鍵截取第一個瀏覽器的畫面作為 {display_name} 模板", end="", flush=True)
         
         try:
             input()
@@ -2122,10 +2119,10 @@ class AutoSlotGameApp:
             # 截取並儲存模板
             template_path = self.image_detector.get_template_path(template_name)
             self.image_detector.capture_screenshot(reference_browser.driver, template_path)
-            self.logger.info(f"✓ 模板圖片已建立: {template_path}")
+            self.logger.info(f"模板圖片已建立 路徑 {template_path}")
             
         except (EOFError, KeyboardInterrupt):
-            self.logger.warning("\n用戶取消截圖")
+            self.logger.warning("用戶取消截圖")
             raise
     
     def _handle_image_not_found(self, reference_browser: BrowserContext, template_name: str, display_name: str) -> None:
@@ -2136,11 +2133,11 @@ class AutoSlotGameApp:
             template_name: 模板檔名
             display_name: 顯示名稱
         """
-        self.logger.info(f"\n當前模板圖片可能與實際畫面不符")
-        self.logger.info(f"選項:")
-        self.logger.info(f"  1. 重新截取 '{display_name}' 模板圖片")
-        self.logger.info(f"  2. 等待並重新檢測")
-        self.logger.info(f"  3. 跳過此階段")
+        self.logger.info("當前模板圖片可能與實際畫面不符")
+        self.logger.info("選項")
+        self.logger.info(f"  1 重新截取 {display_name} 模板圖片")
+        self.logger.info("  2 等待並重新檢測")
+        self.logger.info("  3 跳過此階段")
         
         while True:
             try:
@@ -2149,29 +2146,29 @@ class AutoSlotGameApp:
                 
                 if choice == "1":
                     # 重新截取模板
-                    self.logger.info(f"\n準備重新截取 '{display_name}' 模板")
+                    self.logger.info(f"準備重新截取 {display_name} 模板")
                     self._prompt_capture_template(reference_browser, template_name, display_name)
                     
                     # 重新檢測
-                    self.logger.info(f"\n使用新模板重新檢測...")
+                    self.logger.info("使用新模板重新檢測")
                     detection_results = self._detect_in_all_browsers(template_name)
                     found_count = sum(1 for result in detection_results if result is not None)
                     
                     if found_count > 0:
-                        self.logger.info(f"✓ 檢測到 {found_count}/{len(self.browser_contexts)} 個瀏覽器中有 {display_name}")
+                        self.logger.info(f"檢測到 {found_count}/{len(self.browser_contexts)} 個瀏覽器中有 {display_name}")
                         self._prompt_user_click(display_name, detection_results)
-                        self.logger.info(f"等待 {display_name} 消失...")
+                        self.logger.info(f"等待 {display_name} 消失")
                         self._wait_for_image_disappear(template_name)
-                        self.logger.info(f"✓ {display_name} 已消失")
+                        self.logger.info(f"{display_name} 已消失")
                         return
                     else:
-                        self.logger.warning(f"⚠ 仍未檢測到 {display_name}，請重新選擇")
+                        self.logger.warning(f"仍未檢測到 {display_name} 請重新選擇")
                         continue
                 
                 elif choice == "2":
                     # 等待並重新檢測
-                    self.logger.info(f"\n等待 {display_name} 出現...")
-                    self.logger.info("持續檢測中（每3秒檢測一次，按 Ctrl+C 可中斷）...")
+                    self.logger.info(f"等待 {display_name} 出現")
+                    self.logger.info("持續檢測中 每3秒檢測一次 按 Ctrl+C 可中斷")
                     
                     try:
                         max_wait_attempts = 20  # 最多等待 60 秒
@@ -2181,34 +2178,34 @@ class AutoSlotGameApp:
                             found_count = sum(1 for result in detection_results if result is not None)
                             
                             if found_count > 0:
-                                self.logger.info(f"✓ 檢測到 {found_count}/{len(self.browser_contexts)} 個瀏覽器中有 {display_name}")
+                                self.logger.info(f"檢測到 {found_count}/{len(self.browser_contexts)} 個瀏覽器中有 {display_name}")
                                 self._prompt_user_click(display_name, detection_results)
-                                self.logger.info(f"等待 {display_name} 消失...")
+                                self.logger.info(f"等待 {display_name} 消失")
                                 self._wait_for_image_disappear(template_name)
-                                self.logger.info(f"✓ {display_name} 已消失")
+                                self.logger.info(f"{display_name} 已消失")
                                 return
                             
                             if (attempt + 1) % 5 == 0:
-                                self.logger.info(f"檢測進度: {attempt + 1}/{max_wait_attempts} 次，仍未找到...")
+                                self.logger.info(f"檢測進度 {attempt + 1}/{max_wait_attempts} 次 仍未找到")
                         
-                        self.logger.warning(f"⚠ 等待超時，未檢測到 {display_name}")
+                        self.logger.warning(f"等待超時 未檢測到 {display_name}")
                         continue
                         
                     except KeyboardInterrupt:
-                        self.logger.info("\n用戶中斷等待")
+                        self.logger.info("用戶中斷等待")
                         continue
                 
                 elif choice == "3":
                     # 跳過此階段
-                    self.logger.info(f"✓ 跳過 {display_name} 檢測階段")
+                    self.logger.info(f"跳過 {display_name} 檢測階段")
                     return
                 
                 else:
-                    self.logger.warning("⚠ 無效的選擇，請輸入 1、2 或 3")
+                    self.logger.warning("無效的選擇 請輸入 1 2 或 3")
                     continue
                     
             except (EOFError, KeyboardInterrupt):
-                self.logger.warning("\n用戶中斷操作")
+                self.logger.warning("用戶中斷操作")
                 raise
     
     def _continuous_detect_until_found(self, template_name: str, display_name: str) -> List[Optional[Tuple[int, int, float]]]:
@@ -2233,12 +2230,12 @@ class AutoSlotGameApp:
                 for i, result in enumerate(detection_results, 1):
                     if result:
                         x, y, confidence = result
-                        self.logger.info(f"[{i}/{len(self.browser_contexts)}] ✓ 找到圖片 - 座標: ({x}, {y}), 信心度: {confidence:.2f}")
+                        self.logger.info(f"瀏覽器 {i}/{len(self.browser_contexts)} 找到圖片 座標 {x} {y} 信心度 {confidence:.2f}")
                 return detection_results
             
             # 每 20 次檢測顯示一次進度
             if attempt % 20 == 0:
-                self.logger.info(f"持續檢測中... (第 {attempt} 次，loading 中請稍候)")
+                self.logger.info(f"持續檢測中 第 {attempt} 次 loading 中請稍候")
             
             time.sleep(Constants.DETECTION_INTERVAL)
     
@@ -2263,13 +2260,13 @@ class AutoSlotGameApp:
                 
                 if result and not silent:
                     x, y, confidence = result
-                    self.logger.info(f"[{i}/{len(self.browser_contexts)}] ✓ 找到圖片 - 座標: ({x}, {y}), 信心度: {confidence:.2f}")
+                    self.logger.info(f"瀏覽器 {i}/{len(self.browser_contexts)} 找到圖片 座標 {x} {y} 信心度 {confidence:.2f}")
                 
                 results.append(result)
                 
             except Exception as e:
                 if not silent:
-                    self.logger.error(f"[{i}/{len(self.browser_contexts)}] 檢測失敗: {e}")
+                    self.logger.error(f"瀏覽器 {i}/{len(self.browser_contexts)} 檢測失敗 {e}")
                 results.append(None)
         
         return results
@@ -2281,13 +2278,13 @@ class AutoSlotGameApp:
             display_name: 顯示名稱
             detection_results: 檢測結果列表
         """
-        self.logger.info(f"✓ 找到 '{display_name}'，自動執行點擊操作")
+        self.logger.info(f"找到 {display_name} 自動執行點擊操作")
         
         # TODO: 在所有瀏覽器中執行點擊
         # 這裡需要實現在 Canvas 中的實際點擊邏輯
         # 暫時只記錄座標
         click_count = sum(1 for result in detection_results if result is not None)
-        self.logger.info(f"[TODO] 將在 {click_count} 個瀏覽器中執行點擊 (實際點擊功能待實現)")
+        self.logger.info(f"TODO 將在 {click_count} 個瀏覽器中執行點擊 實際點擊功能待實現")
     
     def _wait_for_image_disappear(self, template_name: str) -> None:
         """持續等待圖片在所有瀏覽器中消失。
@@ -2311,7 +2308,7 @@ class AutoSlotGameApp:
                     if result:
                         still_present.append(i)
                 except Exception as e:
-                    self.logger.debug(f"瀏覽器 {i} 檢測失敗: {e}")
+                    self.logger.debug(f"瀏覽器 {i} 檢測失敗 {e}")
             
             # 如果所有瀏覽器都沒有找到圖片，則返回
             if not still_present:
@@ -2322,8 +2319,8 @@ class AutoSlotGameApp:
     
     def cleanup(self) -> None:
         """清理所有資源"""
-        self.logger.info("\n" + "-" * 60)
-        self.logger.info("正在清理資源...")
+        self.logger.info("")
+        self.logger.info("正在清理資源")
         
         # 關閉所有瀏覽器
         if self.browser_contexts:
@@ -2333,8 +2330,8 @@ class AutoSlotGameApp:
         # 停止所有 Proxy 伺服器
         self.proxy_manager.stop_all_servers()
         
-        self.logger.info("✓ 清理完成")
-        self.logger.info("=" * 60)
+        self.logger.info("清理完成")
+        self.logger.info("")
 
 
 # ============================================================================
@@ -2351,7 +2348,7 @@ def main() -> None:
         app.run()
     except Exception as e:
         logger = LoggerFactory.get_logger()
-        logger.critical(f"應用程式執行失敗: {e}", exc_info=True)
+        logger.critical(f"應用程式執行失敗 {e}", exc_info=True)
         sys.exit(1)
 
 
