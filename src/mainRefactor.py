@@ -22,7 +22,8 @@ import socket
 import select
 import base64
 import time
-from typing import Optional, List, Dict, Tuple, Any, Callable, Protocol
+import random
+from typing import Optional, List, Dict, Tuple, Any, Callable, Protocol, Union
 from pathlib import Path
 from dataclasses import dataclass, field
 from contextlib import contextmanager, suppress
@@ -43,6 +44,36 @@ import cv2
 import numpy as np
 from PIL import Image
 import io
+
+
+# 導出的公共 API
+__all__ = [
+    # 常量
+    'Constants',
+    # 資料類別
+    'UserCredential',
+    'BetRule',
+    'ProxyInfo',
+    'BrowserContext',
+    'OperationResult',
+    # 例外類別
+    'AutoSlotGameError',
+    'ConfigurationError',
+    'BrowserCreationError',
+    'ProxyServerError',
+    'ImageDetectionError',
+    # 日誌類別
+    'LogLevel',
+    'LoggerFactory',
+    # 主要類別
+    'ConfigReader',
+    'BrowserManager',
+    'LocalProxyServerManager',
+    'SyncBrowserOperator',
+    'ImageDetector',
+    'GameControlCenter',
+    'AutoSlotGameApp',
+]
 
 
 # ============================================================================
@@ -84,6 +115,16 @@ class Constants:
     MATCH_THRESHOLD = 0.8  # 圖片匹配閾值
     DETECTION_INTERVAL = 1.0  # 檢測間隔（秒）
     MAX_DETECTION_ATTEMPTS = 60  # 最大檢測次數
+    
+    # 操作相關常量
+    DEFAULT_WAIT_SECONDS = 3  # 預設等待時間（秒）
+    MAX_WAIT_ATTEMPTS = 20  # 最大等待嘗試次數
+    DETECTION_PROGRESS_INTERVAL = 20  # 檢測進度顯示間隔
+    
+    # 視窗排列配置
+    DEFAULT_WINDOW_WIDTH = 600
+    DEFAULT_WINDOW_HEIGHT = 400
+    DEFAULT_WINDOW_COLUMNS = 4
 
 
 # ============================================================================
@@ -149,11 +190,45 @@ class ProxyInfo:
             格式化的連接字串 "host:port:username:password"
         """
         return f"{self.host}:{self.port}:{self.username}:{self.password}"
+    
+    @staticmethod
+    def from_connection_string(connection_string: str) -> 'ProxyInfo':
+        """從連接字串建立 ProxyInfo 實例。
+        
+        Args:
+            connection_string: 格式為 "host:port:username:password"
+            
+        Returns:
+            ProxyInfo 實例
+            
+        Raises:
+            ValueError: 格式不正確時
+        """
+        parts = connection_string.split(':')
+        if len(parts) < 4:
+            raise ValueError(f"Proxy 連接字串格式不正確: {connection_string}")
+        
+        return ProxyInfo(
+            host=parts[0],
+            port=int(parts[1]),
+            username=parts[2],
+            password=':'.join(parts[3:])  # 密碼可能包含冒號
+        )
 
 
 @dataclass
 class BrowserContext:
-    """瀏覽器上下文資訊"""
+    """瀏覽器上下文資訊。
+    
+    封裝瀏覽器實例及其相關資訊，提供便捷的存取介面。
+    
+    Attributes:
+        driver: WebDriver 實例
+        credential: 使用者憑證
+        index: 瀏覽器索引（從 1 開始）
+        proxy_port: Proxy 埠號（可選）
+        created_at: 建立時間戳
+    """
     driver: WebDriver
     credential: UserCredential
     index: int
@@ -167,7 +242,16 @@ class BrowserContext:
 
 
 class OperationResult:
-    """操作結果封裝"""
+    """操作結果封裝。
+    
+    用於封裝操作的執行結果，包含成功狀態、資料、錯誤和訊息。
+    
+    Attributes:
+        success: 操作是否成功
+        data: 操作返回的資料
+        error: 發生的例外（如果有）
+        message: 額外的訊息
+    """
     def __init__(
         self, 
         success: bool, 
@@ -844,12 +928,19 @@ class LocalProxyServerManager:
         Args:
             local_port: 本機埠號
         """
+        # 先從字典中取出 server
         with self._lock:
-            if local_port in self._proxy_servers:
-                server = self._proxy_servers[local_port]
-                server.stop()
-                self.logger.debug(f"已停止 Proxy 伺服器: 埠 {local_port}")
-                del self._proxy_servers[local_port]
+            server = self._proxy_servers.get(local_port)
+        
+        # 在鎖外執行耗時操作
+        if server:
+            server.stop()
+            self.logger.debug(f"已停止 Proxy 伺服器: 埠 {local_port}")
+            
+            # 再次加鎖從字典中刪除
+            with self._lock:
+                if local_port in self._proxy_servers:
+                    del self._proxy_servers[local_port]
                 if local_port in self._proxy_threads:
                     del self._proxy_threads[local_port]
     
@@ -1360,9 +1451,9 @@ class SyncBrowserOperator:
     def resize_and_arrange_all(
         self,
         browser_contexts: List[BrowserContext],
-        width: int = 600,
-        height: int = 400,
-        columns: int = 4,
+        width: int = Constants.DEFAULT_WINDOW_WIDTH,
+        height: int = Constants.DEFAULT_WINDOW_HEIGHT,
+        columns: int = Constants.DEFAULT_WINDOW_COLUMNS,
         timeout: Optional[float] = None
     ) -> List[OperationResult]:
         """調整所有瀏覽器視窗大小並進行排列。
@@ -1431,6 +1522,12 @@ class ImageDetector:
     """圖片檢測器。
     
     提供螢幕截圖、圖片比對和座標定位功能。
+    使用 OpenCV 進行模板匹配，支援多種圖片格式。
+    
+    Attributes:
+        logger: 日誌記錄器
+        project_root: 專案根目錄
+        image_dir: 圖片目錄
     """
     
     def __init__(self, logger: Optional[logging.Logger] = None):
@@ -1574,9 +1671,17 @@ class ImageDetector:
 # ============================================================================
 
 class GameControlCenter:
-    """遊戲控制中心（基礎版本）。
+    """遊戲控制中心。
     
-    提供基本的指令接收框架，具體功能待實現。
+    提供互動式命令行介面，用於控制多個瀏覽器的遊戲操作。
+    支援啟動、暫停遊戲等基本控制功能。
+    
+    Attributes:
+        browser_contexts: 瀏覽器上下文列表
+        browser_operator: 瀏覽器操作器
+        logger: 日誌記錄器
+        running: 控制中心運行狀態
+        game_running: 遊戲運行狀態
     """
     
     def __init__(
@@ -1597,6 +1702,11 @@ class GameControlCenter:
         self.logger = logger or LoggerFactory.get_logger()
         self.running = False
         self.game_running = False  # 遊戲運行狀態
+        self.auto_press_running = False  # 自動按鍵運行狀態
+        self.min_interval = 1.0  # 最小間隔時間
+        self.max_interval = 1.0  # 最大間隔時間
+        self.auto_press_threads: Dict[int, threading.Thread] = {}  # 每個瀏覽器的執行緒
+        self._stop_event = threading.Event()  # 停止事件
     
     def show_help(self) -> None:
         """顯示幫助信息"""
@@ -1604,14 +1714,138 @@ class GameControlCenter:
 遊戲控制中心 指令說明
 
 遊戲控制
-  s         開始遊戲 按空白鍵
-  p         暫停遊戲
+  s min,max    開始遊戲（自訂間隔時間）
+               min: 最小間隔秒數
+               max: 最大間隔秒數
+  p            暫停遊戲（停止自動按鍵）
 
 系統控制
-  h         顯示此幫助信息
-  q         退出控制中心
+  h            顯示此幫助信息
+  q            退出控制中心
 """
         self.logger.info(help_text)
+    
+    def _auto_press_loop_single(self, context: BrowserContext, browser_index: int) -> None:
+        """單個瀏覽器的自動按鍵循環。
+        
+        Args:
+            context: 瀏覽器上下文
+            browser_index: 瀏覽器索引
+        """
+        import random
+        
+        press_count = 0
+        username = context.credential.username
+        
+        self.logger.info(f"瀏覽器 {browser_index} ({username}) 自動按鍵已啟動")
+        
+        while not self._stop_event.is_set():
+            try:
+                press_count += 1
+                
+                # 執行按空白鍵
+                try:
+                    context.driver.execute_cdp_cmd("Input.dispatchKeyEvent", {
+                        "type": "keyDown",
+                        "key": " ",
+                        "code": "Space",
+                        "windowsVirtualKeyCode": 32,
+                        "nativeVirtualKeyCode": 32
+                    })
+                    context.driver.execute_cdp_cmd("Input.dispatchKeyEvent", {
+                        "type": "keyUp",
+                        "key": " ",
+                        "code": "Space",
+                        "windowsVirtualKeyCode": 32,
+                        "nativeVirtualKeyCode": 32
+                    })
+                    
+                    self.logger.debug(
+                        f"瀏覽器 {browser_index} ({username}) 第 {press_count} 次按鍵成功"
+                    )
+                    
+                except Exception as e:
+                    self.logger.error(
+                        f"瀏覽器 {browser_index} ({username}) 按鍵失敗: {e}"
+                    )
+                
+                # 每個瀏覽器使用獨立的隨機間隔
+                interval = random.uniform(self.min_interval, self.max_interval)
+                self.logger.debug(
+                    f"瀏覽器 {browser_index} ({username}) 等待 {interval:.2f} 秒"
+                )
+                
+                # 使用 wait 而非 sleep，這樣可以立即響應停止信號
+                if self._stop_event.wait(timeout=interval):
+                    break
+                    
+            except Exception as e:
+                self.logger.error(
+                    f"瀏覽器 {browser_index} ({username}) 執行錯誤: {e}"
+                )
+                self._stop_event.wait(timeout=1.0)
+        
+        self.logger.info(
+            f"瀏覽器 {browser_index} ({username}) 自動按鍵已停止，共執行 {press_count} 次"
+        )
+    
+    def _start_auto_press(self) -> None:
+        """為每個瀏覽器啟動獨立的自動按鍵執行緒。"""
+        if self.auto_press_running:
+            self.logger.warning("自動按鍵已在運行中")
+            return
+        
+        # 清除停止事件
+        self._stop_event.clear()
+        self.auto_press_threads.clear()
+        
+        # 為每個瀏覽器啟動獨立執行緒
+        for i, context in enumerate(self.browser_contexts, 1):
+            thread = threading.Thread(
+                target=self._auto_press_loop_single,
+                args=(context, i),
+                daemon=True,
+                name=f"AutoPressThread-{i}"
+            )
+            self.auto_press_threads[i] = thread
+            thread.start()
+        
+        self.auto_press_running = True
+        self.game_running = True
+        
+        self.logger.info(
+            f"已為 {len(self.browser_contexts)} 個瀏覽器啟動獨立的自動按鍵執行緒"
+        )
+    
+    def _stop_auto_press(self) -> None:
+        """停止所有自動按鍵執行緒。"""
+        if not self.auto_press_running:
+            self.logger.warning("自動按鍵未在運行")
+            return
+        
+        self.logger.info(f"正在停止 {len(self.auto_press_threads)} 個瀏覽器的自動按鍵...")
+        
+        # 設置停止事件
+        self._stop_event.set()
+        
+        # 等待所有執行緒結束
+        stopped_count = 0
+        for browser_index, thread in self.auto_press_threads.items():
+            if thread and thread.is_alive():
+                thread.join(timeout=5.0)
+                
+                if not thread.is_alive():
+                    stopped_count += 1
+                else:
+                    self.logger.warning(f"瀏覽器 {browser_index} 的執行緒未能正常結束")
+            else:
+                stopped_count += 1
+        
+        self.logger.info(f"自動按鍵已停止: {stopped_count}/{len(self.auto_press_threads)} 個執行緒成功停止")
+        
+        self.auto_press_threads.clear()
+        self.auto_press_running = False
+        self.game_running = False
     
     def process_command(self, command: str) -> bool:
         """處理用戶指令。
@@ -1635,24 +1869,67 @@ class GameControlCenter:
             elif command == 'h':
                 self.show_help()
             
-            elif command == 's':
-                if self.game_running:
-                    self.logger.warning("遊戲已經在運行中")
-                else:
-                    self.logger.info("執行指令 開始遊戲 按空白鍵")
-                    results = self.browser_operator.press_space_all(self.browser_contexts)
-                    success_count = sum(1 for r in results if r.success)
-                    if success_count > 0:
-                        self.game_running = True
-                        self.logger.info(f"遊戲已開始 {success_count}/{len(results)} 個瀏覽器")
-                    else:
-                        self.logger.error("開始遊戲失敗")
+            elif command.startswith('s'):
+                # 解析 's' 指令參數
+                parts = command.split()
+                
+                if len(parts) != 2:
+                    self.logger.error("指令格式錯誤，請使用: s min,max (例如: s 1,2)")
+                    return True
+                
+                # 解析用戶輸入的間隔時間
+                try:
+                    interval_parts = parts[1].split(',')
+                    if len(interval_parts) != 2:
+                        self.logger.error(
+                            "間隔時間格式錯誤，請使用: s min,max (例如: s 1,2)"
+                        )
+                        return True
+                    
+                    min_interval = float(interval_parts[0].strip())
+                    max_interval = float(interval_parts[1].strip())
+                    
+                    if min_interval <= 0 or max_interval <= 0:
+                        self.logger.error("間隔時間必須大於 0")
+                        return True
+                    
+                    if min_interval > max_interval:
+                        self.logger.error("最小間隔不能大於最大間隔")
+                        return True
+                        
+                except ValueError:
+                    self.logger.error(
+                        "間隔時間格式錯誤，請輸入數字 (例如: s 1,2)"
+                    )
+                    return True
+                
+                # 檢查是否已在運行
+                if self.auto_press_running:
+                    self.logger.warning(
+                        f"自動按鍵已在運行中 (間隔: {self.min_interval}~{self.max_interval}秒)\n"
+                        f"請先使用 'p' 暫停，再重新啟動"
+                    )
+                    return True
+                
+                # 設置間隔時間
+                self.min_interval = min_interval
+                self.max_interval = max_interval
+                
+                self.logger.info(
+                    f"啟動自動按鍵循環\n"
+                    f"  間隔時間: {min_interval}~{max_interval} 秒\n"
+                    f"  瀏覽器數量: {len(self.browser_contexts)}\n"
+                    f"  使用 'p' 指令可暫停"
+                )
+                
+                # 啟動自動按鍵
+                self._start_auto_press()
             
             elif command == 'p':
-                if not self.game_running:
-                    self.logger.warning("遊戲尚未開始")
+                if not self.auto_press_running:
+                    self.logger.warning("自動按鍵未在運行")
                 else:
-                    self.game_running = False
+                    self._stop_auto_press()
                     self.logger.info("遊戲已暫停")
             
             else:
@@ -1686,12 +1963,20 @@ class GameControlCenter:
                     self.logger.info("用戶中斷 退出控制中心")
                     break
         finally:
+            # 確保停止自動按鍵
+            if self.auto_press_running:
+                self._stop_auto_press()
+            
             self.running = False
             self.logger.info("控制中心已停止")
     
     def stop(self) -> None:
         """停止控制中心"""
         self.running = False
+        
+        # 確保停止自動按鍵
+        if self.auto_press_running:
+            self._stop_auto_press()
 
 
 # ============================================================================
@@ -1732,11 +2017,11 @@ class AutoSlotGameApp:
         self.browser_contexts: List[BrowserContext] = []
         self.image_detector = ImageDetector(logger=self.logger)
     
-    def _print_step(self, step: Any, title: str) -> None:
+    def _print_step(self, step: Union[int, str], title: str) -> None:
         """輸出步驟標題。
         
         Args:
-            step: 步驟編號
+            step: 步驟編號（整數或字串）
             title: 步驟標題
         """
         self.logger.info("")
@@ -1970,7 +2255,7 @@ class AutoSlotGameApp:
                 self.browser_contexts
             )
             
-            time.sleep(3)  # 等待頁面載入
+            time.sleep(Constants.DEFAULT_WAIT_SECONDS)  # 等待頁面載入
             
             # 步驟 4: 執行登入操作（同步）
             self._print_step(4, "執行登入操作")
@@ -1978,7 +2263,7 @@ class AutoSlotGameApp:
                 self.browser_contexts
             )
             
-            time.sleep(3)  # 等待登入後的頁面跳轉
+            time.sleep(Constants.DEFAULT_WAIT_SECONDS)  # 等待登入後的頁面跳轉
             
             # 步驟 5: 導航到遊戲頁面
             self._print_step(5, "導航到遊戲頁面")
@@ -1986,7 +2271,7 @@ class AutoSlotGameApp:
                 self.browser_contexts
             )
             
-            time.sleep(3)  # 等待遊戲頁面載入
+            time.sleep(Constants.DEFAULT_WAIT_SECONDS)  # 等待遊戲頁面載入
             
             # 調整視窗
             self._print_step("5+", "調整視窗排列 (600x400)")
@@ -1997,7 +2282,7 @@ class AutoSlotGameApp:
                 columns=4
             )
             
-            time.sleep(3)  # 等待視窗調整完成
+            time.sleep(Constants.DEFAULT_WAIT_SECONDS)  # 等待視窗調整完成
             
             # 步驟 6: 圖片檢測與遊戲流程
             self._print_step(6, "圖片檢測與遊戲流程")
@@ -2050,31 +2335,48 @@ class AutoSlotGameApp:
         self.logger.info("圖片檢測流程完成 準備進入遊戲控制中心")
         self.logger.info("")
     
+    def _handle_lobby_image(
+        self, 
+        reference_browser: BrowserContext, 
+        template_name: str, 
+        display_name: str
+    ) -> None:
+        """處理 lobby 圖片的檢測與點擊（通用方法）。
+        
+        Args:
+            reference_browser: 參考瀏覽器
+            template_name: 模板檔名
+            display_name: 顯示名稱
+        """
+        # 1. 檢查模板是否存在
+        if not self.image_detector.template_exists(template_name):
+            self.logger.warning(f"模板圖片 {template_name} 不存在")
+            self._prompt_capture_template(reference_browser, template_name, display_name)
+        else:
+            self.logger.info(f"找到模板圖片 {template_name}")
+        
+        # 2. 持續檢測直到找到圖片
+        self.logger.info(f"正在檢測 {display_name}")
+        detection_results = self._continuous_detect_until_found(template_name, display_name)
+        
+        # 3. 自動執行點擊
+        self._auto_click(display_name, detection_results)
+        
+        # 4. 等待圖片消失
+        self._wait_for_image_disappear(template_name)
+        self.logger.info(f"{display_name} 已消失")
+    
     def _handle_lobby_login(self, reference_browser: BrowserContext) -> None:
         """處理 lobby_login 的檢測與點擊。
         
         Args:
             reference_browser: 參考瀏覽器
         """
-        template_name = Constants.LOBBY_LOGIN
-        
-        # 1. 檢查模板是否存在
-        if not self.image_detector.template_exists(template_name):
-            self.logger.warning(f"模板圖片 {template_name} 不存在")
-            self._prompt_capture_template(reference_browser, template_name, "lobby_login")
-        else:
-            self.logger.info(f"找到模板圖片 {template_name}")
-        
-        # 2. 持續檢測直到找到圖片
-        self.logger.info("正在檢測 lobby_login 靜默檢測中")
-        detection_results = self._continuous_detect_until_found(template_name, "lobby_login")
-        
-        # 3. 自動執行點擊
-        self._auto_click("lobby_login", detection_results)
-        
-        # 4. 等待 lobby_login 消失
-        self._wait_for_image_disappear(template_name)
-        self.logger.info("lobby_login 已消失")
+        self._handle_lobby_image(
+            reference_browser, 
+            Constants.LOBBY_LOGIN, 
+            "lobby_login"
+        )
     
     def _handle_lobby_confirm(self, reference_browser: BrowserContext) -> None:
         """處理 lobby_confirm 的檢測與點擊。
@@ -2082,25 +2384,11 @@ class AutoSlotGameApp:
         Args:
             reference_browser: 參考瀏覽器
         """
-        template_name = Constants.LOBBY_CONFIRM
-        
-        # 1. 檢查模板是否存在
-        if not self.image_detector.template_exists(template_name):
-            self.logger.warning(f"模板圖片 {template_name} 不存在")
-            self._prompt_capture_template(reference_browser, template_name, "lobby_confirm")
-        else:
-            self.logger.info(f"找到模板圖片 {template_name}")
-        
-        # 2. 持續檢測直到找到圖片
-        self.logger.info("正在檢測 lobby_confirm 靜默檢測中")
-        detection_results = self._continuous_detect_until_found(template_name, "lobby_confirm")
-        
-        # 3. 自動執行點擊
-        self._auto_click("lobby_confirm", detection_results)
-        
-        # 4. 等待 lobby_confirm 消失
-        self._wait_for_image_disappear(template_name)
-        self.logger.info("lobby_confirm 已消失")
+        self._handle_lobby_image(
+            reference_browser, 
+            Constants.LOBBY_CONFIRM, 
+            "lobby_confirm"
+        )
     
     def _prompt_capture_template(self, reference_browser: BrowserContext, template_name: str, display_name: str) -> None:
         """提示用戶截取模板圖片。
@@ -2233,9 +2521,9 @@ class AutoSlotGameApp:
                         self.logger.info(f"瀏覽器 {i}/{len(self.browser_contexts)} 找到圖片 座標 {x} {y} 信心度 {confidence:.2f}")
                 return detection_results
             
-            # 每 20 次檢測顯示一次進度
-            if attempt % 20 == 0:
-                self.logger.info(f"持續檢測中 第 {attempt} 次 loading 中請稍候")
+            # 每 N 次檢測顯示一次進度
+            if attempt % Constants.DETECTION_PROGRESS_INTERVAL == 0:
+                self.logger.info(f"持續檢測中，第 {attempt} 次，loading 中請稍候")
             
             time.sleep(Constants.DETECTION_INTERVAL)
     
@@ -2264,9 +2552,13 @@ class AutoSlotGameApp:
                 
                 results.append(result)
                 
+            except ImageDetectionError as e:
+                if not silent:
+                    self.logger.error(f"瀏覽器 {i}/{len(self.browser_contexts)} 圖片檢測錯誤: {e}")
+                results.append(None)
             except Exception as e:
                 if not silent:
-                    self.logger.error(f"瀏覽器 {i}/{len(self.browser_contexts)} 檢測失敗 {e}")
+                    self.logger.error(f"瀏覽器 {i}/{len(self.browser_contexts)} 未預期錯誤: {e}")
                 results.append(None)
         
         return results
@@ -2278,13 +2570,48 @@ class AutoSlotGameApp:
             display_name: 顯示名稱
             detection_results: 檢測結果列表
         """
-        self.logger.info(f"找到 {display_name} 自動執行點擊操作")
+        self.logger.info(f"找到 {display_name}，自動執行點擊操作")
         
-        # TODO: 在所有瀏覽器中執行點擊
-        # 這裡需要實現在 Canvas 中的實際點擊邏輯
-        # 暫時只記錄座標
-        click_count = sum(1 for result in detection_results if result is not None)
-        self.logger.info(f"TODO 將在 {click_count} 個瀏覽器中執行點擊 實際點擊功能待實現")
+        # 使用同步操作器執行點擊
+        def click_operation(context: BrowserContext, index: int, total: int) -> bool:
+            """在單個瀏覽器中執行點擊操作"""
+            result = detection_results[index - 1]
+            if result is None:
+                return False
+            
+            x, y, confidence = result
+            driver = context.driver
+            
+            try:
+                # 使用 CDP (Chrome DevTools Protocol) 執行點擊
+                driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
+                    "type": "mousePressed",
+                    "x": x,
+                    "y": y,
+                    "button": "left",
+                    "clickCount": 1
+                })
+                driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
+                    "type": "mouseReleased",
+                    "x": x,
+                    "y": y,
+                    "button": "left",
+                    "clickCount": 1
+                })
+                
+                self.logger.debug(f"瀏覽器 {index} 在座標 ({x}, {y}) 執行點擊成功")
+                return True
+                
+            except Exception as e:
+                self.logger.error(f"瀏覽器 {index} 點擊失敗: {e}")
+                return False
+        
+        # 同步執行所有點擊
+        self.browser_operator.execute_sync(
+            self.browser_contexts,
+            click_operation,
+            f"點擊 {display_name}"
+        )
     
     def _wait_for_image_disappear(self, template_name: str) -> None:
         """持續等待圖片在所有瀏覽器中消失。
@@ -2343,12 +2670,25 @@ def main() -> None:
     
     初始化並執行應用程式。
     """
+    logger = LoggerFactory.get_logger()
+    
     try:
         app = AutoSlotGameApp()
         app.run()
+    except KeyboardInterrupt:
+        logger.warning("使用者中斷程式執行")
+        sys.exit(0)
+    except ConfigurationError as e:
+        logger.critical(f"配置錯誤: {e}")
+        sys.exit(1)
+    except BrowserCreationError as e:
+        logger.critical(f"瀏覽器建立失敗: {e}")
+        sys.exit(1)
+    except ProxyServerError as e:
+        logger.critical(f"Proxy 伺服器錯誤: {e}")
+        sys.exit(1)
     except Exception as e:
-        logger = LoggerFactory.get_logger()
-        logger.critical(f"應用程式執行失敗 {e}", exc_info=True)
+        logger.critical(f"應用程式執行失敗: {e}", exc_info=True)
         sys.exit(1)
 
 
