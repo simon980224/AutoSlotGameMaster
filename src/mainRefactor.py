@@ -1715,8 +1715,6 @@ class GameControlCenter:
 
 遊戲控制
   s min,max    開始遊戲（自訂間隔時間）
-               min: 最小間隔秒數
-               max: 最大間隔秒數
   p            暫停遊戲（停止自動按鍵）
 
 系統控制
