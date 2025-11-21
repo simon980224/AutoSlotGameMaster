@@ -37,6 +37,8 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.webdriver import WebDriver
 from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 
 # 圖片處理相關
@@ -115,6 +117,14 @@ class Constants:
     MATCH_THRESHOLD = 0.8  # 圖片匹配閾值
     DETECTION_INTERVAL = 1.0  # 檢測間隔（秒）
     MAX_DETECTION_ATTEMPTS = 60  # 最大檢測次數
+    
+    # Canvas 動態計算比例（用於點擊座標）
+    START_GAME_X_RATIO = 0.55  # 開始遊戲按鈕 X 座標比例
+    START_GAME_Y_RATIO = 1.2   # 開始遊戲按鈕 Y 座標比例
+    MACHINE_CONFIRM_X_RATIO = 0.78  # 確認按鈕 X 座標比例
+    MACHINE_CONFIRM_Y_RATIO = 1.15  # 確認按鈕 Y 座標比例
+    FREE_GAME_X_RATIO = 0.25  # 免費遊戲按鈕 X 座標比例
+    FREE_GAME_Y_RATIO = 0.5   # 免費遊戲按鈕 Y 座標比例
     
     # 操作相關常量
     DEFAULT_WAIT_SECONDS = 3  # 預設等待時間（秒）
@@ -1512,6 +1522,349 @@ class SyncBrowserOperator:
             "關閉瀏覽器",
             timeout=timeout
         )
+    
+    def adjust_betsize_all(
+        self,
+        browser_contexts: List[BrowserContext],
+        target_amount: float,
+        timeout: Optional[float] = None
+    ) -> List[OperationResult]:
+        """同步調整所有瀏覽器的下注金額。
+        
+        Args:
+            browser_contexts: 瀏覽器上下文列表
+            target_amount: 目標金額
+            timeout: 超時時間
+            
+        Returns:
+            操作結果列表
+        """
+        def adjust_operation(context: BrowserContext, index: int, total: int) -> bool:
+            return self.adjust_betsize(context.driver, target_amount)
+        
+        return self.execute_sync(
+            browser_contexts,
+            adjust_operation,
+            f"調整下注金額到 {target_amount}",
+            timeout=timeout
+        )
+    
+    def get_current_betsize(self, driver: WebDriver) -> Optional[float]:
+        """取得當前下注金額。
+        
+        Args:
+            driver: WebDriver 實例
+            
+        Returns:
+            Optional[float]: 當前金額，失敗返回None
+        """
+        try:
+            self.logger.info("開始查詢當前下注金額...")
+            
+            # 截取整個瀏覽器截圖
+            screenshot = driver.get_screenshot_as_png()
+            screenshot_np = np.array(Image.open(io.BytesIO(screenshot)))
+            screenshot_gray = cv2.cvtColor(screenshot_np, cv2.COLOR_RGB2GRAY)
+            
+            # 與資料夾中的圖片進行比對
+            matched_amount = self._compare_betsize_images(screenshot_gray)
+            
+            if matched_amount:
+                try:
+                    amount_value = float(matched_amount)
+                    # 定義可用金額列表
+                    GAME_BETSIZE = (
+                        0.4, 0.8, 1, 1.2, 1.6, 2, 2.4, 2.8, 3, 3.2, 3.6, 4, 5, 6, 7, 8, 9, 10,
+                        12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 48, 56, 60, 64, 72, 80, 100,
+                        120, 140, 160, 180, 200, 240, 280, 300, 320, 360, 400, 420, 480, 500,
+                        540, 560, 600, 640, 700, 720, 800, 840, 900, 960, 980, 1000, 1080,
+                        1120, 1200, 1260, 1280, 1400, 1440, 1600, 1800, 2000
+                    )
+                    if amount_value in GAME_BETSIZE:
+                        self.logger.info(f"當前下注金額: {amount_value}")
+                        return amount_value
+                    else:
+                        self.logger.warning(f"金額 {matched_amount} 不在 GAME_BETSIZE 列表中")
+                except ValueError:
+                    self.logger.error(f"無法將 {matched_amount} 轉換為數字")
+            else:
+                self.logger.warning("無法識別當前下注金額")
+            
+            return None
+            
+        except Exception as e:
+            self.logger.error(f"查詢下注金額時發生錯誤: {e}")
+            return None
+    
+    def _compare_betsize_images(self, screenshot_gray: np.ndarray) -> Optional[str]:
+        """使用 bet_size 資料夾中的圖片比對。
+        
+        Args:
+            screenshot_gray: 截圖（灰階）
+            
+        Returns:
+            Optional[str]: 匹配的金額
+        """
+        try:
+            # 取得專案根目錄
+            if getattr(sys, 'frozen', False):
+                project_root = Path(sys.executable).resolve().parent
+            else:
+                project_root = Path(__file__).resolve().parent.parent
+            
+            bet_size_dir = project_root / "img" / "bet_size"
+            
+            if not bet_size_dir.exists():
+                self.logger.warning(f"bet_size 資料夾不存在: {bet_size_dir}，嘗試建立...")
+                try:
+                    bet_size_dir.mkdir(parents=True, exist_ok=True)
+                    self.logger.info(f"已建立 bet_size 資料夾: {bet_size_dir}")
+                except Exception as e:
+                    self.logger.error(f"無法建立 bet_size 資料夾: {e}")
+                    return None
+            
+            # 取得所有 png 圖片
+            image_files = sorted(bet_size_dir.glob("*.png"))
+            if not image_files:
+                self.logger.warning(f"bet_size 資料夾中沒有圖片")
+                return None
+            
+            self.logger.info(f"開始比對 {len(image_files)} 張圖片...")
+            
+            best_match_score = 0.0
+            best_match_amount = None
+            
+            for image_file in image_files:
+                # 讀取模板圖片
+                template = cv2.imread(str(image_file), cv2.IMREAD_GRAYSCALE)
+                if template is None:
+                    continue
+                
+                # 檢查尺寸
+                if (screenshot_gray.shape[0] < template.shape[0] or 
+                    screenshot_gray.shape[1] < template.shape[1]):
+                    continue
+                
+                # 執行模板匹配
+                result = cv2.matchTemplate(screenshot_gray, template, cv2.TM_CCOEFF_NORMED)
+                min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
+                
+                if max_val > best_match_score:
+                    best_match_score = max_val
+                    best_match_amount = image_file.stem
+            
+            # 使用 0.95 作為閾值
+            if best_match_score >= 0.95:
+                self.logger.info(f"找到匹配金額：{best_match_amount} (相似度：{best_match_score:.3f})")
+                return best_match_amount
+            else:
+                self.logger.warning(f"未找到匹配圖片 (最高相似度：{best_match_score:.3f})")
+                return None
+                
+        except Exception as e:
+            self.logger.error(f"比對圖片時發生錯誤: {e}")
+            return None
+    
+    def _click_betsize_button(self, driver: WebDriver, x: float, y: float) -> None:
+        """點擊下注金額調整按鈕。
+        
+        Args:
+            driver: WebDriver 實例
+            x: X 座標 (基於 600x400 視窗)
+            y: Y 座標 (基於 600x400 視窗)
+        """
+        screenshot = driver.get_screenshot_as_png()
+        screenshot_img = Image.open(io.BytesIO(screenshot))
+        
+        # 獲取實際截圖尺寸
+        img_width, img_height = screenshot_img.size
+        
+        # 計算相對座標比例（基於 600x400）
+        x_ratio = x / 600
+        y_ratio = y / 400
+        
+        # 應用到實際截圖尺寸
+        actual_x = int(img_width * x_ratio)
+        actual_y = int(img_height * y_ratio)
+        
+        # 使用轉換後的實際座標進行點擊
+        for ev in ["mousePressed", "mouseReleased"]:
+            driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
+                "type": ev,
+                "x": actual_x,
+                "y": actual_y,
+                "button": "left",
+                "clickCount": 1
+            })
+    
+    def adjust_betsize(self, driver: WebDriver, target_amount: float, max_attempts: int = 200) -> bool:
+        """調整下注金額到目標值。
+        
+        Args:
+            driver: WebDriver 實例
+            target_amount: 目標金額
+            max_attempts: 最大嘗試次數
+            
+        Returns:
+            bool: 調整成功返回True
+        """
+        try:
+            # 定義可用金額列表
+            GAME_BETSIZE = (
+                0.4, 0.8, 1, 1.2, 1.6, 2, 2.4, 2.8, 3, 3.2, 3.6, 4, 5, 6, 7, 8, 9, 10,
+                12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 48, 56, 60, 64, 72, 80, 100,
+                120, 140, 160, 180, 200, 240, 280, 300, 320, 360, 400, 420, 480, 500,
+                540, 560, 600, 640, 700, 720, 800, 840, 900, 960, 980, 1000, 1080,
+                1120, 1200, 1260, 1280, 1400, 1440, 1600, 1800, 2000
+            )
+            
+            # 檢查目標金額
+            if target_amount not in GAME_BETSIZE:
+                self.logger.error(f"目標金額 {target_amount} 不在可用金額列表中")
+                return False
+            
+            self.logger.info(f"目標金額: {target_amount}")
+            
+            # 取得當前金額
+            current_amount = self.get_current_betsize(driver)
+            if current_amount is None:
+                self.logger.error("無法識別當前金額")
+                return False
+            
+            self.logger.info(f"當前金額: {current_amount}")
+            
+            # 檢查是否已是目標金額
+            if current_amount == target_amount:
+                self.logger.info("當前金額已是目標金額，無需調整")
+                return True
+            
+            # 計算需要調整的次數和方向
+            current_index = GAME_BETSIZE.index(current_amount)
+            target_index = GAME_BETSIZE.index(target_amount)
+            diff = target_index - current_index
+            
+            # 設定點擊座標（基於 600x400 視窗）
+            if diff > 0:
+                # 增加金額
+                click_x = 440
+                click_y = 370
+                direction = "增加"
+                estimated_steps = diff
+            else:
+                # 減少金額
+                click_x = 360
+                click_y = 370
+                direction = "減少"
+                estimated_steps = abs(diff)
+            
+            self.logger.info(f"預估需要點擊{direction}按鈕約 {estimated_steps} 次")
+            
+            # 開始調整
+            for i in range(estimated_steps):
+                self._click_betsize_button(driver, click_x, click_y)
+                self.logger.info(f"已點擊 {direction} 按鈕 ({i + 1}/{estimated_steps})")
+                time.sleep(0.3)
+            
+            time.sleep(1)
+            
+            # 驗證並微調
+            self.logger.info("開始驗證調整結果...")
+            for attempt in range(max_attempts):
+                current_amount = self.get_current_betsize(driver)
+                
+                if current_amount is None:
+                    self.logger.warning(f"驗證失敗：無法識別金額 (嘗試 {attempt + 1}/{max_attempts})")
+                    time.sleep(0.5)
+                    continue
+                
+                if current_amount == target_amount:
+                    self.logger.info(f"✓ 調整成功! 當前金額: {current_amount}")
+                    return True
+                
+                self.logger.info(f"當前金額 {current_amount}，目標 {target_amount}，繼續調整...")
+                
+                # 根據當前金額決定點擊哪個按鈕
+                if current_amount < target_amount:
+                    self._click_betsize_button(driver, 440, 370)  # 增加
+                else:
+                    self._click_betsize_button(driver, 360, 370)  # 減少
+                
+                time.sleep(0.5)
+            
+            self.logger.error(f"調整失敗，已達最大嘗試次數 ({max_attempts})")
+            return False
+            
+        except Exception as e:
+            self.logger.error(f"調整金額時發生錯誤: {e}")
+            return False
+    
+    def capture_betsize_template(self, driver: WebDriver, amount: float) -> bool:
+        """截取下注金額模板。
+        
+        Args:
+            driver: WebDriver 實例
+            amount: 下注金額
+            
+        Returns:
+            bool: 截取成功返回True
+        """
+        try:
+            # 固定座標：金額顯示位置 (基於 600x400 視窗)
+            target_x = 400
+            target_y = 380
+            
+            # 截取整個瀏覽器畫面
+            screenshot = driver.get_screenshot_as_png()
+            screenshot_img = Image.open(io.BytesIO(screenshot))
+            
+            # 獲取實際截圖尺寸
+            img_width, img_height = screenshot_img.size
+            
+            # 計算相對座標比例（基於 600x400）
+            x_ratio = target_x / 600
+            y_ratio = target_y / 400
+            
+            # 應用到實際截圖尺寸
+            actual_x = int(img_width * x_ratio)
+            actual_y = int(img_height * y_ratio)
+            
+            # 裁切範圍：上下20px, 左右50px
+            crop_left = max(0, actual_x - 50)
+            crop_top = max(0, actual_y - 20)
+            crop_right = min(img_width, actual_x + 50)
+            crop_bottom = min(img_height, actual_y + 20)
+            
+            # 裁切圖片
+            cropped_img = screenshot_img.crop((crop_left, crop_top, crop_right, crop_bottom))
+            
+            # 取得專案根目錄
+            if getattr(sys, 'frozen', False):
+                project_root = Path(sys.executable).resolve().parent
+            else:
+                project_root = Path(__file__).resolve().parent.parent
+            
+            # 儲存到 img/bet_size 目錄
+            betsize_dir = project_root / "img" / "bet_size"
+            betsize_dir.mkdir(parents=True, exist_ok=True)
+            
+            # 檔名使用金額（整數去掉 .0，小數保留）
+            if amount == int(amount):
+                filename = f"{int(amount)}.png"
+            else:
+                filename = f"{amount}.png"
+            
+            output_path = betsize_dir / filename
+            cropped_img.save(output_path)
+            
+            self.logger.info(f"✓ 金額模板已儲存: {output_path}")
+            self.logger.info(f"  - 金額: {amount}")
+            self.logger.info(f"  - 尺寸: {cropped_img.size[0]}x{cropped_img.size[1]}")
+            
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"截取金額模板失敗: {e}")
+            return False
 
 
 # ============================================================================
@@ -1711,15 +2064,26 @@ class GameControlCenter:
     def show_help(self) -> None:
         """顯示幫助信息"""
         help_text = """
-遊戲控制中心 指令說明
+╔══════════════════════════════════════════════════════════╗
+║            遊戲控制中心 - 指令說明                       ║
+╚══════════════════════════════════════════════════════════╝
 
-遊戲控制
-  s min,max    開始遊戲（自訂間隔時間）
-  p            暫停遊戲（停止自動按鍵）
+【遊戲控制】
+  s <min>,<max>    開始自動按鍵（設定隨機間隔）
+                   範例: s 1,2  (間隔 1~2 秒)
+                   
+  p                暫停自動按鍵
+  
+  b <金額>         調整所有瀏覽器的下注金額
+                   範例: b 0.4, b 2.4, b 10
+                   
+  c                截取金額模板（用於金額識別）
 
-系統控制
-  h            顯示此幫助信息
-  q            退出控制中心
+【系統控制】
+  h                顯示此幫助信息
+  q                退出控制中心
+
+提示：所有指令都區分大小寫，請使用小寫字母
 """
         self.logger.info(help_text)
     
@@ -1859,25 +2223,28 @@ class GameControlCenter:
         if not command:
             return True
         
+        # 解析指令和參數
+        parts = command.split(maxsplit=1)
+        cmd = parts[0] if parts else ""
+        args = parts[1] if len(parts) > 1 else ""
+        
         try:
-            if command == 'q':
+            if cmd == 'q':
                 self.logger.info("正在退出控制中心")
                 return False
             
-            elif command == 'h':
+            elif cmd == 'h':
                 self.show_help()
             
-            elif command.startswith('s'):
+            elif cmd == 's':
                 # 解析 's' 指令參數
-                parts = command.split()
-                
-                if len(parts) != 2:
+                if not args:
                     self.logger.error("指令格式錯誤，請使用: s min,max (例如: s 1,2)")
                     return True
                 
                 # 解析用戶輸入的間隔時間
                 try:
-                    interval_parts = parts[1].split(',')
+                    interval_parts = args.split(',')
                     if len(interval_parts) != 2:
                         self.logger.error(
                             "間隔時間格式錯誤，請使用: s min,max (例如: s 1,2)"
@@ -1923,12 +2290,110 @@ class GameControlCenter:
                 # 啟動自動按鍵
                 self._start_auto_press()
             
-            elif command == 'p':
+            elif cmd == 'p':
                 if not self.auto_press_running:
                     self.logger.warning("自動按鍵未在運行")
                 else:
                     self._stop_auto_press()
                     self.logger.info("遊戲已暫停")
+            
+            elif cmd == 'b':
+                # 解析 b 指令參數
+                if not args:
+                    self.logger.error("指令格式錯誤，請使用: b amount (例如: b 0.4)")
+                    return True
+                
+                try:
+                    target_amount = float(args)
+                    
+                    self.logger.info("")
+                    self.logger.info(f"開始同步調整所有瀏覽器的下注金額到 {target_amount}...")
+                    self.logger.info(f"瀏覽器數量: {len(self.browser_contexts)}")
+                    self.logger.info("")
+                    
+                    # 使用同步方法調整所有瀏覽器的金額
+                    results = self.browser_operator.adjust_betsize_all(
+                        self.browser_contexts,
+                        target_amount
+                    )
+                    
+                    # 統計結果
+                    success_count = sum(1 for r in results if r.success)
+                    
+                    self.logger.info("")
+                    self.logger.info("=" * 60)
+                    if success_count == len(self.browser_contexts):
+                        self.logger.info(f"✓ 金額調整完成: 全部 {success_count} 個瀏覽器調整成功")
+                    else:
+                        self.logger.warning(
+                            f"⚠ 金額調整部分完成: {success_count}/{len(self.browser_contexts)} 個瀏覽器成功"
+                        )
+                        # 顯示失敗的瀏覽器
+                        for i, result in enumerate(results, 1):
+                            if not result.success:
+                                username = self.browser_contexts[i-1].credential.username
+                                self.logger.error(f"  瀏覽器 {i} ({username}) 失敗: {result.message}")
+                    self.logger.info("=" * 60)
+                    self.logger.info("")
+                    
+                except ValueError:
+                    self.logger.error(f"無效的金額: {args}，請輸入數字")
+            
+            elif cmd == 'c':
+                # 定義可用金額列表
+                GAME_BETSIZE = (
+                    0.4, 0.8, 1, 1.2, 1.6, 2, 2.4, 2.8, 3, 3.2, 3.6, 4, 5, 6, 7, 8, 9, 10,
+                    12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 48, 56, 60, 64, 72, 80, 100,
+                    120, 140, 160, 180, 200, 240, 280, 300, 320, 360, 400, 420, 480, 500,
+                    540, 560, 600, 640, 700, 720, 800, 840, 900, 960, 980, 1000, 1080,
+                    1120, 1200, 1260, 1280, 1400, 1440, 1600, 1800, 2000
+                )
+                
+                self.logger.info("")
+                self.logger.info("=== 截取金額模板工具 ===")
+                self.logger.info("請輸入目前遊戲顯示的金額（例如: 0.4, 2.4, 10）")
+                self.logger.info("按 Enter 鍵退出")
+                self.logger.info("")
+                
+                while True:
+                    try:
+                        print("\n金額: ", end="", flush=True)
+                        amount_input = input().strip()
+                        
+                        # 空白輸入則退出
+                        if not amount_input:
+                            self.logger.info("退出金額模板工具")
+                            break
+                        
+                        amount = float(amount_input)
+                        
+                        # 驗證金額是否在有效列表中
+                        if amount not in GAME_BETSIZE:
+                            self.logger.warning(f"⚠ 金額 {amount} 不在標準列表中，但仍會建立模板")
+                        
+                        self.logger.info(f"目標金額: {amount}")
+                        
+                        # 使用第一個瀏覽器截取
+                        if self.browser_contexts:
+                            first_context = self.browser_contexts[0]
+                            if self.browser_operator.capture_betsize_template(first_context.driver, amount):
+                                self.logger.info("✓ 模板截取成功，可繼續輸入下一個金額或按 Enter 退出")
+                            else:
+                                self.logger.error("✗ 模板截取失敗")
+                        else:
+                            self.logger.error("沒有可用的瀏覽器")
+                            break
+                            
+                    except ValueError:
+                        self.logger.error("金額格式錯誤，請輸入有效數字（例如: 0.4）")
+                    except EOFError:
+                        self.logger.info("退出金額模板工具")
+                        break
+                    except KeyboardInterrupt:
+                        self.logger.info("\n退出金額模板工具")
+                        break
+                    except Exception as e:
+                        self.logger.error(f"截取失敗: {e}")
             
             else:
                 self.logger.warning(f"未知指令 {command}")
@@ -2014,6 +2479,7 @@ class AutoSlotGameApp:
         self.rules: List[BetRule] = []
         self.browser_contexts: List[BrowserContext] = []
         self.image_detector = ImageDetector(logger=self.logger)
+        self.last_canvas_rect = None  # 儲存 Canvas 區域資訊
     
     def _print_step(self, step: Union[int, str], title: str) -> None:
         """輸出步驟標題。
@@ -2370,11 +2836,64 @@ class AutoSlotGameApp:
         Args:
             reference_browser: 參考瀏覽器
         """
-        self._handle_lobby_image(
-            reference_browser, 
-            Constants.LOBBY_LOGIN, 
-            "lobby_login"
-        )
+        # 1. 檢查模板是否存在
+        template_name = Constants.LOBBY_LOGIN
+        display_name = "lobby_login"
+        
+        if not self.image_detector.template_exists(template_name):
+            self.logger.warning(f"模板圖片 {template_name} 不存在")
+            self._prompt_capture_template(reference_browser, template_name, display_name)
+        else:
+            self.logger.info(f"找到模板圖片 {template_name}")
+        
+        # 2. 持續檢測直到所有瀏覽器都找到圖片
+        self.logger.info(f"正在檢測 {display_name}，等待所有瀏覽器準備就緒...")
+        detection_results = self._continuous_detect_until_found(template_name, display_name)
+        
+        # 3. 切換到 iframe 並取得 Canvas 座標
+        self.logger.info("正在切換到遊戲 iframe...")
+        for i, context in enumerate(self.browser_contexts, 1):
+            try:
+                # 切換到 iframe
+                iframe = WebDriverWait(context.driver, 10).until(
+                    EC.presence_of_element_located((By.ID, Constants.GAME_IFRAME))
+                )
+                context.driver.switch_to.frame(iframe)
+                self.logger.info(f"  瀏覽器 {i} ({context.credential.username}) 已切換到 iframe")
+            except Exception as e:
+                self.logger.error(f"  瀏覽器 {i} ({context.credential.username}) 切換 iframe 失敗: {e}")
+        
+        # 取得 Canvas 區域（使用第一個瀏覽器作為參考）
+        try:
+            rect = reference_browser.driver.execute_script(f"""
+                const canvas = document.getElementById('{Constants.GAME_CANVAS}');
+                const r = canvas.getBoundingClientRect();
+                return {{x: r.left, y: r.top, w: r.width, h: r.height}};
+            """)
+            self.logger.info(f"Canvas 區域: x={rect['x']}, y={rect['y']}, w={rect['w']}, h={rect['h']}")
+            
+            # 儲存到實例變數供後續使用
+            self.last_canvas_rect = rect
+        except Exception as e:
+            self.logger.error(f"取得 Canvas 座標失敗: {e}")
+            raise
+        
+        # 4. 計算點擊座標（開始遊戲按鈕）
+        start_x = rect["x"] + rect["w"] * Constants.START_GAME_X_RATIO
+        start_y = rect["y"] + rect["h"] * Constants.START_GAME_Y_RATIO
+        self.logger.info(f"開始遊戲按鈕座標: ({start_x:.1f}, {start_y:.1f})")
+        
+        # 5. 在所有瀏覽器中執行點擊
+        time.sleep(1)
+        self.logger.info("步驟 2: 在所有瀏覽器中點擊開始遊戲按鈕...")
+        for i, context in enumerate(self.browser_contexts, 1):
+            self._click_coordinate(context.driver, start_x, start_y)
+            self.logger.debug(f"  瀏覽器 {i} 已執行點擊")
+        
+        # 6. 等待所有瀏覽器中的圖片消失
+        self.logger.info("步驟 2: 等待所有瀏覽器的 lobby_login.png 消失...")
+        self._wait_for_image_disappear(template_name)
+        self.logger.info(f"步驟 2 完成：所有瀏覽器的 {display_name} 都已消失")
     
     def _handle_lobby_confirm(self, reference_browser: BrowserContext) -> None:
         """處理 lobby_confirm 的檢測與點擊。
@@ -2382,11 +2901,116 @@ class AutoSlotGameApp:
         Args:
             reference_browser: 參考瀏覽器
         """
-        self._handle_lobby_image(
-            reference_browser, 
-            Constants.LOBBY_CONFIRM, 
-            "lobby_confirm"
-        )
+        # 1. 檢查模板是否存在
+        template_name = Constants.LOBBY_CONFIRM
+        display_name = "lobby_confirm"
+        
+        if not self.image_detector.template_exists(template_name):
+            self.logger.warning(f"模板圖片 {template_name} 不存在")
+            # 如果沒有模板，嘗試使用確認按鈕座標自動建立
+            if hasattr(self, 'last_canvas_rect') and self.last_canvas_rect:
+                self._auto_capture_lobby_confirm(reference_browser)
+            else:
+                self._prompt_capture_template(reference_browser, template_name, display_name)
+        else:
+            self.logger.info(f"找到模板圖片 {template_name}")
+        
+        # 2. 持續檢測直到所有瀏覽器都找到圖片
+        self.logger.info(f"正在檢測 {display_name}，等待所有瀏覽器準備就緒...")
+        detection_results = self._continuous_detect_until_found(template_name, display_name)
+        
+        # 3. 計算點擊座標（確認按鈕）
+        if hasattr(self, 'last_canvas_rect') and self.last_canvas_rect:
+            rect = self.last_canvas_rect
+            confirm_x = rect["x"] + rect["w"] * Constants.MACHINE_CONFIRM_X_RATIO
+            confirm_y = rect["y"] + rect["h"] * Constants.MACHINE_CONFIRM_Y_RATIO
+            self.logger.info(f"確認按鈕座標: ({confirm_x:.1f}, {confirm_y:.1f})")
+            
+            # 4. 在所有瀏覽器中執行點擊
+            time.sleep(1)
+            self.logger.info("步驟 4: 在所有瀏覽器中點擊確認按鈕...")
+            for i, context in enumerate(self.browser_contexts, 1):
+                self._click_coordinate(context.driver, confirm_x, confirm_y)
+                self.logger.debug(f"  瀏覽器 {i} 已執行點擊")
+        else:
+            self.logger.warning("未找到 Canvas 座標，跳過自動點擊")
+        
+        # 5. 等待所有瀏覽器中的圖片消失
+        self.logger.info("步驟 4: 等待所有瀏覽器的 lobby_confirm.png 消失...")
+        self._wait_for_image_disappear(template_name)
+        self.logger.info(f"步驟 4 完成：所有瀏覽器的 {display_name} 都已消失")
+        
+        # 6. 所有瀏覽器都成功進入遊戲
+        self.logger.info("")
+        self.logger.info("=" * 60)
+        self.logger.info("步驟 5: 所有瀏覽器都已成功進入遊戲控制模式")
+        self.logger.info("=" * 60)
+        self.logger.info("")
+        time.sleep(2)
+    
+    def _click_coordinate(self, driver: WebDriver, x: float, y: float) -> None:
+        """點擊指定座標。
+        
+        Args:
+            driver: WebDriver 實例
+            x: X座標
+            y: Y座標
+        """
+        for event in ["mousePressed", "mouseReleased"]:
+            driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
+                "type": event,
+                "x": x,
+                "y": y,
+                "button": "left",
+                "clickCount": 1
+            })
+    
+    def _auto_capture_lobby_confirm(self, reference_browser: BrowserContext) -> None:
+        """自動截取 lobby_confirm 模板圖片。
+        
+        使用已知的確認按鈕座標自動截取模板。
+        
+        Args:
+            reference_browser: 參考瀏覽器
+        """
+        try:
+            self.logger.info("正在自動建立 lobby_confirm.png 模板...")
+            
+            # 取得確認按鈕座標
+            rect = self.last_canvas_rect
+            confirm_x = rect["x"] + rect["w"] * Constants.MACHINE_CONFIRM_X_RATIO
+            confirm_y = rect["y"] + rect["h"] * Constants.MACHINE_CONFIRM_Y_RATIO
+            
+            # 截取畫面
+            screenshot = reference_browser.driver.get_screenshot_as_png()
+            screenshot_img = Image.open(io.BytesIO(screenshot))
+            
+            # 獲取實際截圖尺寸
+            img_width, img_height = screenshot_img.size
+            
+            center_x = int(confirm_x)
+            center_y = int(confirm_y)
+            
+            # 固定像素偏移：上下左右各20px
+            crop_left = max(0, center_x - 20)
+            crop_top = max(0, center_y - 20)
+            crop_right = min(img_width, center_x + 20)
+            crop_bottom = min(img_height, center_y + 20)
+            
+            self.logger.info(f"截圖尺寸: {img_width}x{img_height}, 確認按鈕座標: ({center_x}, {center_y})")
+            
+            cropped_img = screenshot_img.crop((crop_left, crop_top, crop_right, crop_bottom))
+            
+            # 儲存圖片
+            template_path = self.image_detector.get_template_path(Constants.LOBBY_CONFIRM)
+            template_path.parent.mkdir(parents=True, exist_ok=True)
+            cropped_img.save(template_path)
+            
+            self.logger.info(f"✓ lobby_confirm.png 已自動建立")
+            
+        except Exception as e:
+            self.logger.error(f"自動建立 lobby_confirm.png 失敗: {e}")
+            raise
     
     def _prompt_capture_template(self, reference_browser: BrowserContext, template_name: str, display_name: str) -> None:
         """提示用戶截取模板圖片。
@@ -2505,23 +3129,26 @@ class AutoSlotGameApp:
             檢測結果列表 (每個元素為 None 或 (x, y, confidence))
         """
         attempt = 0
+        total_browsers = len(self.browser_contexts)
         
         while True:
             attempt += 1
             detection_results = self._detect_in_all_browsers(template_name, silent=True)
             found_count = sum(1 for result in detection_results if result is not None)
             
-            if found_count > 0:
+            # 只有當所有瀏覽器都找到圖片時才返回
+            if found_count == total_browsers:
                 # 顯示最終找到的座標
+                self.logger.info(f"所有瀏覽器 ({found_count}/{total_browsers}) 都已檢測到 {display_name}")
                 for i, result in enumerate(detection_results, 1):
                     if result:
                         x, y, confidence = result
-                        self.logger.info(f"瀏覽器 {i}/{len(self.browser_contexts)} 找到圖片 座標 {x} {y} 信心度 {confidence:.2f}")
+                        self.logger.info(f"  瀏覽器 {i} 座標 ({x}, {y}) 信心度 {confidence:.2f}")
                 return detection_results
             
             # 每 N 次檢測顯示一次進度
             if attempt % Constants.DETECTION_PROGRESS_INTERVAL == 0:
-                self.logger.info(f"持續檢測中，第 {attempt} 次，loading 中請稍候")
+                self.logger.info(f"持續檢測中，第 {attempt} 次，已找到 {found_count}/{total_browsers} 個瀏覽器")
             
             time.sleep(Constants.DETECTION_INTERVAL)
     
@@ -2618,6 +3245,7 @@ class AutoSlotGameApp:
             template_name: 模板圖片檔名
         """
         attempt = 0
+        total_browsers = len(self.browser_contexts)
         
         while True:
             attempt += 1
@@ -2635,9 +3263,16 @@ class AutoSlotGameApp:
                 except Exception as e:
                     self.logger.debug(f"瀏覽器 {i} 檢測失敗 {e}")
             
+            disappeared_count = total_browsers - len(still_present)
+            
             # 如果所有瀏覽器都沒有找到圖片，則返回
             if not still_present:
+                self.logger.info(f"所有瀏覽器 ({total_browsers}/{total_browsers}) 中的圖片都已消失")
                 return
+            
+            # 每 10 次檢測顯示一次進度
+            if attempt % 10 == 0:
+                self.logger.info(f"等待圖片消失中，已消失 {disappeared_count}/{total_browsers} 個瀏覽器")
             
             # 等待後再次檢測
             time.sleep(Constants.DETECTION_INTERVAL)
