@@ -10,7 +10,7 @@ AutoSlotGameMaster 打包腳本
     pip install pyinstaller
 
 作者: simon980224
-版本: 1.0.0
+版本: 1.1.0
 """
 
 import os
@@ -273,7 +273,7 @@ def show_result() -> None:
 def main():
     """主函式"""
     print("\n" + "="*70)
-    print(" AutoSlotGameMaster v1.0.0 打包工具")
+    print(" AutoSlotGameMaster v1.1.0 打包工具")
     print("="*70)
     
     # 1. 清理舊的構建檔案

@@ -13,7 +13,7 @@
 - 完善的錯誤處理與重試機制
 
 作者: 凡臻科技
-版本: 1.0.0
+版本: 1.1.0
 Python: 3.8+
 """
 
@@ -106,6 +106,53 @@ def get_resource_path(relative_path: str = "") -> Path:
     if relative_path:
         return base_path / relative_path
     return base_path
+
+
+def cv2_imread_unicode(file_path: Union[str, Path], flags: int = cv2.IMREAD_COLOR) -> Optional[np.ndarray]:
+    """安全讀取圖片（支援 Unicode 路徑）。
+    
+    OpenCV 的 cv2.imread() 無法處理包含中文或其他非 ASCII 字元的路徑。
+    此函式使用 numpy 和 PIL 作為替代方案。
+    
+    Args:
+        file_path: 圖片檔案路徑（支援中文路徑）
+        flags: OpenCV 讀取標誌（cv2.IMREAD_COLOR, cv2.IMREAD_GRAYSCALE 等）
+        
+    Returns:
+        圖片的 numpy 陣列，失敗返回 None
+    """
+    try:
+        # 轉換為 Path 物件
+        path = Path(file_path)
+        
+        # 使用 PIL 讀取圖片（PIL 支援 Unicode 路徑）
+        pil_image = Image.open(path)
+        
+        # 轉換為 numpy 陣列
+        img_array = np.array(pil_image)
+        
+        # 根據讀取標誌處理圖片
+        if flags == cv2.IMREAD_GRAYSCALE:
+            # 轉換為灰階
+            if len(img_array.shape) == 3:
+                img_array = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
+        elif flags == cv2.IMREAD_COLOR:
+            # 確保是彩色圖片
+            if len(img_array.shape) == 2:
+                # 灰階轉彩色
+                img_array = cv2.cvtColor(img_array, cv2.COLOR_GRAY2RGB)
+            elif img_array.shape[2] == 4:
+                # RGBA 轉 RGB
+                img_array = cv2.cvtColor(img_array, cv2.COLOR_RGBA2RGB)
+            # PIL 使用 RGB，OpenCV 使用 BGR，需要轉換
+            if len(img_array.shape) == 3 and img_array.shape[2] == 3:
+                img_array = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
+        
+        return img_array
+        
+    except Exception as e:
+        # 返回 None 保持與 cv2.imread() 相同的行為
+        return None
 
 
 # ============================================================================
@@ -1812,8 +1859,8 @@ class SyncBrowserOperator:
             match_results = []
             
             for image_file in image_files:
-                # 讀取模板圖片
-                template = cv2.imread(str(image_file), cv2.IMREAD_GRAYSCALE)
+                # 讀取模板圖片（使用支援 Unicode 路徑的函式）
+                template = cv2_imread_unicode(image_file, cv2.IMREAD_GRAYSCALE)
                 if template is None:
                     continue
                 
@@ -2118,8 +2165,8 @@ class ImageDetector:
             if not template_path.exists():
                 raise FileNotFoundError(f"模板圖片不存在: {template_path}")
             
-            # 讀取模板圖片
-            template = cv2.imread(str(template_path))
+            # 讀取模板圖片（使用支援 Unicode 路徑的函式）
+            template = cv2_imread_unicode(template_path, cv2.IMREAD_COLOR)
             if template is None:
                 raise ImageDetectionError(f"無法讀取模板圖片: {template_path}")
             
