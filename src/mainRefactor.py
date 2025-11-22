@@ -3184,18 +3184,25 @@ class AutoSlotGameApp:
         self.logger.info(f"正在檢測 {display_name}，等待所有瀏覽器準備就緒...")
         detection_results = self._continuous_detect_until_found(template_name, display_name)
         
-        # 3. 切換到 iframe 並取得 Canvas 座標
-        self.logger.info("正在切換到遊戲 iframe...")
-        for i, context in enumerate(self.browser_contexts, 1):
+        # 3. 切換到 iframe（同步化操作）
+        def switch_to_iframe_operation(context: BrowserContext, index: int, total: int) -> bool:
+            """切換到遊戲 iframe"""
             try:
-                # 切換到 iframe
                 iframe = WebDriverWait(context.driver, 10).until(
                     EC.presence_of_element_located((By.ID, Constants.GAME_IFRAME))
                 )
                 context.driver.switch_to.frame(iframe)
-                self.logger.info(f"  瀏覽器 {i} ({context.credential.username}) 已切換到 iframe")
+                return True
             except Exception as e:
-                self.logger.error(f"  瀏覽器 {i} ({context.credential.username}) 切換 iframe 失敗: {e}")
+                self.logger.error(f"切換 iframe 失敗: {e}")
+                return False
+        
+        self.logger.info("正在同步切換到遊戲 iframe...")
+        iframe_results = self.browser_operator.execute_sync(
+            self.browser_contexts,
+            switch_to_iframe_operation,
+            "切換到遊戲 iframe"
+        )
         
         # 取得 Canvas 區域（使用第一個瀏覽器作為參考）
         try:
@@ -3219,12 +3226,23 @@ class AutoSlotGameApp:
         start_y = rect["y"] + rect["h"] * Constants.START_GAME_Y_RATIO
         self.logger.info(f"開始遊戲按鈕座標: ({start_x:.1f}, {start_y:.1f})")
         
-        # 5. 在所有瀏覽器中執行點擊
+        # 5. 在所有瀏覽器中同步執行點擊
         time.sleep(1)
-        self.logger.info("步驟 2: 在所有瀏覽器中點擊開始遊戲按鈕...")
-        for i, context in enumerate(self.browser_contexts, 1):
-            self._click_coordinate(context.driver, start_x, start_y)
-            self.logger.debug(f"  瀏覽器 {i} 已執行點擊")
+        def click_start_button_operation(context: BrowserContext, index: int, total: int) -> bool:
+            """點擊開始遊戲按鈕"""
+            try:
+                self._click_coordinate(context.driver, start_x, start_y)
+                return True
+            except Exception as e:
+                self.logger.error(f"點擊失敗: {e}")
+                return False
+        
+        self.logger.info("步驟 2: 同步點擊所有瀏覽器的開始遊戲按鈕...")
+        click_results = self.browser_operator.execute_sync(
+            self.browser_contexts,
+            click_start_button_operation,
+            "點擊開始遊戲按鈕"
+        )
         
         # 6. 等待所有瀏覽器中的圖片消失
         self.logger.info("步驟 2: 等待所有瀏覽器的 lobby_login.png 消失...")
@@ -3262,12 +3280,23 @@ class AutoSlotGameApp:
             confirm_y = rect["y"] + rect["h"] * Constants.MACHINE_CONFIRM_Y_RATIO
             self.logger.info(f"確認按鈕座標: ({confirm_x:.1f}, {confirm_y:.1f})")
             
-            # 4. 在所有瀏覽器中執行點擊
+            # 4. 在所有瀏覽器中同步執行點擊
             time.sleep(1)
-            self.logger.info("步驟 4: 在所有瀏覽器中點擊確認按鈕...")
-            for i, context in enumerate(self.browser_contexts, 1):
-                self._click_coordinate(context.driver, confirm_x, confirm_y)
-                self.logger.debug(f"  瀏覽器 {i} 已執行點擊")
+            def click_confirm_button_operation(context: BrowserContext, index: int, total: int) -> bool:
+                """點擊確認按鈕"""
+                try:
+                    self._click_coordinate(context.driver, confirm_x, confirm_y)
+                    return True
+                except Exception as e:
+                    self.logger.error(f"點擊失敗: {e}")
+                    return False
+            
+            self.logger.info("步驟 4: 同步點擊所有瀏覽器的確認按鈕...")
+            click_results = self.browser_operator.execute_sync(
+                self.browser_contexts,
+                click_confirm_button_operation,
+                "點擊確認按鈕"
+            )
         else:
             self.logger.warning("未找到 Canvas 座標，跳過自動點擊")
         
