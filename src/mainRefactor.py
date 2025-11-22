@@ -126,6 +126,13 @@ class Constants:
     FREE_GAME_X_RATIO = 0.25  # 免費遊戲按鈕 X 座標比例
     FREE_GAME_Y_RATIO = 0.5   # 免費遊戲按鈕 Y 座標比例
     
+    # 購買免費遊戲按鈕座標比例
+    BUY_FREE_GAME_BUTTON_X_RATIO = 0.23  # 免費遊戲區域按鈕 X 座標比例
+    BUY_FREE_GAME_BUTTON_Y_RATIO = 1.05  # 免費遊戲區域按鈕 Y 座標比例
+    BUY_FREE_GAME_CONFIRM_X_RATIO = 0.65  # 免費遊戲確認按鈕 X 座標比例
+    BUY_FREE_GAME_CONFIRM_Y_RATIO = 1.2   # 免費遊戲確認按鈕 Y 座標比例
+    BUY_FREE_GAME_WAIT_SECONDS = 10  # 購買後等待秒數
+    
     # 操作相關常量
     DEFAULT_WAIT_SECONDS = 3  # 預設等待時間（秒）
     MAX_WAIT_ATTEMPTS = 20  # 最大等待嘗試次數
@@ -1242,6 +1249,7 @@ class SyncBrowserOperator:
         """
         self.max_workers = max_workers or Constants.MAX_THREAD_WORKERS
         self.logger = logger or LoggerFactory.get_logger()
+        self.last_canvas_rect: Optional[Dict[str, float]] = None  # Canvas 區域資訊
     
     def execute_sync(
         self,
@@ -1456,6 +1464,164 @@ class SyncBrowserOperator:
             press_space_operation,
             "按下空白鍵",
             timeout=timeout
+        )
+    
+    def buy_free_game_single(
+        self,
+        context: BrowserContext,
+        canvas_rect: Dict[str, float]
+    ) -> bool:
+        """在單個瀏覽器中購買免費遊戲。
+        
+        Args:
+            context: 瀏覽器上下文
+            canvas_rect: Canvas 區域資訊 {"x", "y", "w", "h"}
+            
+        Returns:
+            是否成功
+        """
+        try:
+            username = context.credential.username
+            driver = context.driver
+            
+            # === 第一次點擊（免費遊戲區域） ===
+            freegame_x = canvas_rect["x"] + canvas_rect["w"] * Constants.BUY_FREE_GAME_BUTTON_X_RATIO
+            freegame_y = canvas_rect["y"] + canvas_rect["h"] * Constants.BUY_FREE_GAME_BUTTON_Y_RATIO
+            
+            self.logger.info(f"[{username}] 點擊免費遊戲區域 ({freegame_x:.1f}, {freegame_y:.1f})...")
+            for ev in ["mousePressed", "mouseReleased"]:
+                driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
+                    "type": ev,
+                    "x": freegame_x,
+                    "y": freegame_y,
+                    "button": "left",
+                    "clickCount": 1
+                })
+            time.sleep(2)
+            
+            # === 第二次點擊（確認按鈕） ===
+            confirm_x = canvas_rect["x"] + canvas_rect["w"] * Constants.BUY_FREE_GAME_CONFIRM_X_RATIO
+            confirm_y = canvas_rect["y"] + canvas_rect["h"] * Constants.BUY_FREE_GAME_CONFIRM_Y_RATIO
+            
+            self.logger.info(f"[{username}] 點擊確認按鈕 ({confirm_x:.1f}, {confirm_y:.1f})...")
+            for ev in ["mousePressed", "mouseReleased"]:
+                driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
+                    "type": ev,
+                    "x": confirm_x,
+                    "y": confirm_y,
+                    "button": "left",
+                    "clickCount": 1
+                })
+            
+            # === 購買完成後等待並自動按空白鍵 ===
+            self.logger.info(f"[{username}] 購買完成，等待 {Constants.BUY_FREE_GAME_WAIT_SECONDS} 秒後開始遊戲...")
+            time.sleep(Constants.BUY_FREE_GAME_WAIT_SECONDS)
+            
+            self.logger.info(f"[{username}] 按下空白鍵開始遊戲...")
+            driver.execute_cdp_cmd("Input.dispatchKeyEvent", {
+                "type": "keyDown",
+                "key": " ",
+                "code": "Space",
+                "windowsVirtualKeyCode": 32,
+                "nativeVirtualKeyCode": 32
+            })
+            driver.execute_cdp_cmd("Input.dispatchKeyEvent", {
+                "type": "keyUp",
+                "key": " ",
+                "code": "Space",
+                "windowsVirtualKeyCode": 32,
+                "nativeVirtualKeyCode": 32
+            })
+            
+            self.logger.info(f"[{username}] 免費遊戲購買流程完成！")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"[{username}] 購買免費遊戲失敗：{e}")
+            return False
+    
+    def buy_free_game_all(
+        self,
+        browser_contexts: List[BrowserContext],
+        canvas_rect: Dict[str, float],
+        timeout: Optional[float] = None
+    ) -> List[OperationResult]:
+        """同步在所有瀏覽器中購買免費遊戲。
+        
+        Args:
+            browser_contexts: 瀏覽器上下文列表
+            canvas_rect: Canvas 區域資訊
+            timeout: 超時時間
+            
+        Returns:
+            操作結果列表
+        """
+        def buy_operation(context: BrowserContext, index: int, total: int) -> bool:
+            """購買免費遊戲操作"""
+            username = context.credential.username
+            driver = context.driver
+            
+            try:
+                # === 第一次點擊（免費遊戲區域） ===
+                freegame_x = canvas_rect["x"] + canvas_rect["w"] * Constants.BUY_FREE_GAME_BUTTON_X_RATIO
+                freegame_y = canvas_rect["y"] + canvas_rect["h"] * Constants.BUY_FREE_GAME_BUTTON_Y_RATIO
+                
+                self.logger.debug(f"[{username}] 點擊免費遊戲區域 ({freegame_x:.1f}, {freegame_y:.1f})")
+                for ev in ["mousePressed", "mouseReleased"]:
+                    driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
+                        "type": ev,
+                        "x": freegame_x,
+                        "y": freegame_y,
+                        "button": "left",
+                        "clickCount": 1
+                    })
+                time.sleep(2)
+                
+                # === 第二次點擊（確認按鈕） ===
+                confirm_x = canvas_rect["x"] + canvas_rect["w"] * Constants.BUY_FREE_GAME_CONFIRM_X_RATIO
+                confirm_y = canvas_rect["y"] + canvas_rect["h"] * Constants.BUY_FREE_GAME_CONFIRM_Y_RATIO
+                
+                self.logger.debug(f"[{username}] 點擊確認按鈕 ({confirm_x:.1f}, {confirm_y:.1f})")
+                for ev in ["mousePressed", "mouseReleased"]:
+                    driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
+                        "type": ev,
+                        "x": confirm_x,
+                        "y": confirm_y,
+                        "button": "left",
+                        "clickCount": 1
+                    })
+                
+                # === 購買完成後等待並自動按空白鍵 ===
+                self.logger.debug(f"[{username}] 等待 {Constants.BUY_FREE_GAME_WAIT_SECONDS} 秒")
+                time.sleep(Constants.BUY_FREE_GAME_WAIT_SECONDS)
+                
+                self.logger.debug(f"[{username}] 按下空白鍵")
+                driver.execute_cdp_cmd("Input.dispatchKeyEvent", {
+                    "type": "keyDown",
+                    "key": " ",
+                    "code": "Space",
+                    "windowsVirtualKeyCode": 32,
+                    "nativeVirtualKeyCode": 32
+                })
+                driver.execute_cdp_cmd("Input.dispatchKeyEvent", {
+                    "type": "keyUp",
+                    "key": " ",
+                    "code": "Space",
+                    "windowsVirtualKeyCode": 32,
+                    "nativeVirtualKeyCode": 32
+                })
+                
+                return True
+                
+            except Exception as e:
+                self.logger.error(f"[{username}] 購買失敗: {e}")
+                return False
+        
+        return self.execute_sync(
+            browser_contexts,
+            buy_operation,
+            "購買免費遊戲",
+            timeout
         )
     
     def resize_and_arrange_all(
@@ -2097,6 +2263,11 @@ class GameControlCenter:
   
   b <金額>         調整所有瀏覽器的下注金額
                    範例: b 0.4, b 2.4, b 10
+  
+  f <編號>         購買免費遊戲
+                   f 0      - 所有瀏覽器都購買
+                   f 1      - 第 1 個瀏覽器購買
+                   f 1,2,3  - 第 1、2、3 個瀏覽器購買
                    
   c                截取金額模板（用於金額識別）
 
@@ -2359,6 +2530,148 @@ class GameControlCenter:
                     
                 except ValueError:
                     self.logger.error(f"無效的金額: {args}，請輸入數字")
+            
+            elif cmd == 'f':
+                # 購買免費遊戲指令
+                if not args:
+                    self.logger.error("指令格式錯誤，請使用: f <編號>")
+                    self.logger.info("  f 0      - 所有瀏覽器")
+                    self.logger.info("  f 1      - 第 1 個瀏覽器")
+                    self.logger.info("  f 1,2,3  - 第 1、2、3 個瀏覽器")
+                    return True
+                
+                try:
+                    # 檢查 Canvas 區域資訊
+                    if not hasattr(self.browser_operator, 'last_canvas_rect') or \
+                       self.browser_operator.last_canvas_rect is None:
+                        self.logger.error("Canvas 區域未初始化，請確保已完成登入流程")
+                        return True
+                    
+                    # 解析參數
+                    target_indices = []
+                    
+                    # 處理逗號分隔的多個編號
+                    if ',' in args:
+                        try:
+                            indices = [int(x.strip()) for x in args.split(',')]
+                            for idx in indices:
+                                if idx < 1 or idx > len(self.browser_contexts):
+                                    self.logger.error(
+                                        f"瀏覽器編號 {idx} 無效，請輸入 1-{len(self.browser_contexts)} 之間的數字"
+                                    )
+                                    return True
+                            target_indices = indices
+                        except ValueError:
+                            self.logger.error(f"無效的編號格式: {args}，請使用數字和逗號 (例如: f 1,2,3)")
+                            return True
+                    else:
+                        # 單一數字
+                        try:
+                            index = int(args)
+                            if index == 0:
+                                # 0 表示所有瀏覽器
+                                target_indices = list(range(1, len(self.browser_contexts) + 1))
+                            elif index < 1 or index > len(self.browser_contexts):
+                                self.logger.error(
+                                    f"瀏覽器編號無效，請輸入 0 (全部) 或 1-{len(self.browser_contexts)} 之間的數字"
+                                )
+                                return True
+                            else:
+                                target_indices = [index]
+                        except ValueError:
+                            self.logger.error(f"無效的編號: {args}，請輸入數字 (例如: f 1 或 f 1,2)")
+                            return True
+                    
+                    # 顯示執行信息
+                    self.logger.info("")
+                    self.logger.info("=" * 60)
+                    if len(target_indices) == len(self.browser_contexts):
+                        self.logger.info(f"開始在所有 {len(target_indices)} 個瀏覽器同步購買免費遊戲")
+                    elif len(target_indices) == 1:
+                        username = self.browser_contexts[target_indices[0] - 1].credential.username
+                        self.logger.info(f"開始在瀏覽器 {target_indices[0]} ({username}) 購買免費遊戲")
+                    else:
+                        self.logger.info(f"開始在 {len(target_indices)} 個瀏覽器同步購買免費遊戲")
+                        for idx in target_indices:
+                            username = self.browser_contexts[idx - 1].credential.username
+                            self.logger.info(f"  - 瀏覽器 {idx} ({username})")
+                    self.logger.info("=" * 60)
+                    self.logger.info("")
+                    
+                    # 準備目標瀏覽器上下文列表
+                    target_contexts = [self.browser_contexts[idx - 1] for idx in target_indices]
+                    
+                    # 使用同步方式執行購買
+                    self.logger.info("正在同步執行購買操作...")
+                    results = self.browser_operator.buy_free_game_all(
+                        target_contexts,
+                        self.browser_operator.last_canvas_rect
+                    )
+                    
+                    # 統計結果
+                    success_count = sum(1 for r in results if r.success)
+                    failed_browsers = [
+                        (target_indices[i], target_contexts[i].credential.username)
+                        for i, r in enumerate(results)
+                        if not r.success
+                    ]
+                    
+                    # 顯示總結
+                    self.logger.info("")
+                    self.logger.info("=" * 60)
+                    if success_count == len(target_indices):
+                        self.logger.info(f"✓ 免費遊戲購買完成: 全部 {success_count} 個瀏覽器成功")
+                    else:
+                        self.logger.warning(
+                            f"⚠ 免費遊戲購買部分完成: {success_count}/{len(target_indices)} 個瀏覽器成功"
+                        )
+                        if failed_browsers:
+                            self.logger.info("失敗的瀏覽器:")
+                            for idx, username in failed_browsers:
+                                self.logger.error(f"  - 瀏覽器 {idx} ({username})")
+                    self.logger.info("=" * 60)
+                    self.logger.info("")
+                    
+                    # 等待用戶確認免費遊戲流程結束
+                    if success_count > 0:
+                        self.logger.info("免費遊戲已啟動，請手動遊玩")
+                        self.logger.info("當免費遊戲流程結束後，請輸入任意內容並按 Enter 繼續")
+                        self.logger.info("(系統將自動按一次空白鍵以結算)")
+                        self.logger.info("")
+                        
+                        try:
+                            print("按 Enter 繼續 > ", end="", flush=True)
+                            input()
+                            
+                            # 對成功購買的瀏覽器執行空白鍵
+                            self.logger.info("")
+                            self.logger.info("正在對相應瀏覽器執行空白鍵結算...")
+                            
+                            # 只對成功的瀏覽器執行
+                            successful_contexts = [
+                                target_contexts[i]
+                                for i, r in enumerate(results)
+                                if r.success
+                            ]
+                            
+                            if successful_contexts:
+                                press_results = self.browser_operator.press_space_all(successful_contexts)
+                                press_success = sum(1 for r in press_results if r.success)
+                                
+                                self.logger.info(f"✓ 已對 {press_success}/{len(successful_contexts)} 個瀏覽器執行空白鍵")
+                                self.logger.info("免費遊戲流程完成，可繼續使用其他指令")
+                            
+                        except (EOFError, KeyboardInterrupt):
+                            self.logger.info("\n已取消等待")
+                        except Exception as e:
+                            self.logger.error(f"執行空白鍵時發生錯誤: {e}")
+                    
+                    self.logger.info("")
+                    
+                except Exception as e:
+                    self.logger.error(f"購買免費遊戲時發生錯誤: {e}")
+                    import traceback
+                    self.logger.debug(traceback.format_exc())
             
             elif cmd == 'c':
                 # 定義可用金額列表
@@ -2895,6 +3208,8 @@ class AutoSlotGameApp:
             
             # 儲存到實例變數供後續使用
             self.last_canvas_rect = rect
+            # 同時儲存到 browser_operator 供 GameControlCenter 使用
+            self.browser_operator.last_canvas_rect = rect
         except Exception as e:
             self.logger.error(f"取得 Canvas 座標失敗: {e}")
             raise
