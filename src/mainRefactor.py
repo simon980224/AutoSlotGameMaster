@@ -1549,61 +1549,67 @@ class SyncBrowserOperator:
             timeout=timeout
         )
     
-    def get_current_betsize(self, driver: WebDriver) -> Optional[float]:
+    def get_current_betsize(self, driver: WebDriver, retry_count: int = 2) -> Optional[float]:
         """取得當前下注金額。
         
         Args:
             driver: WebDriver 實例
+            retry_count: 重試次數（預設2次）
             
         Returns:
             Optional[float]: 當前金額，失敗返回None
         """
-        try:
-            self.logger.info("開始查詢當前下注金額...")
-            
-            # 截取整個瀏覽器截圖
-            screenshot = driver.get_screenshot_as_png()
-            screenshot_np = np.array(Image.open(io.BytesIO(screenshot)))
-            screenshot_gray = cv2.cvtColor(screenshot_np, cv2.COLOR_RGB2GRAY)
-            
-            # 與資料夾中的圖片進行比對
-            matched_amount = self._compare_betsize_images(screenshot_gray)
-            
-            if matched_amount:
-                try:
-                    amount_value = float(matched_amount)
-                    # 定義可用金額列表
-                    GAME_BETSIZE = (
-                        0.4, 0.8, 1, 1.2, 1.6, 2, 2.4, 2.8, 3, 3.2, 3.6, 4, 5, 6, 7, 8, 9, 10,
-                        12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 48, 56, 60, 64, 72, 80, 100,
-                        120, 140, 160, 180, 200, 240, 280, 300, 320, 360, 400, 420, 480, 500,
-                        540, 560, 600, 640, 700, 720, 800, 840, 900, 960, 980, 1000, 1080,
-                        1120, 1200, 1260, 1280, 1400, 1440, 1600, 1800, 2000
-                    )
-                    if amount_value in GAME_BETSIZE:
-                        self.logger.info(f"當前下注金額: {amount_value}")
-                        return amount_value
-                    else:
-                        self.logger.warning(f"金額 {matched_amount} 不在 GAME_BETSIZE 列表中")
-                except ValueError:
-                    self.logger.error(f"無法將 {matched_amount} 轉換為數字")
-            else:
-                self.logger.warning("無法識別當前下注金額")
-            
-            return None
-            
-        except Exception as e:
-            self.logger.error(f"查詢下注金額時發生錯誤: {e}")
-            return None
+        # 定義可用金額列表
+        GAME_BETSIZE = (
+            0.4, 0.8, 1, 1.2, 1.6, 2, 2.4, 2.8, 3, 3.2, 3.6, 4, 5, 6, 7, 8, 9, 10,
+            12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 48, 56, 60, 64, 72, 80, 100,
+            120, 140, 160, 180, 200, 240, 280, 300, 320, 360, 400, 420, 480, 500,
+            540, 560, 600, 640, 700, 720, 800, 840, 900, 960, 980, 1000, 1080,
+            1120, 1200, 1260, 1280, 1400, 1440, 1600, 1800, 2000
+        )
+        
+        for attempt in range(retry_count):
+            try:
+                if attempt > 0:
+                    self.logger.info(f"重試識別金額... (第 {attempt + 1} 次)")
+                    time.sleep(0.5)  # 等待畫面穩定
+                else:
+                    self.logger.info("開始查詢當前下注金額...")
+                
+                # 截取整個瀏覽器截圖
+                screenshot = driver.get_screenshot_as_png()
+                screenshot_np = np.array(Image.open(io.BytesIO(screenshot)))
+                screenshot_gray = cv2.cvtColor(screenshot_np, cv2.COLOR_RGB2GRAY)
+                
+                # 與資料夾中的圖片進行比對
+                matched_amount, confidence = self._compare_betsize_images(screenshot_gray)
+                
+                if matched_amount:
+                    try:
+                        amount_value = float(matched_amount)
+                        if amount_value in GAME_BETSIZE:
+                            self.logger.info(f"當前下注金額: {amount_value} (信心度: {confidence:.3f})")
+                            return amount_value
+                        else:
+                            self.logger.warning(f"金額 {matched_amount} 不在 GAME_BETSIZE 列表中")
+                    except ValueError:
+                        self.logger.error(f"無法將 {matched_amount} 轉換為數字")
+                else:
+                    self.logger.warning(f"無法識別當前下注金額 (最高信心度: {confidence:.3f})")
+                
+            except Exception as e:
+                self.logger.error(f"查詢下注金額時發生錯誤: {e}")
+        
+        return None
     
-    def _compare_betsize_images(self, screenshot_gray: np.ndarray) -> Optional[str]:
+    def _compare_betsize_images(self, screenshot_gray: np.ndarray) -> Tuple[Optional[str], float]:
         """使用 bet_size 資料夾中的圖片比對。
         
         Args:
             screenshot_gray: 截圖（灰階）
             
         Returns:
-            Optional[str]: 匹配的金額
+            Tuple[Optional[str], float]: (匹配的金額, 信心度)
         """
         try:
             # 取得專案根目錄
@@ -1621,18 +1627,18 @@ class SyncBrowserOperator:
                     self.logger.info(f"已建立 bet_size 資料夾: {bet_size_dir}")
                 except Exception as e:
                     self.logger.error(f"無法建立 bet_size 資料夾: {e}")
-                    return None
+                    return None, 0.0
             
             # 取得所有 png 圖片
             image_files = sorted(bet_size_dir.glob("*.png"))
             if not image_files:
                 self.logger.warning(f"bet_size 資料夾中沒有圖片")
-                return None
+                return None, 0.0
             
-            self.logger.info(f"開始比對 {len(image_files)} 張圖片...")
+            self.logger.debug(f"開始比對 {len(image_files)} 張圖片...")
             
-            best_match_score = 0.0
-            best_match_amount = None
+            # 儲存所有匹配結果（用於除錯）
+            match_results = []
             
             for image_file in image_files:
                 # 讀取模板圖片
@@ -1649,21 +1655,36 @@ class SyncBrowserOperator:
                 result = cv2.matchTemplate(screenshot_gray, template, cv2.TM_CCOEFF_NORMED)
                 min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
                 
-                if max_val > best_match_score:
-                    best_match_score = max_val
-                    best_match_amount = image_file.stem
+                match_results.append((image_file.stem, max_val))
             
-            # 使用 0.95 作為閾值
-            if best_match_score >= 0.95:
-                self.logger.info(f"找到匹配金額：{best_match_amount} (相似度：{best_match_score:.3f})")
-                return best_match_amount
+            # 按信心度排序
+            match_results.sort(key=lambda x: x[1], reverse=True)
+            
+            # 顯示前 5 名候選（除錯用）
+            if match_results:
+                self.logger.debug("前 5 名匹配候選:")
+                for i, (amount, score) in enumerate(match_results[:5]):
+                    self.logger.debug(f"  {i+1}. {amount}: {score:.4f}")
+            
+            if not match_results:
+                return None, 0.0
+            
+            best_match_amount, best_match_score = match_results[0]
+            
+            # 調整閾值：0.90 為可接受，0.85-0.90 為警告，< 0.85 為失敗
+            if best_match_score >= 0.90:
+                self.logger.info(f"找到匹配金額：{best_match_amount} (信心度：{best_match_score:.4f})")
+                return best_match_amount, best_match_score
+            elif best_match_score >= 0.85:
+                self.logger.warning(f"找到可能匹配：{best_match_amount} (信心度較低：{best_match_score:.4f})")
+                return best_match_amount, best_match_score
             else:
-                self.logger.warning(f"未找到匹配圖片 (最高相似度：{best_match_score:.3f})")
-                return None
+                self.logger.warning(f"未找到可靠匹配 (最高信心度：{best_match_score:.4f}, 金額：{best_match_amount})")
+                return None, best_match_score
                 
         except Exception as e:
             self.logger.error(f"比對圖片時發生錯誤: {e}")
-            return None
+            return None, 0.0
     
     def _click_betsize_button(self, driver: WebDriver, x: float, y: float) -> None:
         """點擊下注金額調整按鈕。
