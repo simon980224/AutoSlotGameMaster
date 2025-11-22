@@ -97,7 +97,7 @@ def build_executable() -> bool:
     cmd = [
         'pyinstaller',
         '--onefile',  # 打包成單一執行檔
-        '--windowed',  # Windows 模式（無控制台視窗）- 如果需要看 log 可以改為 --console
+        '--console',  # 顯示控制台視窗以便查看 log
         '--name=AutoSlotGameMaster',  # 執行檔名稱
         '--clean',  # 清理暫存檔
     ]
