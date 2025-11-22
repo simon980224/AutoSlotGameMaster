@@ -2750,7 +2750,7 @@ class AutoSlotGameApp:
         """
         self.logger.info("")
         self.logger.info("━" * 60)
-        self.logger.info("金富翁遊戲自動化系統 v4.0")
+        self.logger.info("金富翁遊戲自動化系統 v1.0.0")
         self.logger.info("━" * 60)
         self.logger.info("")
         
