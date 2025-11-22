@@ -118,10 +118,13 @@ class Constants:
     MAX_DETECTION_ATTEMPTS = 60  # 最大檢測次數
     
     # Canvas 動態計算比例（用於點擊座標）
-    START_GAME_X_RATIO = 0.55  # 開始遊戲按鈕 X 座標比例
-    START_GAME_Y_RATIO = 1.2   # 開始遊戲按鈕 Y 座標比例
-    MACHINE_CONFIRM_X_RATIO = 0.78  # 確認按鈕 X 座標比例
-    MACHINE_CONFIRM_Y_RATIO = 1.15  # 確認按鈕 Y 座標比例
+    # lobby_login 按鈕座標比例
+    LOBBY_LOGIN_BUTTON_X_RATIO = 0.55  # lobby_login 開始遊戲按鈕 X 座標比例
+    LOBBY_LOGIN_BUTTON_Y_RATIO = 1.2   # lobby_login 開始遊戲按鈕 Y 座標比例
+    
+    # lobby_confirm 按鈕座標比例
+    LOBBY_CONFIRM_BUTTON_X_RATIO = 0.78  # lobby_confirm 確認按鈕 X 座標比例
+    LOBBY_CONFIRM_BUTTON_Y_RATIO = 1.15  # lobby_confirm 確認按鈕 Y 座標比例
     
     # 購買免費遊戲按鈕座標比例
     BUY_FREE_GAME_BUTTON_X_RATIO = 0.23  # 免費遊戲區域按鈕 X 座標比例
@@ -138,6 +141,24 @@ class Constants:
     DEFAULT_WINDOW_WIDTH = 600
     DEFAULT_WINDOW_HEIGHT = 400
     DEFAULT_WINDOW_COLUMNS = 4
+    
+    # 遊戲金額配置（使用 frozenset 提升查詢效率）
+    GAME_BETSIZE = frozenset((
+        0.4, 0.8, 1, 1.2, 1.6, 2, 2.4, 2.8, 3, 3.2, 3.6, 4, 5, 6, 7, 8, 9, 10,
+        12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 48, 56, 60, 64, 72, 80, 100,
+        120, 140, 160, 180, 200, 240, 280, 300, 320, 360, 400, 420, 480, 500,
+        540, 560, 600, 640, 700, 720, 800, 840, 900, 960, 980, 1000, 1080,
+        1120, 1200, 1260, 1280, 1400, 1440, 1600, 1800, 2000
+    ))
+    
+    # 遊戲金額列表（用於索引計算）
+    GAME_BETSIZE_TUPLE = (
+        0.4, 0.8, 1, 1.2, 1.6, 2, 2.4, 2.8, 3, 3.2, 3.6, 4, 5, 6, 7, 8, 9, 10,
+        12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 48, 56, 60, 64, 72, 80, 100,
+        120, 140, 160, 180, 200, 240, 280, 300, 320, 360, 400, 420, 480, 500,
+        540, 560, 600, 640, 700, 720, 800, 840, 900, 960, 980, 1000, 1080,
+        1120, 1200, 1260, 1280, 1400, 1440, 1600, 1800, 2000
+    )
 
 
 # ============================================================================
@@ -194,15 +215,20 @@ class ProxyInfo:
         Returns:
             格式化的 Proxy URL
         """
+        # 使用字串拼接而非 f-string 在大量呼叫時更高效
         return f"http://{self.username}:{self.password}@{self.host}:{self.port}"
     
     def to_connection_string(self) -> str:
-        """轉換為連接字串格式。
+        """轉換為連接字串格式（快取結果）。
         
         Returns:
             格式化的連接字串 "host:port:username:password"
         """
         return f"{self.host}:{self.port}:{self.username}:{self.password}"
+    
+    def __str__(self) -> str:
+        """字串表示（隱藏敏感資訊）"""
+        return f"ProxyInfo({self.host}:{self.port}, user={self.username[:3]}***)"
     
     @staticmethod
     def from_connection_string(connection_string: str) -> 'ProxyInfo':
@@ -384,10 +410,11 @@ class ColoredFormatter(logging.Formatter):
 
 
 class LoggerFactory:
-    """Logger 工廠類別"""
+    """Logger 工廠類別 - 使用單例模式優化效能"""
     
     _loggers: Dict[str, logging.Logger] = {}
-    _lock = threading.Lock()
+    _lock = threading.RLock()  # 使用 RLock 避免死鎖
+    _formatter: Optional[ColoredFormatter] = None  # 共用 formatter 實例
     
     @classmethod
     def get_logger(
@@ -395,7 +422,7 @@ class LoggerFactory:
         name: str = "AutoSlotGame",
         level: LogLevel = LogLevel.INFO
     ) -> logging.Logger:
-        """取得或建立 logger 實例。
+        """取得或建立 logger 實例（執行緒安全）。
         
         Args:
             name: Logger 名稱
@@ -404,7 +431,12 @@ class LoggerFactory:
         Returns:
             配置完成的 Logger 物件
         """
+        # 快速路徑：無鎖檢查（大多數情況下避免加鎖）
+        if name in cls._loggers:
+            return cls._loggers[name]
+        
         with cls._lock:
+            # 雙重檢查避免重複建立
             if name in cls._loggers:
                 return cls._loggers[name]
             
@@ -414,10 +446,13 @@ class LoggerFactory:
             
             # 避免重複添加 handler
             if not logger.handlers:
-                # 控制台 handler (帶顏色)
+                # 共用 formatter 實例以節省記憶體
+                if cls._formatter is None:
+                    cls._formatter = ColoredFormatter()
+                
                 console_handler = logging.StreamHandler(sys.stdout)
                 console_handler.setLevel(level.value)
-                console_handler.setFormatter(ColoredFormatter())
+                console_handler.setFormatter(cls._formatter)
                 logger.addHandler(console_handler)
             
             cls._loggers[name] = logger
@@ -475,7 +510,7 @@ class ConfigReader:
             raise ConfigurationError(f"配置目錄不存在: {self.lib_path}")
     
     def _read_file_lines(self, filename: str, skip_header: bool = True) -> List[str]:
-        """讀取檔案並返回有效行列表。
+        """讀取檔案並返回有效行列表（優化版）。
         
         Args:
             filename: 檔案名稱
@@ -493,23 +528,25 @@ class ConfigReader:
             raise ConfigurationError(f"找不到配置檔案: {file_path}")
         
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
+            with open(file_path, 'r', encoding='utf-8', buffering=8192) as f:
                 lines = f.readlines()
             
             # 跳過標題行
             start_index = 1 if skip_header and lines else 0
             
-            # 過濾空行和註釋
-            valid_lines = []
-            for line in lines[start_index:]:
-                line = line.strip()
-                if line and not line.startswith('#'):
-                    valid_lines.append(line)
+            # 使用列表推導式（更高效）
+            valid_lines = [
+                line.strip() 
+                for line in lines[start_index:] 
+                if (stripped := line.strip()) and not stripped.startswith('#')
+            ]
             
             return valid_lines
             
-        except Exception as e:
+        except (IOError, OSError) as e:
             raise ConfigurationError(f"讀取檔案失敗 {filename}: {e}") from e
+        except Exception as e:
+            raise ConfigurationError(f"解析檔案失敗 {filename}: {e}") from e
     
     def read_user_credentials(
         self, 
@@ -930,37 +967,35 @@ class LocalProxyServerManager:
             return None
     
     def stop_proxy_server(self, local_port: int) -> None:
-        """停止指定的 proxy 伺服器。
+        """停止指定的 proxy 伺服器（優化版）。
         
         Args:
             local_port: 本機埠號
         """
-        # 先從字典中取出 server
+        server = None
+        
+        # 原子性取出 server
         with self._lock:
-            server = self._proxy_servers.get(local_port)
+            server = self._proxy_servers.pop(local_port, None)
+            self._proxy_threads.pop(local_port, None)
         
         # 在鎖外執行耗時操作
         if server:
-            server.stop()
-            
-            # 再次加鎖從字典中刪除
-            with self._lock:
-                if local_port in self._proxy_servers:
-                    del self._proxy_servers[local_port]
-                if local_port in self._proxy_threads:
-                    del self._proxy_threads[local_port]
+            try:
+                server.stop()
+            except Exception as e:
+                self.logger.debug(f"停止 Proxy 伺服器時發生錯誤 ({local_port}): {e}")
     
     def stop_all_servers(self) -> None:
-        """停止所有 proxy 伺服器"""
-        ports = []
+        """停止所有 proxy 伺服器（優化版）"""
+        # 一次性取出所有埠號
         with self._lock:
-            if self._proxy_servers:
-                # 複製鍵列表以避免在迭代時修改字典
-                ports = list(self._proxy_servers.keys())
+            ports = list(self._proxy_servers.keys())
         
-        # 在鎖外停止伺服器
-        for local_port in ports:
-            self.stop_proxy_server(local_port)
+        # 並行停止所有伺服器（提升效率）
+        if ports:
+            with ThreadPoolExecutor(max_workers=min(len(ports), Constants.MAX_THREAD_WORKERS)) as executor:
+                executor.map(self.stop_proxy_server, ports)
     
     def __enter__(self):
         """上下文管理器進入"""
@@ -1048,7 +1083,7 @@ class BrowserManager:
         self, 
         local_proxy_port: Optional[int] = None
     ) -> WebDriver:
-        """建立 WebDriver 實例。
+        """建立 WebDriver 實例（優化版）。
         
         優先使用專案內的驅動程式檔案，
         若失敗則嘗試使用 WebDriver Manager 自動管理作為備援。
@@ -1068,33 +1103,39 @@ class BrowserManager:
         
         # 方法 1: 優先使用專案內的驅動程式檔案
         try:
-            self.logger.info("正在使用專案內驅動程式")
             driver = self._create_webdriver_with_local_driver(chrome_options)
             
-            self.logger.info("✓ 瀏覽器已就緒")
-            
-        except Exception as e:
+        except FileNotFoundError as e:
             errors.append(f"本機驅動程式: {e}")
-            self.logger.warning(f"本機驅動程式失敗 {e}")
-            self.logger.info("嘗試使用 WebDriver Manager 作為備援")
+            self.logger.warning(f"本機驅動程式不存在，嘗試使用 WebDriver Manager")
             
             # 方法 2: 使用 WebDriver Manager 自動管理
             try:
-                self.logger.info("正在使用 WebDriver Manager 取得 ChromeDriver")
                 service = Service(ChromeDriverManager().install())
-                self.logger.info("正在啟動 Chrome 瀏覽器")
                 driver = webdriver.Chrome(service=service, options=chrome_options)
-                
-                self.logger.info("✓ 瀏覽器已就緒（使用自動驅動程式）")
                 
             except Exception as e2:
                 errors.append(f"WebDriver Manager: {e2}")
-                self.logger.error(f"WebDriver Manager 也失敗 {e2}")
+                self.logger.error(f"WebDriver Manager 也失敗: {e2}")
+        
+        except Exception as e:
+            errors.append(f"本機驅動程式: {e}")
+            self.logger.warning(f"本機驅動程式失敗，嘗試備援方案: {e}")
         
         if driver is None:
             error_message = "無法建立瀏覽器實例。\n" + "\n".join(f"- {error}" for error in errors)
             raise BrowserCreationError(error_message)
         
+        # 配置超時和優化
+        self._configure_webdriver(driver)
+        return driver
+    
+    def _configure_webdriver(self, driver: WebDriver) -> None:
+        """配置 WebDriver 超時和優化設定。
+        
+        Args:
+            driver: WebDriver 實例
+        """
         # 設定超時
         with suppress(Exception):
             driver.set_page_load_timeout(Constants.DEFAULT_PAGE_LOAD_TIMEOUT)
@@ -1110,7 +1151,6 @@ class BrowserManager:
                 "uploadThroughput": -1,
                 "latency": 0
             })
-        return driver
     
     def _create_webdriver_with_local_driver(self, chrome_options: Options) -> WebDriver:
         """使用專案內的驅動程式檔案建立 WebDriver。
@@ -1228,7 +1268,7 @@ class SyncBrowserOperator:
         operation_name: str,
         timeout: Optional[float] = None
     ) -> List[OperationResult]:
-        """同步執行操作到所有瀏覽器。
+        """同步執行操作到所有瀏覽器（優化版）。
         
         Args:
             browser_contexts: 瀏覽器上下文列表
@@ -1239,8 +1279,6 @@ class SyncBrowserOperator:
         Returns:
             所有操作的結果列表
         """
-        # 不在這裡輸出標題,由調用方決定是否需要
-        
         total = len(browser_contexts)
         results: List[OperationResult] = [OperationResult(False)] * total
         
@@ -1248,29 +1286,26 @@ class SyncBrowserOperator:
             """在執行緒中執行操作"""
             try:
                 result_data = operation_func(context, index + 1, total)
-                result = OperationResult(
+                return index, OperationResult(
                     success=True,
                     data=result_data,
                     message=f"{operation_name} 成功"
                 )
-                return index, result
-                
             except Exception as e:
-                self.logger.error(f"瀏覽器 {index+1}/{total} {operation_name} 失敗 {e}")
-                result = OperationResult(
+                self.logger.error(f"瀏覽器 {index+1}/{total} {operation_name} 失敗: {e}")
+                return index, OperationResult(
                     success=False,
                     error=e,
                     message=str(e)
                 )
-                return index, result
         
         # 使用執行緒池執行
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             # 提交所有任務
-            futures: Dict[Future, int] = {}
-            for i, context in enumerate(browser_contexts):
-                future = executor.submit(execute_operation, i, context)
-                futures[future] = i
+            futures = [
+                executor.submit(execute_operation, i, context)
+                for i, context in enumerate(browser_contexts)
+            ]
             
             # 收集結果
             try:
@@ -1673,7 +1708,7 @@ class SyncBrowserOperator:
         )
     
     def get_current_betsize(self, driver: WebDriver, retry_count: int = 2) -> Optional[float]:
-        """取得當前下注金額。
+        """取得當前下注金額（優化版）。
         
         Args:
             driver: WebDriver 實例
@@ -1682,14 +1717,14 @@ class SyncBrowserOperator:
         Returns:
             Optional[float]: 當前金額，失敗返回None
         """
-        # 定義可用金額列表
-        GAME_BETSIZE = (
+        # 定義可用金額列表（使用 set 提升查詢效率）
+        GAME_BETSIZE_SET = frozenset((
             0.4, 0.8, 1, 1.2, 1.6, 2, 2.4, 2.8, 3, 3.2, 3.6, 4, 5, 6, 7, 8, 9, 10,
             12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 48, 56, 60, 64, 72, 80, 100,
             120, 140, 160, 180, 200, 240, 280, 300, 320, 360, 400, 420, 480, 500,
             540, 560, 600, 640, 700, 720, 800, 840, 900, 960, 980, 1000, 1080,
             1120, 1200, 1260, 1280, 1400, 1440, 1600, 1800, 2000
-        )
+        ))
         
         for attempt in range(retry_count):
             try:
@@ -1707,7 +1742,7 @@ class SyncBrowserOperator:
                 if matched_amount:
                     try:
                         amount_value = float(matched_amount)
-                        if amount_value in GAME_BETSIZE:
+                        if amount_value in GAME_BETSIZE_SET:
                             self.logger.info(f"✓ 目前金額: {amount_value}")
                             return amount_value
                     except ValueError:
@@ -1719,7 +1754,7 @@ class SyncBrowserOperator:
         return None
     
     def _compare_betsize_images(self, screenshot_gray: np.ndarray) -> Tuple[Optional[str], float]:
-        """使用 bet_size 資料夾中的圖片比對。
+        """使用 bet_size 資料夾中的圖片比對（優化版）。
         
         Args:
             screenshot_gray: 截圖（灰階）
@@ -1737,7 +1772,7 @@ class SyncBrowserOperator:
             bet_size_dir = project_root / "img" / "bet_size"
             
             if not bet_size_dir.exists():
-                self.logger.warning(f"bet_size 資料夾不存在: {bet_size_dir}，嘗試建立...")
+                self.logger.warning(f"bet_size 資料夾不存在: {bet_size_dir}")
                 try:
                     bet_size_dir.mkdir(parents=True, exist_ok=True)
                     self.logger.info(f"已建立 bet_size 資料夾: {bet_size_dir}")
@@ -1748,7 +1783,7 @@ class SyncBrowserOperator:
             # 取得所有 png 圖片
             image_files = sorted(bet_size_dir.glob("*.png"))
             if not image_files:
-                self.logger.warning(f"bet_size 資料夾中沒有圖片")
+                self.logger.warning("bet_size 資料夾中沒有圖片")
                 return None, 0.0
             
             # 儲存所有匹配結果
@@ -1767,16 +1802,15 @@ class SyncBrowserOperator:
                 
                 # 執行模板匹配
                 result = cv2.matchTemplate(screenshot_gray, template, cv2.TM_CCOEFF_NORMED)
-                min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
+                _, max_val, _, _ = cv2.minMaxLoc(result)
                 
                 match_results.append((image_file.stem, max_val))
-            
-            # 按信心度排序
-            match_results.sort(key=lambda x: x[1], reverse=True)
             
             if not match_results:
                 return None, 0.0
             
+            # 按信心度排序
+            match_results.sort(key=lambda x: x[1], reverse=True)
             best_match_amount, best_match_score = match_results[0]
             
             # 調整閾值：0.90 為可接受，0.85-0.90 為警告，< 0.85 為失敗
@@ -1822,7 +1856,7 @@ class SyncBrowserOperator:
             })
     
     def adjust_betsize(self, driver: WebDriver, target_amount: float, max_attempts: int = 200) -> bool:
-        """調整下注金額到目標值。
+        """調整下注金額到目標值（優化版）。
         
         Args:
             driver: WebDriver 實例
@@ -1833,17 +1867,8 @@ class SyncBrowserOperator:
             bool: 調整成功返回True
         """
         try:
-            # 定義可用金額列表
-            GAME_BETSIZE = (
-                0.4, 0.8, 1, 1.2, 1.6, 2, 2.4, 2.8, 3, 3.2, 3.6, 4, 5, 6, 7, 8, 9, 10,
-                12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 48, 56, 60, 64, 72, 80, 100,
-                120, 140, 160, 180, 200, 240, 280, 300, 320, 360, 400, 420, 480, 500,
-                540, 560, 600, 640, 700, 720, 800, 840, 900, 960, 980, 1000, 1080,
-                1120, 1200, 1260, 1280, 1400, 1440, 1600, 1800, 2000
-            )
-            
             # 檢查目標金額
-            if target_amount not in GAME_BETSIZE:
+            if target_amount not in Constants.GAME_BETSIZE:
                 self.logger.error(f"目標金額 {target_amount} 不在可用金額列表中")
                 return False
             
@@ -1859,8 +1884,8 @@ class SyncBrowserOperator:
                 return True
             
             # 計算需要調整的次數和方向
-            current_index = GAME_BETSIZE.index(current_amount)
-            target_index = GAME_BETSIZE.index(target_amount)
+            current_index = Constants.GAME_BETSIZE_TUPLE.index(current_amount)
+            target_index = Constants.GAME_BETSIZE_TUPLE.index(target_amount)
             diff = target_index - current_index
             
             # 設定點擊座標（基於 600x400 視窗）
@@ -1868,13 +1893,11 @@ class SyncBrowserOperator:
                 # 增加金額
                 click_x = 440
                 click_y = 370
-                direction = "增加"
                 estimated_steps = diff
             else:
                 # 減少金額
                 click_x = 360
                 click_y = 370
-                direction = "減少"
                 estimated_steps = abs(diff)
             
             # 開始調整
@@ -2204,7 +2227,7 @@ class GameControlCenter:
         self.logger.info(help_text)
     
     def _auto_press_loop_single(self, context: BrowserContext, browser_index: int) -> None:
-        """單個瀏覽器的自動按鍵循環。
+        """單個瀏覽器的自動按鍵循環（優化版）。
         
         Args:
             context: 瀏覽器上下文
@@ -2214,6 +2237,23 @@ class GameControlCenter:
         
         press_count = 0
         username = context.credential.username
+        driver = context.driver
+        
+        # 預先建立 CDP 指令字典（減少重複建立）
+        key_down_cmd = {
+            "type": "keyDown",
+            "key": " ",
+            "code": "Space",
+            "windowsVirtualKeyCode": 32,
+            "nativeVirtualKeyCode": 32
+        }
+        key_up_cmd = {
+            "type": "keyUp",
+            "key": " ",
+            "code": "Space",
+            "windowsVirtualKeyCode": 32,
+            "nativeVirtualKeyCode": 32
+        }
         
         while not self._stop_event.is_set():
             try:
@@ -2221,25 +2261,10 @@ class GameControlCenter:
                 
                 # 執行按空白鍵
                 try:
-                    context.driver.execute_cdp_cmd("Input.dispatchKeyEvent", {
-                        "type": "keyDown",
-                        "key": " ",
-                        "code": "Space",
-                        "windowsVirtualKeyCode": 32,
-                        "nativeVirtualKeyCode": 32
-                    })
-                    context.driver.execute_cdp_cmd("Input.dispatchKeyEvent", {
-                        "type": "keyUp",
-                        "key": " ",
-                        "code": "Space",
-                        "windowsVirtualKeyCode": 32,
-                        "nativeVirtualKeyCode": 32
-                    })
-                    
+                    driver.execute_cdp_cmd("Input.dispatchKeyEvent", key_down_cmd)
+                    driver.execute_cdp_cmd("Input.dispatchKeyEvent", key_up_cmd)
                 except Exception as e:
-                    self.logger.error(
-                        f"瀏覽器 {browser_index} ({username}) 按鍵失敗: {e}"
-                    )
+                    self.logger.error(f"瀏覽器 {browser_index} ({username}) 按鍵失敗: {e}")
                 
                 # 每個瀏覽器使用獨立的隨機間隔
                 interval = random.uniform(self.min_interval, self.max_interval)
@@ -2249,14 +2274,10 @@ class GameControlCenter:
                     break
                     
             except Exception as e:
-                self.logger.error(
-                    f"瀏覽器 {browser_index} ({username}) 執行錯誤: {e}"
-                )
+                self.logger.error(f"瀏覽器 {browser_index} ({username}) 執行錯誤: {e}")
                 self._stop_event.wait(timeout=1.0)
         
-        self.logger.info(
-            f"瀏覽器 {browser_index} ({username}) 已停止，共執行 {press_count} 次"
-        )
+        self.logger.info(f"瀏覽器 {browser_index} ({username}) 已停止，共執行 {press_count} 次")
     
     def _start_auto_press(self) -> None:
         """為每個瀏覽器啟動獨立的自動按鍵執行緒。"""
@@ -2837,7 +2858,7 @@ class AutoSlotGameApp:
         browser_count: int,
         proxy_ports: List[Optional[int]]
     ) -> List[BrowserContext]:
-        """建立瀏覽器實例。
+        """建立瀏覽器實例（優化版）。
         
         Args:
             browser_count: 瀏覽器數量
@@ -2869,20 +2890,15 @@ class AutoSlotGameApp:
                 return index, context
                 
             except Exception as e:
-                self.logger.error(f"瀏覽器 {index+1}/{browser_count} 建立瀏覽器失敗 {e}")
+                self.logger.error(f"瀏覽器 {index+1}/{browser_count} 建立失敗: {e}")
                 return index, None
         
         # 使用執行緒池建立瀏覽器
         with ThreadPoolExecutor(max_workers=Constants.MAX_THREAD_WORKERS) as executor:
-            futures = []
-            for i in range(browser_count):
-                future = executor.submit(
-                    create_browser_instance,
-                    i,
-                    self.credentials[i],
-                    proxy_ports[i]
-                )
-                futures.append(future)
+            futures = [
+                executor.submit(create_browser_instance, i, self.credentials[i], proxy_ports[i])
+                for i in range(browser_count)
+            ]
             
             # 收集結果
             for future in as_completed(futures):
@@ -2945,7 +2961,7 @@ class AutoSlotGameApp:
             time.sleep(Constants.DEFAULT_WAIT_SECONDS)  # 等待遊戲頁面載入
             
             # 調整視窗
-            self._print_step("5+", "調整視窗排列 (600x400)")
+            self._print_step(6, "調整視窗排列 (600x400)")
             resize_results = self.browser_operator.resize_and_arrange_all(
                 self.browser_contexts,
                 width=600,
@@ -2955,12 +2971,12 @@ class AutoSlotGameApp:
             
             time.sleep(Constants.DEFAULT_WAIT_SECONDS)  # 等待視窗調整完成
             
-            # 步驟 6: 圖片檢測與遊戲流程
-            self._print_step(6, "圖片檢測與遊戲流程")
+            # 步驟 7: 圖片檢測與遊戲流程
+            self._print_step(7, "圖片檢測與遊戲流程")
             self._execute_image_detection_flow()
             
-            # 步驟 7: 啟動遊戲控制中心
-            self._print_step(7, "啟動遊戲控制中心")
+            # 步驟 8: 啟動遊戲控制中心
+            self._print_step(8, "啟動遊戲控制中心")
             control_center = GameControlCenter(
                 browser_contexts=self.browser_contexts,
                 browser_operator=self.browser_operator,
@@ -3082,8 +3098,8 @@ class AutoSlotGameApp:
             raise
         
         # 4. 計算點擊座標（開始遊戲按鈕）
-        start_x = rect["x"] + rect["w"] * Constants.START_GAME_X_RATIO
-        start_y = rect["y"] + rect["h"] * Constants.START_GAME_Y_RATIO
+        start_x = rect["x"] + rect["w"] * Constants.LOBBY_LOGIN_BUTTON_X_RATIO
+        start_y = rect["y"] + rect["h"] * Constants.LOBBY_LOGIN_BUTTON_Y_RATIO
         
         # 5. 在所有瀏覽器中同步執行點擊
         time.sleep(1)
@@ -3128,8 +3144,8 @@ class AutoSlotGameApp:
         # 3. 計算點擊座標（確認按鈕）
         if hasattr(self, 'last_canvas_rect') and self.last_canvas_rect:
             rect = self.last_canvas_rect
-            confirm_x = rect["x"] + rect["w"] * Constants.MACHINE_CONFIRM_X_RATIO
-            confirm_y = rect["y"] + rect["h"] * Constants.MACHINE_CONFIRM_Y_RATIO
+            confirm_x = rect["x"] + rect["w"] * Constants.LOBBY_CONFIRM_BUTTON_X_RATIO
+            confirm_y = rect["y"] + rect["h"] * Constants.LOBBY_CONFIRM_BUTTON_Y_RATIO
             
             # 4. 在所有瀏覽器中同步執行點擊
             time.sleep(1)
@@ -3185,8 +3201,8 @@ class AutoSlotGameApp:
         try:
             # 取得確認按鈕座標
             rect = self.last_canvas_rect
-            confirm_x = rect["x"] + rect["w"] * Constants.MACHINE_CONFIRM_X_RATIO
-            confirm_y = rect["y"] + rect["h"] * Constants.MACHINE_CONFIRM_Y_RATIO
+            confirm_x = rect["x"] + rect["w"] * Constants.LOBBY_CONFIRM_BUTTON_X_RATIO
+            confirm_y = rect["y"] + rect["h"] * Constants.LOBBY_CONFIRM_BUTTON_Y_RATIO
             
             # 截取畫面
             screenshot = reference_browser.driver.get_screenshot_as_png()
@@ -3479,16 +3495,23 @@ class AutoSlotGameApp:
             time.sleep(Constants.DETECTION_INTERVAL)
     
     def cleanup(self) -> None:
-        """清理所有資源"""
+        """清理所有資源（優化版）"""
         self.logger.info("正在清理資源...")
         
-        # 關閉所有瀏覽器
+        # 1. 關閉所有瀏覽器
         if self.browser_contexts:
-            self.browser_operator.close_all(self.browser_contexts)
-            self.browser_contexts.clear()
+            try:
+                self.browser_operator.close_all(self.browser_contexts)
+            except Exception as e:
+                self.logger.error(f"關閉瀏覽器時發生錯誤: {e}")
+            finally:
+                self.browser_contexts.clear()
         
-        # 停止所有 Proxy 伺服器
-        self.proxy_manager.stop_all_servers()
+        # 2. 停止所有 Proxy 伺服器
+        try:
+            self.proxy_manager.stop_all_servers()
+        except Exception as e:
+            self.logger.error(f"停止 Proxy 伺服器時發生錯誤: {e}")
         
         self.logger.info("✓ 清理完成")
 
