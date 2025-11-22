@@ -13,8 +13,13 @@
 - 完善的錯誤處理與重試機制
 
 作者: 凡臻科技
-版本: 1.1.0
+版本: 1.2.0
 Python: 3.8+
+
+版本歷史:
+- v1.2.0: 新增專案啟動前自動清除 chromedriver 快取功能
+- v1.1.0: 修正 OpenCV 無法讀取中文路徑圖片的問題
+- v1.0.0: 初始版本發布
 """
 
 import logging
@@ -24,6 +29,7 @@ import socket
 import select
 import base64
 import time
+import subprocess
 from typing import Optional, List, Dict, Tuple, Any, Callable, Protocol, Union
 from pathlib import Path
 from dataclasses import dataclass, field
@@ -82,6 +88,58 @@ __all__ = [
 # ============================================================================
 # 輔助函式
 # ============================================================================
+
+def cleanup_chromedriver_processes() -> None:
+    """清除所有緩存的 chromedriver 程序。
+    
+    在程式啟動前執行，確保沒有殘留的 chromedriver 程序佔用資源。
+    支援 Windows、macOS 和 Linux 作業系統。
+    """
+    logger = LoggerFactory.get_logger()
+    system = platform.system().lower()
+    
+    try:
+        if system == "windows":
+            # Windows: 使用 taskkill 命令
+            result = subprocess.run(
+                ["taskkill", "/F", "/IM", "chromedriver.exe"],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            
+            # 檢查結果
+            if result.returncode == 0:
+                logger.info("✓ 已清除 Windows 上的 chromedriver 程序")
+            elif "找不到" in result.stdout or "not found" in result.stdout.lower():
+                logger.debug("沒有執行中的 chromedriver 程序")
+            else:
+                logger.debug(f"taskkill 執行結果: {result.stdout.strip()}")
+                
+        elif system in ["darwin", "linux"]:
+            # macOS/Linux: 使用 killall 命令
+            result = subprocess.run(
+                ["killall", "-9", "chromedriver"],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            
+            # killall 在沒有找到程序時會返回非 0，這是正常的
+            if result.returncode == 0:
+                logger.info(f"✓ 已清除 {system.upper()} 上的 chromedriver 程序")
+            else:
+                logger.debug("沒有執行中的 chromedriver 程序")
+        else:
+            logger.warning(f"不支援的作業系統: {system}，跳過清除 chromedriver")
+            
+    except subprocess.TimeoutExpired:
+        logger.warning("清除 chromedriver 程序逾時")
+    except FileNotFoundError:
+        logger.debug(f"系統找不到清除命令（{system}），可能沒有執行中的 chromedriver")
+    except Exception as e:
+        logger.warning(f"清除 chromedriver 程序時發生錯誤: {e}")
+
 
 def get_resource_path(relative_path: str = "") -> Path:
     """取得資源檔案的絕對路徑。
@@ -2165,7 +2223,7 @@ class ImageDetector:
             if not template_path.exists():
                 raise FileNotFoundError(f"模板圖片不存在: {template_path}")
             
-            # 讀取模板圖片（使用支援 Unicode 路徑的函式）
+            # 讀取模板圖片（使用支援 Unicode 路徑的函式，解決中文路徑問題）
             template = cv2_imread_unicode(template_path, cv2.IMREAD_COLOR)
             if template is None:
                 raise ImageDetectionError(f"無法讀取模板圖片: {template_path}")
@@ -3585,6 +3643,9 @@ def main() -> None:
     初始化並執行應用程式。
     """
     logger = LoggerFactory.get_logger()
+    
+    # 在程式啟動前清除所有緩存的 chromedriver 程序
+    cleanup_chromedriver_processes()
     
     try:
         app = AutoSlotGameApp()
