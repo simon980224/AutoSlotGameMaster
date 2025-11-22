@@ -79,7 +79,7 @@ def check_requirements() -> bool:
     
     required_files = [
         'src/main.py',
-        'sett.png',
+        'sett.ico',  # 使用 .ico 格式圖示
         'requirements.txt'
     ]
     
@@ -140,7 +140,7 @@ def build_executable() -> bool:
         '--name=AutoSlotGameMaster',          # 可執行檔名稱
         '--onefile',                          # 打包成單一檔案
         '--console',                          # 保留控制台視窗
-        '--icon=sett.png',                    # 設定圖示
+        '--icon=sett.ico',                    # 設定圖示（.ico 格式，包含多種尺寸）
         '--clean',                            # 清理臨時檔案
         '--noconfirm',                        # 覆蓋輸出目錄不提示
         # 注意：移除 --add-data 選項，讓 img 和 lib 目錄放在 exe 旁邊
