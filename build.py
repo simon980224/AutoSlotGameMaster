@@ -143,8 +143,8 @@ def build_executable() -> bool:
         '--icon=sett.png',                    # 設定圖示
         '--clean',                            # 清理臨時檔案
         '--noconfirm',                        # 覆蓋輸出目錄不提示
-        '--add-data=img;img',                 # 包含 img 目錄 (Windows 格式)
-        '--add-data=lib;lib',                 # 包含 lib 目錄 (Windows 格式)
+        # 注意：移除 --add-data 選項，讓 img 和 lib 目錄放在 exe 旁邊
+        # 這樣使用者可以方便地編輯配置檔案和圖片模板
         'src/main.py'                         # 主程式入口
     ]
     

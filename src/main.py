@@ -80,6 +80,35 @@ __all__ = [
 
 
 # ============================================================================
+# 輔助函式
+# ============================================================================
+
+def get_resource_path(relative_path: str = "") -> Path:
+    """取得資源檔案的絕對路徑。
+    
+    在開發環境中，返回專案根目錄的路徑。
+    在打包後的環境中，返回 exe 所在目錄的路徑（而非臨時目錄）。
+    
+    Args:
+        relative_path: 相對於根目錄的路徑
+        
+    Returns:
+        資源檔案的絕對路徑
+    """
+    if getattr(sys, 'frozen', False):
+        # 打包後：使用 exe 所在目錄（不是 _MEIPASS 臨時目錄）
+        # 因為 lib 和 img 應該放在 exe 旁邊，方便使用者編輯
+        base_path = Path(sys.executable).resolve().parent
+    else:
+        # 開發環境：使用 main.py 的父目錄的父目錄
+        base_path = Path(__file__).resolve().parent.parent
+    
+    if relative_path:
+        return base_path / relative_path
+    return base_path
+
+
+# ============================================================================
 # 常量定義
 # ============================================================================
 
@@ -500,9 +529,8 @@ class ConfigReader:
             logger: 日誌記錄器
         """
         if lib_path is None:
-            # 預設使用專案根目錄下的 lib 資料夾
-            project_root = Path(__file__).parent.parent
-            lib_path = project_root / Constants.DEFAULT_LIB_PATH
+            # 使用輔助函式取得專案根目錄
+            lib_path = get_resource_path(Constants.DEFAULT_LIB_PATH)
         
         self.lib_path = Path(lib_path)
         self.logger = logger or LoggerFactory.get_logger()
@@ -1169,11 +1197,8 @@ class BrowserManager:
             FileNotFoundError: 驅動程式不存在
             BrowserCreationError: 無法啟動驅動程式
         """
-        # 取得專案根目錄
-        if getattr(sys, 'frozen', False):
-            project_root = Path(sys.executable).resolve().parent
-        else:
-            project_root = Path(__file__).resolve().parent.parent
+        # 使用輔助函式取得專案根目錄
+        project_root = get_resource_path()
         
         # 根據作業系統選擇驅動程式
         system = platform.system().lower()
@@ -1765,13 +1790,8 @@ class SyncBrowserOperator:
             Tuple[Optional[str], float]: (匹配的金額, 信心度)
         """
         try:
-            # 取得專案根目錄
-            if getattr(sys, 'frozen', False):
-                project_root = Path(sys.executable).resolve().parent
-            else:
-                project_root = Path(__file__).resolve().parent.parent
-            
-            bet_size_dir = project_root / "img" / "bet_size"
+            # 使用輔助函式取得專案根目錄
+            bet_size_dir = get_resource_path("img") / "bet_size"
             
             if not bet_size_dir.exists():
                 self.logger.warning(f"bet_size 資料夾不存在: {bet_size_dir}")
@@ -1975,14 +1995,8 @@ class SyncBrowserOperator:
             # 裁切圖片
             cropped_img = screenshot_img.crop((crop_left, crop_top, crop_right, crop_bottom))
             
-            # 取得專案根目錄
-            if getattr(sys, 'frozen', False):
-                project_root = Path(sys.executable).resolve().parent
-            else:
-                project_root = Path(__file__).resolve().parent.parent
-            
-            # 儲存到 img/bet_size 目錄
-            bet_size_dir = project_root / "img" / "bet_size"
+            # 使用輔助函式取得專案根目錄
+            bet_size_dir = get_resource_path("img") / "bet_size"
             bet_size_dir.mkdir(parents=True, exist_ok=True)
             
             # 檔名使用金額（整數去掉 .0，小數保留）
@@ -2023,13 +2037,9 @@ class ImageDetector:
         """初始化圖片檢測器"""
         self.logger = logger or LoggerFactory.get_logger()
         
-        # 取得專案根目錄
-        if getattr(sys, 'frozen', False):
-            self.project_root = Path(sys.executable).resolve().parent
-        else:
-            self.project_root = Path(__file__).resolve().parent.parent
-        
-        self.image_dir = self.project_root / Constants.IMAGE_DIR
+        # 使用輔助函式取得專案根目錄和圖片目錄
+        self.project_root = get_resource_path()
+        self.image_dir = get_resource_path(Constants.IMAGE_DIR)
         
         # 確保圖片目錄存在
         self.image_dir.mkdir(parents=True, exist_ok=True)
