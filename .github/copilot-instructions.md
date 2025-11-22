@@ -1,0 +1,182 @@
+# AutoSlotGameMaster - AI 程式碼代理指南
+
+## 專案概述
+
+金富翁遊戲自動化系統 - 使用 Selenium WebDriver 控制多個瀏覽器實例，透過圖片識別和 Chrome DevTools Protocol 實現遊戲自動化。
+
+**核心技術**: Python 3.8+, Selenium 4.25+, OpenCV, 本地 Proxy 中繼伺服器, 執行緒池並行處理
+
+## 架構特點
+
+### 1. 依賴注入與工廠模式
+- 所有主要類別支援依賴注入（透過建構函式參數）
+- `LoggerFactory.get_logger()` - 單例模式的 Logger 工廠
+- `BrowserManager.create_webdriver()` - 優先使用專案根目錄的 `chromedriver`，失敗時自動降級到 WebDriver Manager
+- 使用 `Protocol` 定義介面（如 `ConfigReaderProtocol`）
+
+### 2. 上下文管理器與資源清理
+- `LocalProxyServerManager` 支援 `with` 語句自動清理資源
+- `BrowserManager.create_browser_context()` 使用 `@contextmanager` 確保 WebDriver 正確關閉
+- 所有 socket 操作使用 `with suppress(Exception)` 避免清理時異常
+
+### 3. 並行處理架構
+- **同步操作**: `SyncBrowserOperator.execute_sync()` 使用 `ThreadPoolExecutor` 對所有瀏覽器執行相同操作
+- **獨立執行緒**: `GameControlCenter._auto_press_loop_single()` 為每個瀏覽器啟動獨立執行緒，使用 `threading.Event` 控制停止
+- **最大工作數**: `Constants.MAX_THREAD_WORKERS = 10`
+
+### 4. Proxy 中繼架構
+```python
+遠端 Proxy (需認證) 
+  ↓
+SimpleProxyServer (本地埠 9000+, 無需認證)
+  ↓
+Chrome (使用本地 Proxy)
+```
+- `ProxyConnectionHandler` 處理 CONNECT 和 HTTP 請求
+- 使用 `select.select()` 實現雙向數據轉發
+- 每個瀏覽器使用獨立的本地埠（9000, 9001, 9002...）
+
+### 5. 圖片識別流程
+- **模板位置**: `img/lobby_login.png`, `img/lobby_confirm.png`, `img/bet_size/*.png`
+- **檢測方法**: OpenCV `cv2.matchTemplate()` with `TM_CCOEFF_NORMED`
+- **閾值**: `Constants.MATCH_THRESHOLD = 0.8`
+- **座標計算**: 使用 Canvas 區域比例計算點擊座標
+  - `LOBBY_LOGIN_BUTTON_X_RATIO = 0.55`, `LOBBY_LOGIN_BUTTON_Y_RATIO = 1.2`
+  - `LOBBY_CONFIRM_BUTTON_X_RATIO = 0.78`, `LOBBY_CONFIRM_BUTTON_Y_RATIO = 1.15`
+
+### 6. 資料結構（不可變）
+所有資料類別使用 `@dataclass(frozen=True)` 確保不可變性：
+- `UserCredential(username, password, proxy)` - Proxy 格式: `host:port:username:password`
+- `BetRule(amount, duration)` - 下注金額與持續時間（分鐘）
+- `ProxyInfo.from_connection_string()` - 從連接字串建立實例
+
+## 關鍵檔案與目錄
+
+### 配置檔案
+- `lib/用戶資料.txt` - 格式: `帳號,密碼,IP:port:user:password`（第三欄為 Proxy，可為空）
+- `lib/用戶規則.txt` - 格式: `金額:時間(分鐘)`
+- 使用 `ConfigReader._read_file_lines()` 讀取，自動跳過標題行和註釋
+
+### 圖片資源
+- `img/lobby_login.png` - 遊戲登入畫面
+- `img/lobby_confirm.png` - 確認按鈕（可自動生成）
+- `img/bet_size/*.png` - 金額識別模板（檔名即為金額，如 `0.4.png`, `10.png`）
+
+### 驅動程式
+- **macOS/Linux**: `chromedriver`（需執行權限 `chmod +x`）
+- **Windows**: `chromedriver.exe`
+- 位置: 專案根目錄（與 `src/` 同級）
+
+## 開發工作流程
+
+### 本機執行
+```bash
+# 配置 Python 環境（虛擬環境或 Conda）
+python -m venv venv
+source venv/bin/activate  # macOS/Linux
+# 或
+venv\Scripts\activate  # Windows
+
+# 安裝依賴
+pip install -r requirements.txt
+
+# 執行主程式
+python src/main.py
+```
+
+### 打包為可執行檔
+```bash
+# 使用 build.py 腳本（會清理舊檔案、檢查依賴、打包、複製資源）
+python build.py
+
+# 輸出位置: dist/AutoSlotGameMaster.exe
+# 包含目錄: dist/img/, dist/lib/
+```
+
+### 除錯技巧
+1. **調整日誌等級**: `LoggerFactory.get_logger(level=LogLevel.DEBUG)`
+2. **單一瀏覽器測試**: 修改 `prompt_browser_count()` 返回 1
+3. **跳過圖片檢測**: 在 `_execute_image_detection_flow()` 中註釋相關步驟
+4. **查看 Proxy 流量**: 使用 `self.logger.debug()` 輸出 Proxy 請求
+
+## 命名與編碼規範
+
+### 類別命名
+- 管理器: `*Manager` (如 `BrowserManager`, `LocalProxyServerManager`)
+- 操作器: `*Operator` (如 `SyncBrowserOperator`)
+- 處理器: `*Handler` (如 `ProxyConnectionHandler`)
+- 中心: `*Center` (如 `GameControlCenter`)
+
+### 方法命名
+- 私有方法: `_method_name()` (如 `_auto_press_loop_single()`)
+- 建立資源: `create_*()` (如 `create_webdriver()`)
+- 清理資源: `cleanup()` 或 `stop_*()`
+- 同步操作: `*_all()` (如 `navigate_all()`, `adjust_betsize_all()`)
+
+### 編碼慣例
+- 使用 **繁體中文** 進行日誌輸出和使用者訊息
+- 程式碼註釋和文件字串使用繁體中文
+- 變數和函式名稱使用英文（snake_case）
+- 常量使用大寫字母（UPPER_CASE）
+
+### 錯誤處理
+- 自訂例外繼承自 `AutoSlotGameError`
+- 使用 `with suppress(Exception)` 處理清理時的非關鍵錯誤
+- 在執行緒池中捕獲並記錄個別任務的例外
+
+## 常見開發任務
+
+### 新增命令到控制中心
+在 `GameControlCenter.process_command()` 中添加新的 `elif cmd == 'x':` 分支，參考現有命令（如 `'b'` 調整金額、`'f'` 購買免費遊戲）。
+
+### 新增圖片檢測模板
+1. 在 `Constants` 中定義模板檔名和座標比例常量
+2. 在 `img/` 目錄中放置模板圖片
+3. 使用 `ImageDetector.detect_in_browser()` 進行檢測
+4. 使用 `_continuous_detect_until_found()` 等待圖片出現
+
+### 調整下注金額邏輯
+- **可用金額**: 定義在 `Constants.GAME_BETSIZE_TUPLE`（必須按順序排列）
+- **識別方法**: `SyncBrowserOperator.get_current_betsize()` 使用圖片比對
+- **調整方法**: `adjust_betsize()` 計算索引差異，點擊增加/減少按鈕
+- **按鈕座標**: 增加 `(440, 370)`，減少 `(360, 370)`（基於 600x400 視窗）
+
+### 修改瀏覽器配置
+在 `BrowserManager.create_chrome_options()` 中添加 Chrome 參數。注意：
+- 使用 `--disable-*` 參數優化效能
+- Chrome 131+ 特定優化已包含
+- Proxy 設定透過 `--proxy-server=http://127.0.0.1:9000` 傳遞
+
+### 處理多瀏覽器同步操作
+使用 `SyncBrowserOperator.execute_sync()` 模式：
+```python
+def operation_func(context: BrowserContext, index: int, total: int) -> Any:
+    # 在單一瀏覽器中執行操作
+    return result
+
+results = self.browser_operator.execute_sync(
+    self.browser_contexts,
+    operation_func,
+    "操作名稱"
+)
+```
+
+## 測試注意事項
+
+- **避免硬編碼座標**: 使用 Canvas 區域比例計算
+- **Proxy 格式驗證**: 確保 `用戶資料.txt` 第三欄格式正確（`host:port:user:pass`）
+- **金額模板建立**: 使用 `c` 命令在控制中心截取模板
+- **Chrome 版本相容性**: 確保 `chromedriver` 版本與 Chrome 版本匹配
+
+## 效能優化建議
+
+1. **減少日誌輸出**: 在生產環境使用 `INFO` 等級，開發時使用 `DEBUG`
+2. **並行度調整**: 根據系統資源調整 `MAX_THREAD_WORKERS`
+3. **檢測間隔**: 調整 `DETECTION_INTERVAL` 平衡響應速度與 CPU 使用
+4. **Proxy 緩衝區**: 調整 `PROXY_BUFFER_SIZE` 適應網路環境
+
+---
+
+**專案維護者**: simon980224  
+**程式碼風格**: PEP 8 + 繁體中文註釋  
+**Python 版本**: 3.8+
