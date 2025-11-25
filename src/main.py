@@ -13,10 +13,11 @@
 - 完善的錯誤處理與重試機制
 
 作者: 凡臻科技
-版本: 1.2.0
+版本: 1.3.0
 Python: 3.8+
 
 版本歷史:
+- v1.3.0: 新增自動旋轉功能（支援 10、50、100 次）
 - v1.2.0: 新增專案啟動前自動清除 chromedriver 快取功能
 - v1.1.0: 修正 OpenCV 無法讀取中文路徑圖片的問題
 - v1.0.0: 初始版本發布
@@ -268,6 +269,16 @@ class Constants:
     BUY_FREE_GAME_CONFIRM_X_RATIO = 0.65  # 免費遊戲確認按鈕 X 座標比例
     BUY_FREE_GAME_CONFIRM_Y_RATIO = 1.2   # 免費遊戲確認按鈕 Y 座標比例
     BUY_FREE_GAME_WAIT_SECONDS = 10  # 購買後等待秒數
+    
+    # 自動旋轉按鈕座標比例
+    AUTO_SPIN_BUTTON_X_RATIO = 0.8  # 自動轉按鈕 X 座標比例
+    AUTO_SPIN_BUTTON_Y_RATIO = 1.05   # 自動轉按鈕 Y 座標比例
+    AUTO_SPIN_10_X_RATIO = 0.5        # 10次按鈕 X 座標比例
+    AUTO_SPIN_10_Y_RATIO = 0.83       # 10次按鈕 Y 座標比例
+    AUTO_SPIN_50_X_RATIO = 0.56       # 50次按鈕 X 座標比例
+    AUTO_SPIN_50_Y_RATIO = 0.83       # 50次按鈕 Y 座標比例
+    AUTO_SPIN_100_X_RATIO = 0.62      # 100次按鈕 X 座標比例
+    AUTO_SPIN_100_Y_RATIO = 0.83      # 100次按鈕 Y 座標比例
     
     # 操作相關常量
     DEFAULT_WAIT_SECONDS = 3  # 預設等待時間（秒）
@@ -2332,6 +2343,11 @@ class GameControlCenter:
                    f 0      - 所有瀏覽器都購買
                    f 1      - 第 1 個瀏覽器購買
                    f 1,2,3  - 第 1、2、3 個瀏覽器購買
+  
+  a <次數>         設定自動旋轉
+                   a 10     - 自動旋轉 10 次
+                   a 50     - 自動旋轉 50 次
+                   a 100    - 自動旋轉 100 次
                    
   c                截取金額模板（用於金額識別）
 
@@ -2695,6 +2711,110 @@ class GameControlCenter:
                     
                 except Exception as e:
                     self.logger.error(f"購買過程發生錯誤: {e}")
+            
+            elif cmd == 'a':
+                # 自動旋轉指令
+                if not command_arguments:
+                    self.logger.error("指令格式錯誤，請使用: a <次數>")
+                    self.logger.info("  a 10   - 自動旋轉 10 次")
+                    self.logger.info("  a 50   - 自動旋轉 50 次")
+                    self.logger.info("  a 100  - 自動旋轉 100 次")
+                    return True
+                
+                try:
+                    # 檢查 Canvas 區域資訊
+                    if not hasattr(self.browser_operator, 'last_canvas_rect') or \
+                       self.browser_operator.last_canvas_rect is None:
+                        self.logger.error("Canvas 區域未初始化，請確保已完成登入流程")
+                        return True
+                    
+                    # 解析次數參數
+                    spin_count = int(command_arguments.strip())
+                    
+                    # 驗證次數是否有效
+                    if spin_count not in [10, 50, 100]:
+                        self.logger.error(f"無效的次數: {spin_count}，請輸入 10、50 或 100")
+                        return True
+                    
+                    self.logger.info(f"開始設定自動旋轉 {spin_count} 次...")
+                    
+                    # 取得 Canvas 區域
+                    rect = self.browser_operator.last_canvas_rect
+                    
+                    # 計算第一次點擊座標（自動轉按鈕）
+                    auto_x = rect["x"] + rect["w"] * Constants.AUTO_SPIN_BUTTON_X_RATIO
+                    auto_y = rect["y"] + rect["h"] * Constants.AUTO_SPIN_BUTTON_Y_RATIO
+                    
+                    # 根據次數選擇第二次點擊座標
+                    if spin_count == 10:
+                        count_x = rect["x"] + rect["w"] * Constants.AUTO_SPIN_10_X_RATIO
+                        count_y = rect["y"] + rect["h"] * Constants.AUTO_SPIN_10_Y_RATIO
+                    elif spin_count == 50:
+                        count_x = rect["x"] + rect["w"] * Constants.AUTO_SPIN_50_X_RATIO
+                        count_y = rect["y"] + rect["h"] * Constants.AUTO_SPIN_50_Y_RATIO
+                    else:  # 100
+                        count_x = rect["x"] + rect["w"] * Constants.AUTO_SPIN_100_X_RATIO
+                        count_y = rect["y"] + rect["h"] * Constants.AUTO_SPIN_100_Y_RATIO
+                    
+                    # 使用同步方式對所有瀏覽器執行點擊
+                    def auto_spin_operation(context: BrowserContext, index: int, total: int) -> bool:
+                        """執行自動旋轉設定"""
+                        username = context.credential.username
+                        driver = context.driver
+                        
+                        try:
+                            # 第一次點擊（自動轉按鈕）
+                            for event_type in ["mousePressed", "mouseReleased"]:
+                                driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
+                                    "type": event_type,
+                                    "x": auto_x,
+                                    "y": auto_y,
+                                    "button": "left",
+                                    "clickCount": 1
+                                })
+                            time.sleep(0.5)  # 等待選單出現
+                            
+                            # 第二次點擊（選擇次數）
+                            for event_type in ["mousePressed", "mouseReleased"]:
+                                driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
+                                    "type": event_type,
+                                    "x": count_x,
+                                    "y": count_y,
+                                    "button": "left",
+                                    "clickCount": 1
+                                })
+                            
+                            return True
+                            
+                        except Exception as e:
+                            self.logger.error(f"[{username}] 設定自動旋轉失敗: {e}")
+                            return False
+                    
+                    results = self.browser_operator.execute_sync(
+                        self.browser_contexts,
+                        auto_spin_operation,
+                        f"設定自動旋轉 {spin_count} 次"
+                    )
+                    
+                    # 統計結果
+                    success_count = sum(1 for r in results if r.success)
+                    
+                    if success_count == len(self.browser_contexts):
+                        self.logger.info(f"✓ 自動旋轉設定完成: 全部 {success_count} 個瀏覽器成功")
+                    else:
+                        self.logger.warning(
+                            f"⚠ 部分完成: {success_count}/{len(self.browser_contexts)} 個瀏覽器成功"
+                        )
+                        # 顯示失敗的瀏覽器
+                        for i, result in enumerate(results, 1):
+                            if not result.success:
+                                username = self.browser_contexts[i-1].credential.username
+                                self.logger.error(f"  瀏覽器 {i} ({username}) 失敗")
+                    
+                except ValueError:
+                    self.logger.error(f"無效的次數: {command_arguments}，請輸入 10、50 或 100")
+                except Exception as e:
+                    self.logger.error(f"設定自動旋轉時發生錯誤: {e}")
             
             elif cmd == 'c':
                 # 定義可用金額列表
