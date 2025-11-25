@@ -2700,6 +2700,42 @@ class GameControlCenter:
                                 press_success = sum(1 for r in press_results if r.success)
                                 
                                 self.logger.info(f"✓ 已對 {press_success} 個瀏覽器執行結算")
+                                
+                                # 點擊 LOBBY_LOGIN_BUTTON 座標（連續 5 次，間隔 1 秒）- 快速跳過結算畫面
+                                self.logger.info("正在跳過結算畫面...")
+                                rect = self.browser_operator.last_canvas_rect
+                                lobby_x = rect["x"] + rect["w"] * Constants.LOBBY_LOGIN_BUTTON_X_RATIO
+                                lobby_y = rect["y"] + rect["h"] * Constants.LOBBY_LOGIN_BUTTON_Y_RATIO
+                                
+                                def click_lobby_button(context: BrowserContext, index: int, total: int) -> bool:
+                                    """跳過結算畫面"""
+                                    driver = context.driver
+                                    try:
+                                        time.sleep(3)  # 等待 3 秒後開始點擊
+                                        for click_num in range(1, 6):  # 連續點擊 5 次跳過結算
+                                            for event_type in ["mousePressed", "mouseReleased"]:
+                                                driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
+                                                    "type": event_type,
+                                                    "x": lobby_x,
+                                                    "y": lobby_y,
+                                                    "button": "left",
+                                                    "clickCount": 1
+                                                })
+                                            if click_num < 5:  # 最後一次不需要等待
+                                                time.sleep(3)  # 間隔 3 秒
+                                        return True
+                                    except Exception as e:
+                                        self.logger.error(f"瀏覽器 {index} 點擊失敗: {e}")
+                                        return False
+                                
+                                click_results = self.browser_operator.execute_sync(
+                                    successful_contexts,
+                                    click_lobby_button,
+                                    "跳過結算畫面"
+                                )
+                                click_success = sum(1 for r in click_results if r.success)
+                                
+                                self.logger.info(f"✓ 已對 {click_success} 個瀏覽器跳過結算畫面")
                                 self.logger.info("免費遊戲流程完成")
                             
                         except (EOFError, KeyboardInterrupt):
@@ -2975,7 +3011,7 @@ class AutoSlotGameApp:
         """
         self.logger.info("")
         self.logger.info("━" * 60)
-        self.logger.info("金富翁遊戲自動化系統 v1.0.0")
+        self.logger.info("金富翁遊戲自動化系統 v1.4.0")
         self.logger.info("━" * 60)
         self.logger.info("")
         
