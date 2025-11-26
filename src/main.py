@@ -1221,6 +1221,12 @@ class BrowserManager:
             "profile.password_manager_enabled": False,
             "profile.default_content_setting_values.notifications": 2,
             "profile.default_content_settings.popups": 0,
+            # 靜音設定（2 = 靜音，1 = 允許聲音）
+            "profile.content_settings.exceptions.sound": {
+                "*": {
+                    "setting": 2
+                }
+            }
         })
         
         return chrome_options
@@ -3011,7 +3017,7 @@ class AutoSlotGameApp:
         """
         self.logger.info("")
         self.logger.info("━" * 60)
-        self.logger.info("金富翁遊戲自動化系統 v1.4.0")
+        self.logger.info("金富翁遊戲自動化系統 v1.4.1")
         self.logger.info("━" * 60)
         self.logger.info("")
         
