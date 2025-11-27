@@ -2938,8 +2938,21 @@ class GameControlCenter:
                     except Exception as e:
                         self.logger.error(f"截取失敗: {e}")
             
-            elif cmd == 'r':
-                self._run_bet_rules()
+            # === 使用者下達 r 開始執行規則 ===
+            elif cmd == "r":
+                is_paused = False
+                print("▶ 開始執行規則，執行中可隨時按 p 暫停")
+
+                # 🔥 新增：專門監聽使用者是否輸入 p
+                while not is_paused:
+                    sub_cmd = input("<<< 請輸入指令（p 暫停）>>> ").strip().lower()
+                    if sub_cmd == "p":
+                        is_paused = True
+                        print("⏸ 已暫停規則，等待下一個指令")
+                        break
+                    else:
+                        print("❗ 目前只能輸入 p 暫停")
+
             
             else:
                 self.logger.warning(f"未知指令 {command}")
