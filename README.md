@@ -426,6 +426,12 @@ google-chrome --version  # Linux
 
 ## 📝 版本歷史
 
+### v1.4.3 (2025-01-27)
+- ⚡ 優化瀏覽器網路設定，提升連線效能
+- 🚀 啟用 QUIC 協定、TCP Fast Open 和 NetworkService
+- 🔧 移除可能降低效能的網路設定（dns-prefetch-disable 等）
+- 💾 調整磁碟快取和媒體快取為 200MB，改善載入速度
+
 ### v1.4.2 (2025-01-27)
 - 🐛 修正 Windows 中文路徑截圖儲存失敗問題
 - 🔧 改用 `cv2.imencode()` + 標準檔案操作，完全支援 Unicode 路徑

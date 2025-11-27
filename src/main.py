@@ -13,10 +13,11 @@
 - 完善的錯誤處理與重試機制
 
 作者: 凡臻科技
-版本: 1.4.2
+版本: 1.4.3
 Python: 3.8+
 
 版本歷史:
+- v1.4.3: 優化瀏覽器網路設定（啟用 QUIC、TCP Fast Open、NetworkService）
 - v1.4.2: 修正 Windows 中文路徑截圖儲存失敗問題
 - v1.4.1: 新增瀏覽器靜音功能，自動將所有瀏覽器設為靜音
 - v1.4.0: 優化免費遊戲結算流程（3秒後開始點擊，間隔3秒，共5次）
@@ -1199,17 +1200,28 @@ class BrowserManager:
         chrome_options.add_argument("--disable-backgrounding-occluded-windows")
         chrome_options.add_argument("--disable-renderer-backgrounding")
         chrome_options.add_argument("--disable-background-timer-throttling")
-        chrome_options.add_argument("--disable-ipc-flooding-protection")
+        # 移除: --disable-ipc-flooding-protection (可能導致通訊過載)
         
-        # Chrome 131+ 優化設定
-        chrome_options.add_argument("--disable-features=NetworkTimeServiceQuerying")
-        chrome_options.add_argument("--dns-prefetch-disable")
-        chrome_options.add_argument("--disable-background-networking")
+        # 網路效能優化設定
+        # 移除: --dns-prefetch-disable (會降低 DNS 解析速度)
+        # 移除: --disable-background-networking (會影響連線池管理)
+        # 移除: --disable-features=NetworkTimeServiceQuerying (影響時間同步)
+        
+        # 啟用網路加速功能
+        chrome_options.add_argument("--enable-features=NetworkService,NetworkServiceInProcess")
+        chrome_options.add_argument("--enable-quic")  # 啟用 QUIC 協定加速
+        chrome_options.add_argument("--enable-tcp-fast-open")  # TCP 快速開啟
+        
+        # 其他優化設定
         chrome_options.add_argument("--disable-sync")
         chrome_options.add_argument("--metrics-recording-only")
         chrome_options.add_argument("--disable-default-apps")
         chrome_options.add_argument("--no-first-run")
         chrome_options.add_argument("--disable-extensions")
+        
+        # 記憶體與渲染優化
+        chrome_options.add_argument("--disk-cache-size=209715200")  # 200MB 磁碟快取
+        chrome_options.add_argument("--media-cache-size=209715200")  # 200MB 媒體快取
         
         # 移除自動化痕跡
         chrome_options.add_experimental_option(
@@ -3028,7 +3040,7 @@ class AutoSlotGameApp:
         """
         self.logger.info("")
         self.logger.info("━" * 60)
-        self.logger.info("金富翁遊戲自動化系統 v1.4.2")
+        self.logger.info("金富翁遊戲自動化系統 v1.4.3")
         self.logger.info("━" * 60)
         self.logger.info("")
         
