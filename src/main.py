@@ -2943,6 +2943,54 @@ class GameControlCenter:
         
         return True
     
+    def run_bet_rules(
+        browser_contexts,
+        rules: list,
+        operator: SyncBrowserOperator
+    ):
+        """
+        依序執行用戶規則.txt 的所有規則
+        每條規則格式：金額:分鐘
+        例如：0.8:10 代表調整到 0.8 並運行 10 分鐘
+        """
+
+        logger = LoggerFactory.get_logger("BetRuleRunner")
+
+        if not rules:
+            logger.warning("❌ 沒有任何下注規則可執行")
+            return
+
+        rule_index = 1
+
+        for rule in rules:
+            amount = rule.amount
+            duration = rule.duration
+
+            logger.info(f"🎯 開始執行規則 #{rule_index}: 金額={amount}, 時間={duration} 分鐘")
+
+            # 1. 調整下注金額 ----------------------------------------------------
+            logger.info(f"➡ 正在調整金額到 {amount} ...")
+            adjust_result = operator.adjust_betsize_all(browser_contexts, amount)
+
+            if not all(r.success for r in adjust_result):
+                logger.error("❌ 部分瀏覽器調整金額失敗，中止規則流程")
+                return
+
+            logger.info(f"✅ 金額調整完成，開始執行 {duration} 分鐘")
+
+            # 2. 持續運行 N 分鐘 --------------------------------------------------
+            seconds = duration * 60
+            for sec in range(seconds):
+                if sec % 30 == 0:
+                    logger.info(f"⏳ 已運行 {sec}/{seconds} 秒 (規則 #{rule_index})")
+                time.sleep(1)
+
+            logger.info(f"🏁 規則 #{rule_index} 執行完成\n")
+            rule_index += 1
+
+        logger.info("🎉 所有規則執行完畢！")
+
+    
     def start(self) -> None:
         """啟動控制中心"""
         self.running = True
@@ -3795,7 +3843,46 @@ class AutoSlotGameApp:
             
             # 等待後再次檢測
             time.sleep(Constants.DETECTION_INTERVAL)
+
+    def wait_for_rules_command():
+        """
+        等待使用者輸入 r 才開始執行規則
+        """
+        logger = LoggerFactory.get_logger("RuleWaiter")
+        logger.info("🟡 請輸入 'r' 開始執行規則 ...")
+
+        while True:
+            user_input = input("👉 請輸入 'r' 開始： ").strip().lower()
+            if user_input == "r":
+                logger.info("🟢 已收到指令 r，開始執行規則！")
+                break
+            else:
+                logger.warning("⚠️ 無效指令，請輸入 r")
+
     
+
+    def start_rules_flow(self, browser_contexts, operator: SyncBrowserOperator):
+        """
+        等待使用者按下 r → 然後讀 txt → 然後依序執行所有下注規則
+        """
+        logger = LoggerFactory.get_logger("StartRulesFlow")
+
+        # 1. 等待使用者輸入 r --------------------------------------------------
+        self.wait_for_rules_command()
+
+        # 2. 讀取用戶規則.txt ---------------------------------------------------
+        config = ConfigReader()
+        rules = config.read_bet_rules()
+
+        if not rules:
+            logger.error("❌ 用戶規則.txt 內沒有規則！")
+            return
+
+        logger.info(f"📘 共讀取到 {len(rules)} 條規則，開始執行 ...")
+
+        # 3. 執行規則 -----------------------------------------------------------
+        self.game_control.run_bet_rules(browser_contexts, rules, operator)
+
     def cleanup(self) -> None:
         """清理所有資源（優化版）"""
         self.logger.info("正在清理資源...")
