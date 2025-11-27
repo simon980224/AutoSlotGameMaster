@@ -1,6 +1,6 @@
 """
 金富翁遊戲自動化系統
-1
+
 核心特性:
 - 完整型別提示與協議 (Protocol)
 - 上下文管理器與資源自動清理
@@ -13,10 +13,14 @@
 - 完善的錯誤處理與重試機制
 
 作者: 凡臻科技
-版本: 1.3.0
+版本: 1.4.3
 Python: 3.8+
 
 版本歷史:
+- v1.4.3: 優化瀏覽器網路設定（啟用 QUIC、TCP Fast Open、NetworkService）
+- v1.4.2: 修正 Windows 中文路徑截圖儲存失敗問題
+- v1.4.1: 新增瀏覽器靜音功能，自動將所有瀏覽器設為靜音
+- v1.4.0: 優化免費遊戲結算流程（3秒後開始點擊，間隔3秒，共5次）
 - v1.3.0: 新增自動旋轉功能（支援 10、50、100 次）
 - v1.2.0: 新增專案啟動前自動清除 chromedriver 快取功能
 - v1.1.0: 修正 OpenCV 無法讀取中文路徑圖片的問題
@@ -1196,17 +1200,28 @@ class BrowserManager:
         chrome_options.add_argument("--disable-backgrounding-occluded-windows")
         chrome_options.add_argument("--disable-renderer-backgrounding")
         chrome_options.add_argument("--disable-background-timer-throttling")
-        chrome_options.add_argument("--disable-ipc-flooding-protection")
+        # 移除: --disable-ipc-flooding-protection (可能導致通訊過載)
         
-        # Chrome 131+ 優化設定
-        chrome_options.add_argument("--disable-features=NetworkTimeServiceQuerying")
-        chrome_options.add_argument("--dns-prefetch-disable")
-        chrome_options.add_argument("--disable-background-networking")
+        # 網路效能優化設定
+        # 移除: --dns-prefetch-disable (會降低 DNS 解析速度)
+        # 移除: --disable-background-networking (會影響連線池管理)
+        # 移除: --disable-features=NetworkTimeServiceQuerying (影響時間同步)
+        
+        # 啟用網路加速功能
+        chrome_options.add_argument("--enable-features=NetworkService,NetworkServiceInProcess")
+        chrome_options.add_argument("--enable-quic")  # 啟用 QUIC 協定加速
+        chrome_options.add_argument("--enable-tcp-fast-open")  # TCP 快速開啟
+        
+        # 其他優化設定
         chrome_options.add_argument("--disable-sync")
         chrome_options.add_argument("--metrics-recording-only")
         chrome_options.add_argument("--disable-default-apps")
         chrome_options.add_argument("--no-first-run")
         chrome_options.add_argument("--disable-extensions")
+        
+        # 記憶體與渲染優化
+        chrome_options.add_argument("--disk-cache-size=209715200")  # 200MB 磁碟快取
+        chrome_options.add_argument("--media-cache-size=209715200")  # 200MB 媒體快取
         
         # 移除自動化痕跡
         chrome_options.add_experimental_option(
@@ -1221,6 +1236,12 @@ class BrowserManager:
             "profile.password_manager_enabled": False,
             "profile.default_content_setting_values.notifications": 2,
             "profile.default_content_settings.popups": 0,
+            # 靜音設定（2 = 靜音，1 = 允許聲音）
+            "profile.content_settings.exceptions.sound": {
+                "*": {
+                    "setting": 2
+                }
+            }
         })
         
         return chrome_options
@@ -2207,8 +2228,16 @@ class ImageDetector:
             # 如果指定了儲存路徑，則儲存圖片
             if save_path:
                 save_path.parent.mkdir(parents=True, exist_ok=True)
-                cv2.imwrite(str(save_path), image_cv)
-                self.logger.info(f"截圖已儲存 {save_path}")
+                
+                # 使用支援 Unicode 路徑的方式儲存圖片
+                # cv2.imwrite 無法處理中文路徑，改用 imencode + 檔案寫入
+                is_success, buffer = cv2.imencode('.png', image_cv)
+                if is_success:
+                    with open(save_path, 'wb') as f:
+                        f.write(buffer.tobytes())
+                    self.logger.info(f"截圖已儲存 {save_path}")
+                else:
+                    raise ImageDetectionError(f"圖片編碼失敗")
             
             return image_cv
             
@@ -3011,7 +3040,7 @@ class AutoSlotGameApp:
         """
         self.logger.info("")
         self.logger.info("━" * 60)
-        self.logger.info("金富翁遊戲自動化系統 v1.4.0")
+        self.logger.info("金富翁遊戲自動化系統 v1.4.3")
         self.logger.info("━" * 60)
         self.logger.info("")
         

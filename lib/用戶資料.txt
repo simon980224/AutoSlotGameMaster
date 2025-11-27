@@ -1,3 +1,9 @@
-帳號:密碼:IP:port:user:password
-g59eae1,aaaa1111,82.22.69.70:7277:evuxkwoi:hsrmr72i08rc
-gbc3773,aaaa1111,82.22.89.202:7908:evuxkwoi:hsrmr72i08rc
+帳號,密碼,IP:port:user:password
+g274946,aaaa1111,195.40.12.74:7258:evuxkwoi:hsrmr72i08rc
+gc90949,aaaa1111,195.40.161.199:7382:evuxkwoi:hsrmr72i08rc
+ge29864,aaaa1111,92.112.84.51:6025:evuxkwoi:hsrmr72i08rc
+ge4466f,aaaa1111,192.95.86.51:5391:evuxkwoi:hsrmr72i08rc
+ga01a3f,aaaa1111,23.26.45.77:7543:evuxkwoi:hsrmr72i08rc
+g78e7ab,aaaa1111,195.40.161.91:7274:evuxkwoi:hsrmr72i08rc
+g047da1,aaaa1111,46.203.23.114:7137:evuxkwoi:hsrmr72i08rc
+g70458e,aaaa1111,195.40.12.216:7400:evuxkwoi:hsrmr72i08rc
