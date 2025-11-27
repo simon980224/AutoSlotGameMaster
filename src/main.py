@@ -240,13 +240,13 @@ class Constants:
     PROXY_SELECT_TIMEOUT = 1.0
     
     # URL 配置
-    LOGIN_PAGE = "https://m.jfw-win.com/#/login?redirect=%2Fhome%2Fpage"
-    GAME_PAGE = "https://m.jfw-win.com/#/home/loding?game_code=egyptian-mythology&factory_code=ATG&state=true&name=%E6%88%B0%E7%A5%9E%E8%B3%BD%E7%89%B9"
+    LOGIN_PAGE = "https://www.welove999.com/login?id=login"
+    GAME_PAGE = "https://play.godeebxp.com/egames/9a1d4e323f25351644a614dc451beb30ebb8a799/game/?t=10f16dc57602434aa6253c3c8d832bc6&gn=golden-seth&l=zh-tw&ct=slot&gt=slot-erase-any-times-2&socket_url=socket.godeebxp.com&client_type=web&p=atg&view_mode=landscape&goback_url=https%3A%2F%2Fplay.godeebxp.com%2Fegames%2Flobby%2Fgame%2F%3Ft%3D15615e9d1719440f97c97dce93df22dd%26l%3Dzh-tw%26socket_url%3Dsocket.godeebxp.com%26ts%3D1764274210298"
     
     # 頁面元素選擇器
-    USERNAME_INPUT = "//input[@placeholder='請輸入帳號']"
+    USERNAME_INPUT = "//input[@placeholder='請輸入會員帳號']"
     PASSWORD_INPUT = "//input[@placeholder='請輸入密碼']"
-    LOGIN_BUTTON = "//div[contains(@class, 'login-btn')]//span[text()='立即登入']/.."
+    LOGIN_BUTTON = "//div[contains(@class,'button') and contains(text(),'立即登入')]"
     GAME_IFRAME = "gameFrame-0"
     GAME_CANVAS = "GameCanvas"
     
