@@ -246,7 +246,7 @@ class Constants:
     # 頁面元素選擇器
     USERNAME_INPUT = "//input[@placeholder='請輸入會員帳號']"
     PASSWORD_INPUT = "//input[@placeholder='請輸入密碼']"
-    LOGIN_BUTTON = "//div[contains(@class,'button') and contains(text(),'立即登入')]"
+    LOGIN_BUTTON = "/html/body/div[1]/div/div[1]/div/div/div[2]/div[4]/div[2]"
     GAME_IFRAME = "gameFrame-0"
     GAME_CANVAS = "GameCanvas"
     
