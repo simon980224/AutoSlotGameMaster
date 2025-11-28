@@ -241,12 +241,18 @@ class Constants:
     
     # URL 配置
     LOGIN_PAGE = "https://www.welove999.com/login?id=login"
-    GAME_PAGE = "https://play.godeebxp.com/egames/9a1d4e323f25351644a614dc451beb30ebb8a799/game/?t=10f16dc57602434aa6253c3c8d832bc6&gn=golden-seth&l=zh-tw&ct=slot&gt=slot-erase-any-times-2&socket_url=socket.godeebxp.com&client_type=web&p=atg&view_mode=landscape&goback_url=https%3A%2F%2Fplay.godeebxp.com%2Fegames%2Flobby%2Fgame%2F%3Ft%3D15615e9d1719440f97c97dce93df22dd%26l%3Dzh-tw%26socket_url%3Dsocket.godeebxp.com%26ts%3D1764274210298"
+    # GAME_PAGE 已棄用，改用 Selenium 點擊進入遊戲
+    # GAME_PAGE = "https://play.godeebxp.com/egames/..."
     
     # 頁面元素選擇器
     USERNAME_INPUT = "//input[@placeholder='請輸入會員帳號']"
     PASSWORD_INPUT = "//input[@placeholder='請輸入密碼']"
     LOGIN_BUTTON = "/html/body/div[1]/div/div[1]/div/div/div[2]/div[4]/div[2]"
+    
+    # 遊戲進入流程選擇器
+    GAME_CATEGORY_TRIGGER = "//*[@id='app']/div/div[1]/div/div[2]/div[1]/div/a[4]"  # 遊戲分類觸發按鈕
+    GAME_PROVIDER_BUTTON = "//*[@id='app']/div/div[2]/div/div/div[1]/div[8]/div[1]"  # 餐廳賓果
+    START_GAME_BUTTON = "//*[@id='gameList']/div[2]/div[2]/button"  # 開始遊戲按鈕
     GAME_IFRAME = "gameFrame-0"
     GAME_CANVAS = "GameCanvas"
     
@@ -1528,12 +1534,12 @@ class SyncBrowserOperator:
         """
         return self.navigate_all(browser_contexts, Constants.LOGIN_PAGE, timeout)
     
-    def navigate_to_game_page(
+    def click_game_provider_all(
         self,
         browser_contexts: List[BrowserContext],
         timeout: Optional[float] = None
     ) -> List[OperationResult]:
-        """同步導航所有瀏覽器到遊戲頁面。
+        """同步點擊所有瀏覽器的遊戲商按鈕（DBG餐廳賓果）。
         
         Args:
             browser_contexts: 瀏覽器上下文列表
@@ -1542,7 +1548,89 @@ class SyncBrowserOperator:
         Returns:
             操作結果列表
         """
-        return self.navigate_all(browser_contexts, Constants.GAME_PAGE, timeout)
+        def click_provider_operation(context: BrowserContext, index: int, total: int) -> bool:
+            driver = context.driver
+            wait = WebDriverWait(driver, timeout or 15)
+            
+            # 記錄當前視窗數量
+            original_window_count = len(driver.window_handles)
+            
+            # 步驟 1: 先點擊遊戲分類觸發按鈕
+            category_trigger = wait.until(
+                EC.presence_of_element_located((By.XPATH, Constants.GAME_CATEGORY_TRIGGER))
+            )
+            driver.execute_script("arguments[0].click();", category_trigger)
+            time.sleep(1)  # 等待遊戲列表展開
+            
+            # 步驟 2: 等待遊戲商按鈕出現
+            provider_button = wait.until(
+                EC.presence_of_element_located((By.XPATH, Constants.GAME_PROVIDER_BUTTON))
+            )
+            
+            # 滾動到元素位置
+            driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", provider_button)
+            time.sleep(0.5)
+            
+            # 使用 JavaScript 強制點擊（繞過隱藏狀態檢查）
+            driver.execute_script("arguments[0].click();", provider_button)
+            
+            # 等待 2 秒檢查是否有新視窗開啟
+            time.sleep(2)
+            
+            # 如果有新視窗開啟，切換到新視窗
+            if len(driver.window_handles) > original_window_count:
+                driver.switch_to.window(driver.window_handles[-1])
+                time.sleep(1)  # 等待新頁面載入
+            
+            return True
+        
+        return self.execute_sync(
+            browser_contexts,
+            click_provider_operation,
+            "點擊遊戲商按鈕",
+            timeout=timeout
+        )
+    
+    def click_start_game_all(
+        self,
+        browser_contexts: List[BrowserContext],
+        timeout: Optional[float] = None
+    ) -> List[OperationResult]:
+        """同步點擊所有瀏覽器的開始遊戲按鈕。
+        
+        Args:
+            browser_contexts: 瀏覽器上下文列表
+            timeout: 超時時間
+            
+        Returns:
+            操作結果列表
+        """
+        def click_start_operation(context: BrowserContext, index: int, total: int) -> bool:
+            driver = context.driver
+            wait = WebDriverWait(driver, timeout or 15)
+            
+            # 等待元素出現（不需要可見）
+            start_button = wait.until(
+                EC.presence_of_element_located((By.XPATH, Constants.START_GAME_BUTTON))
+            )
+            
+            # 滾動到元素位置
+            driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", start_button)
+            time.sleep(0.5)
+            
+            # 使用 JavaScript 強制點擊（繞過隱藏狀態檢查）
+            driver.execute_script("arguments[0].click();", start_button)
+            
+            time.sleep(3)  # 等待遊戲載入
+            return True
+        
+        return self.execute_sync(
+            browser_contexts,
+            click_start_operation,
+            "點擊開始遊戲按鈕",
+            timeout=timeout
+        )
+    
     
     def perform_login_all(
         self,
@@ -1576,13 +1664,13 @@ class SyncBrowserOperator:
             login_button = driver.find_element(By.XPATH, Constants.LOGIN_BUTTON)
             login_button.click()
             
-            time.sleep(5)  # 等待登入完成
+            time.sleep(2)  # 等待登入完成並出現彈窗
             return True
         
         return self.execute_sync(
             browser_contexts,
             login_operation,
-            "登入操作",
+            "登入操作（含關閉彈窗）",
             timeout=timeout
         )
     
@@ -3252,15 +3340,23 @@ class AutoSlotGameApp:
                 self.browser_contexts
             )
             
-            time.sleep(Constants.DEFAULT_WAIT_SECONDS)  # 等待登入後的頁面跳轉
+            time.sleep(1)  # 關完公告 1 秒後即可點擊遊戲商
             
-            # 步驟 5: 導航到遊戲頁面
-            self._print_step(5, "導航到遊戲頁面")
-            game_results = self.browser_operator.navigate_to_game_page(
+            # 步驟 5: 點擊遊戲商按鈕（DBG餐廳賓果）
+            self._print_step("5a", "點擊遊戲商按鈕 (DBG餐廳賓果)")
+            provider_results = self.browser_operator.click_game_provider_all(
                 self.browser_contexts
             )
             
-            time.sleep(Constants.DEFAULT_WAIT_SECONDS)  # 等待遊戲頁面載入
+            time.sleep(Constants.DEFAULT_WAIT_SECONDS)  # 等待遊戲列表載入
+            
+            # 步驟 5b: 點擊開始遊戲按鈕
+            self._print_step("5b", "點擊開始遊戲按鈕")
+            start_results = self.browser_operator.click_start_game_all(
+                self.browser_contexts
+            )
+            
+            time.sleep(Constants.DEFAULT_WAIT_SECONDS)  # 等待遊戲載入
             
             # 調整視窗
             self._print_step(6, "調整視窗排列 (600x400)")
