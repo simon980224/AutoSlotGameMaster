@@ -13,10 +13,11 @@
 - 完善的錯誤處理與重試機制
 
 作者: 凡臻科技
-版本: 1.4.3
+版本: 1.5.0
 Python: 3.8+
 
 版本歷史:
+- v1.5.0: 統一管理所有魔法數字（視窗尺寸、座標、等待時間、重試次數等）
 - v1.4.3: 優化瀏覽器網路設定（啟用 QUIC、TCP Fast Open、NetworkService）
 - v1.4.2: 修正 Windows 中文路徑截圖儲存失敗問題
 - v1.4.1: 新增瀏覽器靜音功能，自動將所有瀏覽器設為靜音
@@ -288,10 +289,43 @@ class Constants:
     DEFAULT_WAIT_SECONDS = 3  # 預設等待時間（秒）
     DETECTION_PROGRESS_INTERVAL = 20  # 檢測進度顯示間隔
     
+    # 操作等待時間（秒）
+    LOGIN_WAIT_TIME = 5          # 登入後等待時間
+    BETSIZE_ADJUST_STEP_WAIT = 0.3  # 調整金額每步等待時間
+    BETSIZE_ADJUST_VERIFY_WAIT = 1.0  # 調整金額驗證前等待時間
+    BETSIZE_ADJUST_RETRY_WAIT = 0.5  # 調整金額重試等待時間
+    BETSIZE_READ_RETRY_WAIT = 0.5    # 讀取金額重試等待時間
+    FREE_GAME_CLICK_WAIT = 2     # 免費遊戲點擊間隔
+    FREE_GAME_SETTLE_INITIAL_WAIT = 3  # 免費遊戲結算初始等待
+    FREE_GAME_SETTLE_CLICK_INTERVAL = 3  # 免費遊戲結算點擊間隔
+    AUTO_SPIN_MENU_WAIT = 0.5    # 自動旋轉選單等待時間
+    PROXY_SERVER_START_WAIT = 1  # Proxy 伺服器啟動等待時間
+    TEMPLATE_CAPTURE_WAIT = 1    # 模板截取後等待時間
+    DETECTION_COMPLETE_WAIT = 2  # 檢測完成後等待時間
+    
+    # 重試與循環配置
+    BETSIZE_ADJUST_MAX_ATTEMPTS = 200  # 調整金額最大嘗試次數
+    BETSIZE_READ_MAX_RETRIES = 2       # 讀取金額最大重試次數
+    FREE_GAME_SETTLE_CLICK_COUNT = 5   # 免費遊戲結算點擊次數
+    DETECTION_WAIT_MAX_ATTEMPTS = 20   # 檢測等待最大嘗試次數
+    
     # 視窗排列配置
     DEFAULT_WINDOW_WIDTH = 600
     DEFAULT_WINDOW_HEIGHT = 400
     DEFAULT_WINDOW_COLUMNS = 4
+    
+    # 下注金額調整按鈕座標（基於預設視窗大小）
+    BETSIZE_INCREASE_BUTTON_X = 440  # 增加金額按鈕 X 座標
+    BETSIZE_INCREASE_BUTTON_Y = 370  # 增加金額按鈕 Y 座標
+    BETSIZE_DECREASE_BUTTON_X = 360  # 減少金額按鈕 X 座標
+    BETSIZE_DECREASE_BUTTON_Y = 370  # 減少金額按鈕 Y 座標
+    BETSIZE_DISPLAY_X = 400          # 金額顯示位置 X 座標
+    BETSIZE_DISPLAY_Y = 380          # 金額顯示位置 Y 座標
+    
+    # 截圖裁切範圍（像素）
+    BETSIZE_CROP_MARGIN_X = 50  # 金額模板水平裁切邊距
+    BETSIZE_CROP_MARGIN_Y = 20  # 金額模板垂直裁切邊距
+    TEMPLATE_CROP_MARGIN = 20    # 通用模板裁切邊距
     
     # 遊戲金額配置（使用 frozenset 提升查詢效率）
     GAME_BETSIZE = frozenset((
@@ -1107,7 +1141,7 @@ class LocalProxyServerManager:
                 self._proxy_threads[local_port] = server_thread
             
             # 等待伺服器啟動
-            time.sleep(1)
+            time.sleep(Constants.PROXY_SERVER_START_WAIT)
             
             self.logger.info(f"✓ Proxy 中繼已啟動 (埠: {local_port})")
             return local_port
@@ -1576,7 +1610,7 @@ class SyncBrowserOperator:
             login_button = driver.find_element(By.XPATH, Constants.LOGIN_BUTTON)
             login_button.click()
             
-            time.sleep(5)  # 等待登入完成
+            time.sleep(Constants.LOGIN_WAIT_TIME)  # 等待登入完成
             return True
         
         return self.execute_sync(
@@ -1657,7 +1691,7 @@ class SyncBrowserOperator:
                     "button": "left",
                     "clickCount": 1
                 })
-            time.sleep(2)
+            time.sleep(Constants.FREE_GAME_CLICK_WAIT)
             
             # === 第二次點擊（確認按鈕） ===
             confirm_x = canvas_rect["x"] + canvas_rect["w"] * Constants.BUY_FREE_GAME_CONFIRM_X_RATIO
@@ -1734,7 +1768,7 @@ class SyncBrowserOperator:
                         "button": "left",
                         "clickCount": 1
                     })
-                time.sleep(2)
+                time.sleep(Constants.FREE_GAME_CLICK_WAIT)
                 
                 # === 第二次點擊（確認按鈕） ===
                 confirm_x = canvas_rect["x"] + canvas_rect["w"] * Constants.BUY_FREE_GAME_CONFIRM_X_RATIO
@@ -1871,16 +1905,19 @@ class SyncBrowserOperator:
             timeout=timeout
         )
     
-    def get_current_betsize(self, driver: WebDriver, retry_count: int = 2) -> Optional[float]:
+    def get_current_betsize(self, driver: WebDriver, retry_count: int = None) -> Optional[float]:
         """取得當前下注金額（優化版）。
         
         Args:
             driver: WebDriver 實例
-            retry_count: 重試次數（預設2次）
+            retry_count: 重試次數（預設使用常數）
             
         Returns:
             Optional[float]: 當前金額，失敗返回None
         """
+        if retry_count is None:
+            retry_count = Constants.BETSIZE_READ_MAX_RETRIES
+        
         # 定義可用金額列表（使用 set 提升查詢效率）
         GAME_BETSIZE_SET = frozenset((
             0.4, 0.8, 1, 1.2, 1.6, 2, 2.4, 2.8, 3, 3.2, 3.6, 4, 5, 6, 7, 8, 9, 10,
@@ -1893,7 +1930,7 @@ class SyncBrowserOperator:
         for attempt in range(retry_count):
             try:
                 if attempt > 0:
-                    time.sleep(0.5)  # 等待畫面穩定
+                    time.sleep(Constants.BETSIZE_READ_RETRY_WAIT)  # 等待畫面穩定
                 
                 # 截取整個瀏覽器截圖
                 screenshot = driver.get_screenshot_as_png()
@@ -1987,8 +2024,8 @@ class SyncBrowserOperator:
         
         Args:
             driver: WebDriver 實例
-            x: X 座標 (基於 600x400 視窗)
-            y: Y 座標 (基於 600x400 視窗)
+            x: X 座標 (基於預設視窗大小)
+            y: Y 座標 (基於預設視窗大小)
         """
         screenshot = driver.get_screenshot_as_png()
         screenshot_img = Image.open(io.BytesIO(screenshot))
@@ -1996,9 +2033,9 @@ class SyncBrowserOperator:
         # 獲取實際截圖尺寸
         image_width, image_height = screenshot_img.size
         
-        # 計算相對座標比例（基於 600x400）
-        x_ratio = x / 600
-        y_ratio = y / 400
+        # 計算相對座標比例（基於預設視窗大小）
+        x_ratio = x / Constants.DEFAULT_WINDOW_WIDTH
+        y_ratio = y / Constants.DEFAULT_WINDOW_HEIGHT
         
         # 應用到實際截圖尺寸
         actual_x = int(image_width * x_ratio)
@@ -2014,17 +2051,20 @@ class SyncBrowserOperator:
                 "clickCount": 1
             })
     
-    def adjust_betsize(self, driver: WebDriver, target_amount: float, max_attempts: int = 200) -> bool:
+    def adjust_betsize(self, driver: WebDriver, target_amount: float, max_attempts: int = None) -> bool:
         """調整下注金額到目標值（優化版）。
         
         Args:
             driver: WebDriver 實例
             target_amount: 目標金額
-            max_attempts: 最大嘗試次數
+            max_attempts: 最大嘗試次數（預設使用常數）
             
         Returns:
             bool: 調整成功返回True
         """
+        if max_attempts is None:
+            max_attempts = Constants.BETSIZE_ADJUST_MAX_ATTEMPTS
+        
         try:
             # 檢查目標金額
             if target_amount not in Constants.GAME_BETSIZE:
@@ -2047,31 +2087,31 @@ class SyncBrowserOperator:
             target_index = Constants.GAME_BETSIZE_TUPLE.index(target_amount)
             diff = target_index - current_index
             
-            # 設定點擊座標（基於 600x400 視窗）
+            # 設定點擊座標（基於預設視窗大小）
             if diff > 0:
                 # 增加金額
-                click_x = 440
-                click_y = 370
+                click_x = Constants.BETSIZE_INCREASE_BUTTON_X
+                click_y = Constants.BETSIZE_INCREASE_BUTTON_Y
                 estimated_steps = diff
             else:
                 # 減少金額
-                click_x = 360
-                click_y = 370
+                click_x = Constants.BETSIZE_DECREASE_BUTTON_X
+                click_y = Constants.BETSIZE_DECREASE_BUTTON_Y
                 estimated_steps = abs(diff)
             
             # 開始調整
             for i in range(estimated_steps):
                 self._click_betsize_button(driver, click_x, click_y)
-                time.sleep(0.3)
+                time.sleep(Constants.BETSIZE_ADJUST_STEP_WAIT)
             
-            time.sleep(1)
+            time.sleep(Constants.BETSIZE_ADJUST_VERIFY_WAIT)
             
             # 驗證並微調
             for attempt in range(max_attempts):
                 current_amount = self.get_current_betsize(driver)
                 
                 if current_amount is None:
-                    time.sleep(0.5)
+                    time.sleep(Constants.BETSIZE_ADJUST_RETRY_WAIT)
                     continue
                 
                 if current_amount == target_amount:
@@ -2080,11 +2120,11 @@ class SyncBrowserOperator:
                 
                 # 根據當前金額決定點擊哪個按鈕
                 if current_amount < target_amount:
-                    self._click_betsize_button(driver, 440, 370)  # 增加
+                    self._click_betsize_button(driver, Constants.BETSIZE_INCREASE_BUTTON_X, Constants.BETSIZE_INCREASE_BUTTON_Y)  # 增加
                 else:
-                    self._click_betsize_button(driver, 360, 370)  # 減少
+                    self._click_betsize_button(driver, Constants.BETSIZE_DECREASE_BUTTON_X, Constants.BETSIZE_DECREASE_BUTTON_Y)  # 減少
                 
-                time.sleep(0.5)
+                time.sleep(Constants.BETSIZE_ADJUST_RETRY_WAIT)
             
             self.logger.error("✗ 金額調整失敗")
             return False
@@ -2104,9 +2144,9 @@ class SyncBrowserOperator:
             bool: 截取成功返回True
         """
         try:
-            # 固定座標：金額顯示位置 (基於 600x400 視窗)
-            target_x = 400
-            target_y = 380
+            # 固定座標：金額顯示位置（基於預設視窗大小）
+            target_x = Constants.BETSIZE_DISPLAY_X
+            target_y = Constants.BETSIZE_DISPLAY_Y
             
             # 截取整個瀏覽器畫面
             screenshot = driver.get_screenshot_as_png()
@@ -2115,19 +2155,19 @@ class SyncBrowserOperator:
             # 獲取實際截圖尺寸
             image_width, image_height = screenshot_img.size
             
-            # 計算相對座標比例（基於 600x400）
-            x_ratio = target_x / 600
-            y_ratio = target_y / 400
+            # 計算相對座標比例（基於預設視窗大小）
+            x_ratio = target_x / Constants.DEFAULT_WINDOW_WIDTH
+            y_ratio = target_y / Constants.DEFAULT_WINDOW_HEIGHT
             
             # 應用到實際截圖尺寸
             actual_x = int(image_width * x_ratio)
             actual_y = int(image_height * y_ratio)
             
-            # 裁切範圍：上下20px, 左右50px
-            crop_left = max(0, actual_x - 50)
-            crop_top = max(0, actual_y - 20)
-            crop_right = min(image_width, actual_x + 50)
-            crop_bottom = min(image_height, actual_y + 20)
+            # 裁切範圍（使用常數定義）
+            crop_left = max(0, actual_x - Constants.BETSIZE_CROP_MARGIN_X)
+            crop_top = max(0, actual_y - Constants.BETSIZE_CROP_MARGIN_Y)
+            crop_right = min(image_width, actual_x + Constants.BETSIZE_CROP_MARGIN_X)
+            crop_bottom = min(image_height, actual_y + Constants.BETSIZE_CROP_MARGIN_Y)
             
             # 裁切圖片
             cropped_img = screenshot_img.crop((crop_left, crop_top, crop_right, crop_bottom))
@@ -2740,8 +2780,8 @@ class GameControlCenter:
                                     """跳過結算畫面"""
                                     driver = context.driver
                                     try:
-                                        time.sleep(3)  # 等待 3 秒後開始點擊
-                                        for click_num in range(1, 6):  # 連續點擊 5 次跳過結算
+                                        time.sleep(Constants.FREE_GAME_SETTLE_INITIAL_WAIT)  # 等待後開始點擊
+                                        for click_num in range(1, Constants.FREE_GAME_SETTLE_CLICK_COUNT + 1):  # 連續點擊跳過結算
                                             for event_type in ["mousePressed", "mouseReleased"]:
                                                 driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
                                                     "type": event_type,
@@ -2750,8 +2790,8 @@ class GameControlCenter:
                                                     "button": "left",
                                                     "clickCount": 1
                                                 })
-                                            if click_num < 5:  # 最後一次不需要等待
-                                                time.sleep(3)  # 間隔 3 秒
+                                            if click_num < Constants.FREE_GAME_SETTLE_CLICK_COUNT:  # 最後一次不需要等待
+                                                time.sleep(Constants.FREE_GAME_SETTLE_CLICK_INTERVAL)  # 點擊間隔
                                         return True
                                     except Exception as e:
                                         self.logger.error(f"瀏覽器 {index} 點擊失敗: {e}")
@@ -2837,7 +2877,7 @@ class GameControlCenter:
                                     "button": "left",
                                     "clickCount": 1
                                 })
-                            time.sleep(0.5)  # 等待選單出現
+                            time.sleep(Constants.AUTO_SPIN_MENU_WAIT)  # 等待選單出現
                             
                             # 第二次點擊（選擇次數）
                             for event_type in ["mousePressed", "mouseReleased"]:
@@ -3040,7 +3080,7 @@ class AutoSlotGameApp:
         """
         self.logger.info("")
         self.logger.info("━" * 60)
-        self.logger.info("金富翁遊戲自動化系統 v1.4.3")
+        self.logger.info("金富翁遊戲自動化系統 v1.5.0")
         self.logger.info("━" * 60)
         self.logger.info("")
         
@@ -3404,7 +3444,7 @@ class AutoSlotGameApp:
         start_y = rect["y"] + rect["h"] * Constants.LOBBY_LOGIN_BUTTON_Y_RATIO
         
         # 5. 在所有瀏覽器中同步執行點擊
-        time.sleep(1)
+        time.sleep(Constants.TEMPLATE_CAPTURE_WAIT)
         def click_start_button_operation(context: BrowserContext, index: int, total: int) -> bool:
             """點擊開始遊戲按鈕"""
             try:
@@ -3450,7 +3490,7 @@ class AutoSlotGameApp:
             confirm_y = rect["y"] + rect["h"] * Constants.LOBBY_CONFIRM_BUTTON_Y_RATIO
             
             # 4. 在所有瀏覽器中同步執行點擊
-            time.sleep(1)
+            time.sleep(Constants.TEMPLATE_CAPTURE_WAIT)
             def click_confirm_button_operation(context: BrowserContext, index: int, total: int) -> bool:
                 """點擊確認按鈕"""
                 try:
@@ -3473,7 +3513,7 @@ class AutoSlotGameApp:
         
         # 6. 所有瀏覽器都成功進入遊戲
         self.logger.info("✓ 所有瀏覽器已準備就緒")
-        time.sleep(2)
+        time.sleep(Constants.DETECTION_COMPLETE_WAIT)
     
     def _click_coordinate(self, driver: WebDriver, x: float, y: float) -> None:
         """點擊指定座標。
@@ -3516,11 +3556,11 @@ class AutoSlotGameApp:
             center_x = int(confirm_x)
             center_y = int(confirm_y)
             
-            # 固定像素偏移：上下左右各20px
-            crop_left = max(0, center_x - 20)
-            crop_top = max(0, center_y - 20)
-            crop_right = min(image_width, center_x + 20)
-            crop_bottom = min(image_height, center_y + 20)
+            # 固定像素偏移（使用常數定義）
+            crop_left = max(0, center_x - Constants.TEMPLATE_CROP_MARGIN)
+            crop_top = max(0, center_y - Constants.TEMPLATE_CROP_MARGIN)
+            crop_right = min(image_width, center_x + Constants.TEMPLATE_CROP_MARGIN)
+            crop_bottom = min(image_height, center_y + Constants.TEMPLATE_CROP_MARGIN)
             
             cropped_img = screenshot_img.crop((crop_left, crop_top, crop_right, crop_bottom))
             
@@ -3604,9 +3644,8 @@ class AutoSlotGameApp:
                     self.logger.info("持續檢測中 每3秒檢測一次 按 Ctrl+C 可中斷")
                     
                     try:
-                        max_wait_attempts = 20  # 最多等待 60 秒
-                        for attempt in range(max_wait_attempts):
-                            time.sleep(3)
+                        for attempt in range(Constants.DETECTION_WAIT_MAX_ATTEMPTS):
+                            time.sleep(Constants.DEFAULT_WAIT_SECONDS)
                             detection_results = self._detect_in_all_browsers(template_name)
                             found_count = sum(1 for result in detection_results if result is not None)
                             
@@ -3619,7 +3658,7 @@ class AutoSlotGameApp:
                                 return
                             
                             if (attempt + 1) % 5 == 0:
-                                self.logger.info(f"檢測進度 {attempt + 1}/{max_wait_attempts} 次 仍未找到")
+                                self.logger.info(f"檢測進度 {attempt + 1}/{Constants.DETECTION_WAIT_MAX_ATTEMPTS} 次 仍未找到")
                         
                         self.logger.warning(f"等待超時 未檢測到 {display_name}")
                         continue

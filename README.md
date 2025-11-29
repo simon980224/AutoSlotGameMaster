@@ -122,6 +122,7 @@ pip install -r requirements.txt
 ```
 
 依賴套件：
+
 - `selenium>=4.25.0` - 瀏覽器自動化
 - `webdriver-manager>=4.0.0` - 驅動程式管理
 - `pillow>=10.0.0` - 圖片處理
@@ -235,6 +236,7 @@ python build.py
 ```
 
 打包腳本會自動：
+
 1. ✅ 清理舊的構建檔案
 2. ✅ 檢查必要檔案和依賴
 3. ✅ 使用 PyInstaller 打包
@@ -244,6 +246,7 @@ python build.py
 輸出位置：`dist/AutoSlotGameMaster.exe`
 
 打包後的目錄結構：
+
 ```
 dist/
 ├── AutoSlotGameMaster.exe
@@ -266,20 +269,20 @@ dist/
 class Constants:
     # 執行緒池配置
     MAX_THREAD_WORKERS = 10  # 最大並行工作數
-    
+
     # 超時設定
     DEFAULT_TIMEOUT_SECONDS = 30
     DEFAULT_PAGE_LOAD_TIMEOUT = 600
-    
+
     # 圖片檢測
     MATCH_THRESHOLD = 0.8  # 匹配閾值（0-1）
     DETECTION_INTERVAL = 1.0  # 檢測間隔（秒）
-    
+
     # 視窗配置
     DEFAULT_WINDOW_WIDTH = 600
     DEFAULT_WINDOW_HEIGHT = 400
     DEFAULT_WINDOW_COLUMNS = 4  # 每行視窗數
-    
+
     # Proxy 配置
     DEFAULT_PROXY_START_PORT = 9000
     PROXY_BUFFER_SIZE = 4096
@@ -426,47 +429,66 @@ google-chrome --version  # Linux
 
 ## 📝 版本歷史
 
+### v1.5.0 (2025-01-29)
+
+- 🎯 **重大重構**：統一管理所有魔法數字至 Constants 類別
+- 📐 新增視窗尺寸相關常數（DEFAULT_WINDOW_WIDTH/HEIGHT）
+- 📍 新增按鈕座標常數（BETSIZE_INCREASE/DECREASE_BUTTON_X/Y 等）
+- ⏱️ 新增操作等待時間常數（LOGIN_WAIT_TIME、FREE_GAME_CLICK_WAIT 等）
+- 🔄 新增重試與循環配置常數（BETSIZE_ADJUST_MAX_ATTEMPTS、FREE_GAME_SETTLE_CLICK_COUNT 等）
+- 🖼️ 新增截圖裁切範圍常數（BETSIZE_CROP_MARGIN_X/Y、TEMPLATE_CROP_MARGIN）
+- ✨ 提升程式碼可維護性、可讀性和一致性
+- 📚 移除所有硬編碼數值，集中管理配置參數
+
 ### v1.4.3 (2025-01-27)
+
 - ⚡ 優化瀏覽器網路設定，提升連線效能
 - 🚀 啟用 QUIC 協定、TCP Fast Open 和 NetworkService
 - 🔧 移除可能降低效能的網路設定（dns-prefetch-disable 等）
 - 💾 調整磁碟快取和媒體快取為 200MB，改善載入速度
 
 ### v1.4.2 (2025-01-27)
+
 - 🐛 修正 Windows 中文路徑截圖儲存失敗問題
 - 🔧 改用 `cv2.imencode()` + 標準檔案操作，完全支援 Unicode 路徑
 - ✅ 解決「截圖已儲存」但檔案實際未建立的問題
 - 📚 更新版本資訊和相關文件
 
 ### v1.4.1 (2025-01-26)
+
 - ✨ 新增瀏覽器靜音功能
 - 🔇 自動將所有瀏覽器實例設為靜音，避免遊戲聲音干擾
 - 🔧 在 Chrome 選項中加入 `profile.content_settings.exceptions.sound` 設定
 - 📚 更新相關程式碼註釋
 
 ### v1.4.0 (2025-01-25)
+
 - ✨ 優化免費遊戲結算流程，調整點擊時機和間隔
-- 🎮 改進結算畫面跳過功能：3秒後開始點擊，每次間隔3秒，共點擊5次
+- 🎮 改進結算畫面跳過功能：3 秒後開始點擊，每次間隔 3 秒，共點擊 5 次
 - 🐛 修正點擊過快導致結算畫面未出現的問題
 - 📚 更新相關日誌訊息，更清楚說明功能用途
 
 ### v1.3.0 (2025-01-25)
+
 - ✨ 新增自動旋轉功能，支援設定 10、50、100 次自動旋轉
 - 🎮 改進遊戲控制介面，添加 `a` 指令控制自動旋轉
 - 📚 更新使用指南和命令說明文件
 
 ### v1.2.0 (2025-01-23)
+
 - ✨ 新增專案啟動前自動清除 chromedriver 快取功能
 - 🔧 改善程式啟動穩定性，避免殘留程序佔用資源
 - 📚 更新相關文件說明
 
 ### v1.1.0 (2025-01-22)
+
 - 🐛 修正 OpenCV 無法讀取中文路徑圖片的問題
 - 🔧 程式碼優化與重構
 - 📚 完善文件與註釋
 - ⚡ 效能改進
 
 ### v1.0.0 (2025-01-22)
+
 - ✨ 初始版本發布
 - 🚀 多瀏覽器並行控制
 - 🔍 圖片識別與自動化
