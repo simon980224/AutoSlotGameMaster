@@ -68,6 +68,7 @@ AutoSlotGameMaster/
 ├── img/
 │   ├── lobby_login.png      # 登入畫面模板
 │   ├── lobby_confirm.png    # 確認按鈕模板
+│   ├── error_message.png    # 錯誤訊息模板（v1.6.0 新增）
 │   └── bet_size/            # 金額識別模板（73 張圖片）
 │       ├── 0.4.png
 │       ├── 0.8.png
@@ -253,6 +254,7 @@ dist/
 ├── img/
 │   ├── lobby_login.png
 │   ├── lobby_confirm.png
+│   ├── error_message.png
 │   └── bet_size/
 └── lib/
     ├── 用戶資料.txt
@@ -277,6 +279,13 @@ class Constants:
     # 圖片檢測
     MATCH_THRESHOLD = 0.8  # 匹配閾值（0-1）
     DETECTION_INTERVAL = 1.0  # 檢測間隔（秒）
+
+    # 錯誤檢測（v1.6.0 新增）
+    ERROR_MESSAGE_LEFT_X = 240  # 左側錯誤訊息區域 X 座標
+    ERROR_MESSAGE_LEFT_Y = 190  # 左側錯誤訊息區域 Y 座標
+    ERROR_MESSAGE_RIGHT_X = 360  # 右側錯誤訊息區域 X 座標
+    ERROR_MESSAGE_RIGHT_Y = 190  # 右側錯誤訊息區域 Y 座標
+    ERROR_MESSAGE_PERSIST_SECONDS = 1  # 錯誤訊息持續秒數閾值
 
     # 視窗配置
     DEFAULT_WINDOW_WIDTH = 600
@@ -428,6 +437,16 @@ google-chrome --version  # Linux
 - 常量使用 `UPPER_CASE`
 
 ## 📝 版本歷史
+
+### v1.6.0 (2025-12-01)
+
+- ✨ **新增錯誤訊息檢測與自動重啟機制**
+- 🔍 雙區域檢測：同時檢測左側 `(240, 190)` 和右側 `(360, 190)` 的錯誤訊息
+- ⚡ 快速響應：錯誤訊息持續 1 秒即觸發自動重啟（可避免長時間卡住）
+- 🔄 智慧重啟流程：自動重新整理 → 檢測 lobby_login → 點擊 → 等待 lobby_confirm
+- 📊 批次處理：同步收集所有瀏覽器錯誤狀態，批次執行重啟操作
+- 🎯 精準檢測：只檢測需要重啟的瀏覽器，不影響正常運行的瀏覽器
+- 📝 優化日誌：合併顯示相同狀態，減少冗餘輸出，提升可讀性
 
 ### v1.5.0 (2025-01-29)
 

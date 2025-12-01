@@ -13,10 +13,11 @@
 - 完善的錯誤處理與重試機制
 
 作者: 凡臻科技
-版本: 1.5.0
+版本: 1.6.0
 Python: 3.8+
 
 版本歷史:
+- v1.6.0: 優化登入流程（新增錯誤訊息檢測與自動重啟機制）
 - v1.5.0: 統一管理所有魔法數字（視窗尺寸、座標、等待時間、重試次數等）
 - v1.4.3: 優化瀏覽器網路設定（啟用 QUIC、TCP Fast Open、NetworkService）
 - v1.4.2: 修正 Windows 中文路徑截圖儲存失敗問題
@@ -255,6 +256,7 @@ class Constants:
     IMAGE_DIR = "img"
     LOBBY_LOGIN = "lobby_login.png"
     LOBBY_CONFIRM = "lobby_confirm.png"
+    ERROR_MESSAGE = "error_message.png"
     MATCH_THRESHOLD = 0.8  # 圖片匹配閾值
     DETECTION_INTERVAL = 1.0  # 檢測間隔（秒）
     MAX_DETECTION_ATTEMPTS = 60  # 最大檢測次數
@@ -308,6 +310,7 @@ class Constants:
     BETSIZE_READ_MAX_RETRIES = 2       # 讀取金額最大重試次數
     FREE_GAME_SETTLE_CLICK_COUNT = 5   # 免費遊戲結算點擊次數
     DETECTION_WAIT_MAX_ATTEMPTS = 20   # 檢測等待最大嘗試次數
+    LOBBY_CONFIRM_CHECK_ATTEMPTS = 3   # lobby_confirm 檢測嘗試次數（之後檢查錯誤）
     
     # 視窗排列配置
     DEFAULT_WINDOW_WIDTH = 600
@@ -323,10 +326,11 @@ class Constants:
     BETSIZE_DISPLAY_Y = 380          # 金額顯示位置 Y 座標
 
     # 錯誤訊息圖片識別座標（基於預設視窗大小）
-    LEFT_ERROR_MESSAGE_X = 240  # 左側錯誤訊息區域 X 座標
-    LEFT_ERROR_MESSAGE_Y = 190  # 左側錯誤訊息區域 Y 座標
-    RIGHT_ERROR_MESSAGE_X = 360  # 右側錯誤訊息區域 X 座標
-    RIGHT_ERROR_MESSAGE_Y = 190   # 右側錯誤訊息區域 Y 座標
+    ERROR_MESSAGE_LEFT_X = 240  # 左側錯誤訊息區域 X 座標
+    ERROR_MESSAGE_LEFT_Y = 190  # 左側錯誤訊息區域 Y 座標
+    ERROR_MESSAGE_RIGHT_X = 360  # 右側錯誤訊息區域 X 座標
+    ERROR_MESSAGE_RIGHT_Y = 190   # 右側錯誤訊息區域 Y 座標
+    ERROR_MESSAGE_PERSIST_SECONDS = 1  # 錯誤訊息持續秒數閾值
 
     # 截圖裁切範圍（像素）
     BETSIZE_CROP_MARGIN_X = 50  # 金額模板水平裁切邊距
@@ -2354,6 +2358,69 @@ class ImageDetector:
         except Exception as e:
             self.logger.error(f"瀏覽器圖片檢測失敗 {e}")
             return None
+    
+    def detect_error_message_in_region(
+        self, 
+        driver: WebDriver, 
+        x: int, 
+        y: int, 
+        margin: int = Constants.TEMPLATE_CROP_MARGIN,
+        threshold: float = Constants.MATCH_THRESHOLD
+    ) -> bool:
+        """檢測指定區域是否包含錯誤訊息。
+        
+        Args:
+            driver: WebDriver 實例
+            x: 區域中心 X 座標
+            y: 區域中心 Y 座標
+            margin: 裁切邊距
+            threshold: 匹配閾值
+            
+        Returns:
+            是否檢測到錯誤訊息
+        """
+        try:
+            # 截取全螢幕
+            screenshot = self.capture_screenshot(driver)
+            if screenshot is None:
+                return False
+            
+            # 獲取截圖尺寸
+            height, width = screenshot.shape[:2]
+            
+            # 計算裁切範圍
+            crop_left = max(0, x - margin)
+            crop_top = max(0, y - margin)
+            crop_right = min(width, x + margin)
+            crop_bottom = min(height, y + margin)
+            
+            # 裁切區域
+            cropped = screenshot[crop_top:crop_bottom, crop_left:crop_right]
+            
+            # 讀取錯誤訊息模板
+            template_path = self.get_template_path(Constants.ERROR_MESSAGE)
+            if not template_path.exists():
+                self.logger.debug(f"錯誤訊息模板不存在: {template_path}")
+                return False
+            
+            template = cv2_imread_unicode(template_path)
+            if template is None:
+                self.logger.debug("無法讀取錯誤訊息模板")
+                return False
+            
+            # 轉換為灰階
+            cropped_gray = cv2.cvtColor(cropped, cv2.COLOR_BGR2GRAY)
+            template_gray = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
+            
+            # 模板匹配
+            result = cv2.matchTemplate(cropped_gray, template_gray, cv2.TM_CCOEFF_NORMED)
+            _, max_val, _, _ = cv2.minMaxLoc(result)
+            
+            return max_val >= threshold
+            
+        except Exception as e:
+            self.logger.debug(f"錯誤訊息檢測失敗: {e}")
+            return False
 
 
 # ============================================================================
@@ -3086,7 +3153,7 @@ class AutoSlotGameApp:
         """
         self.logger.info("")
         self.logger.info("━" * 60)
-        self.logger.info("金富翁遊戲自動化系統 v1.5.0")
+        self.logger.info("金富翁遊戲自動化系統 v1.6.0")
         self.logger.info("━" * 60)
         self.logger.info("")
         
@@ -3470,7 +3537,7 @@ class AutoSlotGameApp:
         self._wait_for_image_disappear(template_name)
     
     def _handle_lobby_confirm(self, reference_browser: BrowserContext) -> None:
-        """處理 lobby_confirm 的檢測與點擊。
+        """處理 lobby_confirm 的檢測與點擊，包含錯誤訊息檢測和自動重啟。
         
         Args:
             reference_browser: 參考瀏覽器
@@ -3486,8 +3553,8 @@ class AutoSlotGameApp:
             else:
                 self._prompt_capture_template(reference_browser, template_name, display_name)
         
-        # 2. 持續檢測直到所有瀏覽器都找到圖片
-        detection_results = self._continuous_detect_until_found(template_name, display_name)
+        # 2. 持續檢測直到所有瀏覽器都找到圖片（包含錯誤處理）
+        self._wait_for_lobby_confirm_with_error_handling()
         
         # 3. 計算點擊座標（確認按鈕）
         if hasattr(self, 'last_canvas_rect') and self.last_canvas_rect:
@@ -3520,6 +3587,258 @@ class AutoSlotGameApp:
         # 6. 所有瀏覽器都成功進入遊戲
         self.logger.info("✓ 所有瀏覽器已準備就緒")
         time.sleep(Constants.DETECTION_COMPLETE_WAIT)
+    
+    def _wait_for_lobby_confirm_with_error_handling(self) -> None:
+        """等待 lobby_confirm 出現，包含錯誤訊息檢測和自動重啟邏輯（同步版本）。
+        
+        流程：
+        1. 同步檢測所有瀏覽器的 lobby_confirm（前 3 次）
+        2. 如果未找到，同步檢測錯誤訊息
+        3. 如果檢測到錯誤且持續超過 3 秒，同步重啟所有錯誤的瀏覽器
+        4. 重複直到所有瀏覽器都顯示 lobby_confirm
+        """
+        template_name = Constants.LOBBY_CONFIRM
+        total_browsers = len(self.browser_contexts)
+        browser_states = {}  # 記錄每個瀏覽器的狀態
+        
+        # 初始化瀏覽器狀態
+        for i in range(1, total_browsers + 1):
+            browser_states[i] = {
+                'found_confirm': False,
+                'error_start_time': None,
+                'lobby_confirm_attempts': 0
+            }
+        
+        self.logger.info("開始檢測 lobby_confirm（包含錯誤訊息監控）")
+        last_progress = -1
+        
+        while True:
+            # 同步檢測所有瀏覽器
+            pending_browsers = [i for i in range(1, total_browsers + 1) if not browser_states[i]['found_confirm']]
+            
+            if not pending_browsers:
+                self.logger.info("✓ 所有瀏覽器都已檢測到 lobby_confirm")
+                break
+            
+            # 同步檢測 lobby_confirm
+            current_time = time.time()
+            errors_to_restart = []
+            new_errors = []
+            
+            for i in pending_browsers:
+                context = self.browser_contexts[i - 1]
+                browser_states[i]['lobby_confirm_attempts'] += 1
+                
+                try:
+                    # 檢測 lobby_confirm
+                    result = self.image_detector.detect_in_browser(context.driver, template_name)
+                    
+                    if result:
+                        # 找到 lobby_confirm
+                        browser_states[i]['found_confirm'] = True
+                        browser_states[i]['error_start_time'] = None
+                        continue
+                    
+                    # 前 3 次不檢查錯誤訊息
+                    if browser_states[i]['lobby_confirm_attempts'] <= Constants.LOBBY_CONFIRM_CHECK_ATTEMPTS:
+                        continue
+                    
+                    # 檢測錯誤訊息
+                    left_error = self.image_detector.detect_error_message_in_region(
+                        context.driver,
+                        Constants.ERROR_MESSAGE_LEFT_X,
+                        Constants.ERROR_MESSAGE_LEFT_Y,
+                        Constants.TEMPLATE_CROP_MARGIN
+                    )
+                    
+                    right_error = self.image_detector.detect_error_message_in_region(
+                        context.driver,
+                        Constants.ERROR_MESSAGE_RIGHT_X,
+                        Constants.ERROR_MESSAGE_RIGHT_Y,
+                        Constants.TEMPLATE_CROP_MARGIN
+                    )
+                    
+                    # 兩個區域都檢測到錯誤訊息
+                    if left_error and right_error:
+                        if browser_states[i]['error_start_time'] is None:
+                            # 第一次檢測到錯誤
+                            browser_states[i]['error_start_time'] = current_time
+                            new_errors.append(i)
+                        else:
+                            # 持續檢測到錯誤
+                            elapsed = current_time - browser_states[i]['error_start_time']
+                            if elapsed >= Constants.ERROR_MESSAGE_PERSIST_SECONDS:
+                                errors_to_restart.append(i)
+                    else:
+                        # 未檢測到錯誤，重置計時
+                        if browser_states[i]['error_start_time'] is not None:
+                            browser_states[i]['error_start_time'] = None
+                
+                except Exception as e:
+                    self.logger.error(f"瀏覽器 {i} 檢測過程發生錯誤: {e}")
+            
+            # 輸出新檢測到的錯誤（合併顯示）
+            if new_errors:
+                self.logger.warning(f"檢測到錯誤訊息: 瀏覽器 {', '.join(map(str, new_errors))}")
+            
+            # 同步重啟所有需要重啟的瀏覽器
+            if errors_to_restart:
+                self.logger.error(f"執行重啟: 瀏覽器 {', '.join(map(str, errors_to_restart))}")
+                self._restart_browsers_from_lobby_login(errors_to_restart, browser_states)
+            
+            # 顯示進度（只在變化時輸出）
+            found_count = sum(1 for state in browser_states.values() if state['found_confirm'])
+            if found_count != last_progress:
+                if found_count > 0:
+                    self.logger.info(f"進度: {found_count}/{total_browsers} 個瀏覽器已就緒")
+                last_progress = found_count
+            
+            time.sleep(Constants.DETECTION_INTERVAL)
+    
+    def _restart_browsers_from_lobby_login(self, browser_indices: List[int], browser_states: dict) -> None:
+        """同步重啟多個瀏覽器並從 lobby_login 階段開始檢測。
+        
+        Args:
+            browser_indices: 需要重啟的瀏覽器索引列表
+            browser_states: 瀏覽器狀態字典
+        """
+        if not browser_indices:
+            return
+        
+        browser_list = ', '.join(map(str, browser_indices))
+        
+        # 1. 同步重新整理所有錯誤的瀏覽器
+        def refresh_operation(context: BrowserContext, index: int, total: int) -> bool:
+            """重新整理頁面"""
+            if index not in browser_indices:
+                return True
+            try:
+                context.driver.refresh()
+                return True
+            except Exception as e:
+                self.logger.error(f"瀏覽器 {index} 重新整理失敗: {e}")
+                return False
+        
+        # 靜默執行重新整理
+        with ThreadPoolExecutor(max_workers=len(browser_indices)) as executor:
+            futures = []
+            for i in browser_indices:
+                context = self.browser_contexts[i - 1]
+                future = executor.submit(refresh_operation, context, i, len(self.browser_contexts))
+                futures.append(future)
+            
+            for future in as_completed(futures):
+                future.result()
+        
+        # 2. 等待頁面載入後開始檢測 lobby_login
+        time.sleep(Constants.DEFAULT_WAIT_SECONDS)
+        
+        # 3. 只檢測需要重啟的瀏覽器
+        template_name = Constants.LOBBY_LOGIN
+        attempt = 0
+        
+        while True:
+            attempt += 1
+            all_found = True
+            
+            for i in browser_indices:
+                context = self.browser_contexts[i - 1]
+                try:
+                    result = self.image_detector.detect_in_browser(context.driver, template_name)
+                    if not result:
+                        all_found = False
+                        break
+                except Exception:
+                    all_found = False
+                    break
+            
+            if all_found:
+                self.logger.info(f"✓ 瀏覽器 {browser_list} 已檢測到 lobby_login")
+                break
+            
+            # 每 N 次檢測顯示一次進度
+            if attempt % Constants.DETECTION_PROGRESS_INTERVAL == 0:
+                found_count = sum(
+                    1 for i in browser_indices 
+                    if self.image_detector.detect_in_browser(
+                        self.browser_contexts[i - 1].driver, 
+                        template_name
+                    ) is not None
+                )
+                self.logger.info(f"檢測中... ({found_count}/{len(browser_indices)})")
+            
+            time.sleep(Constants.DETECTION_INTERVAL)
+        
+        # 4. 計算點擊座標並同步點擊
+        if hasattr(self, 'last_canvas_rect') and self.last_canvas_rect:
+            rect = self.last_canvas_rect
+            start_x = rect["x"] + rect["w"] * Constants.LOBBY_LOGIN_BUTTON_X_RATIO
+            start_y = rect["y"] + rect["h"] * Constants.LOBBY_LOGIN_BUTTON_Y_RATIO
+            
+            time.sleep(Constants.TEMPLATE_CAPTURE_WAIT)
+            
+            # 靜默執行點擊
+            with ThreadPoolExecutor(max_workers=len(browser_indices)) as executor:
+                futures = []
+                for i in browser_indices:
+                    context = self.browser_contexts[i - 1]
+                    future = executor.submit(
+                        lambda ctx: self._click_coordinate(ctx.driver, start_x, start_y),
+                        context
+                    )
+                    futures.append(future)
+                
+                for future in as_completed(futures):
+                    try:
+                        future.result()
+                    except Exception as e:
+                        self.logger.debug(f"點擊失敗: {e}")
+        
+        # 5. 等待 lobby_login 消失
+        time.sleep(Constants.DEFAULT_WAIT_SECONDS)
+        
+        # 6. 重置狀態
+        for i in browser_indices:
+            browser_states[i]['error_start_time'] = None
+            browser_states[i]['lobby_confirm_attempts'] = 0
+        
+        self.logger.info(f"✓ 瀏覽器 {browser_list} 已重啟並等待 lobby_confirm")
+    
+    def _restart_browser_to_game(self, context: BrowserContext, index: int) -> None:
+        """重新啟動瀏覽器到遊戲頁面。
+        
+        Args:
+            context: 瀏覽器上下文
+            index: 瀏覽器索引
+        """
+        try:
+            driver = context.driver
+            username = context.credential.username
+            
+            self.logger.info(f"瀏覽器 {index} ({username}) 開始重新整理...")
+            
+            # 重新整理頁面
+            driver.refresh()
+            
+            # 等待頁面載入
+            time.sleep(Constants.DEFAULT_WAIT_SECONDS)
+            
+            # 切換到 iframe
+            try:
+                iframe = WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((By.ID, Constants.GAME_IFRAME))
+                )
+                driver.switch_to.frame(iframe)
+                self.logger.info(f"瀏覽器 {index} 已切換到遊戲 iframe")
+            except Exception as e:
+                self.logger.error(f"瀏覽器 {index} 切換 iframe 失敗: {e}")
+                raise
+            
+            self.logger.info(f"✓ 瀏覽器 {index} ({username}) 重啟完成，等待 lobby_confirm")
+            
+        except Exception as e:
+            self.logger.error(f"瀏覽器 {index} 重啟失敗: {e}")
+            raise
     
     def _click_coordinate(self, driver: WebDriver, x: float, y: float) -> None:
         """點擊指定座標。

@@ -8,10 +8,11 @@
 
 ## 版本資訊
 
-**目前版本**: v1.5.0
+**目前版本**: v1.6.0
 
 **更新內容**:
 
+- v1.6.0: 新增 lobby_confirm 錯誤訊息檢測與自動重啟機制（雙區域檢測、1 秒閾值觸發）
 - v1.5.0: 統一管理所有魔法數字（視窗尺寸、座標、等待時間、重試次數等），提升程式碼可維護性
 - v1.4.3: 優化瀏覽器網路設定（啟用 QUIC、TCP Fast Open、NetworkService）
 - v1.4.2: 修正 Windows 中文路徑截圖儲存失敗問題
@@ -59,12 +60,16 @@ Chrome (使用本地 Proxy)
 
 ### 5. 圖片識別流程
 
-- **模板位置**: `img/lobby_login.png`, `img/lobby_confirm.png`, `img/bet_size/*.png`
+- **模板位置**: `img/lobby_login.png`, `img/lobby_confirm.png`, `img/error_message.png`（v1.6.0 新增）, `img/bet_size/*.png`
 - **檢測方法**: OpenCV `cv2.matchTemplate()` with `TM_CCOEFF_NORMED`
 - **閾值**: `Constants.MATCH_THRESHOLD = 0.8`
 - **座標計算**: 使用 Canvas 區域比例計算點擊座標
   - `LOBBY_LOGIN_BUTTON_X_RATIO = 0.55`, `LOBBY_LOGIN_BUTTON_Y_RATIO = 1.2`
   - `LOBBY_CONFIRM_BUTTON_X_RATIO = 0.78`, `LOBBY_CONFIRM_BUTTON_Y_RATIO = 1.15`
+- **錯誤檢測**（v1.6.0 新增）:
+  - 雙區域檢測：左側 `(240, 190)` 和右側 `(360, 190)`
+  - 時間閾值：錯誤訊息持續 1 秒即觸發自動重啟
+  - 自動重啟流程：重新整理 → 檢測 lobby_login → 點擊 → 等待 lobby_confirm
 
 ### 6. 資料結構（不可變）
 
@@ -93,6 +98,7 @@ Chrome (使用本地 Proxy)
 - `FREE_GAME_CLICK_WAIT = 2` - 免費遊戲點擊間隔
 - `FREE_GAME_SETTLE_INITIAL_WAIT = 3` - 免費遊戲結算初始等待
 - `PROXY_SERVER_START_WAIT = 1` - Proxy 伺服器啟動等待
+- `ERROR_MESSAGE_PERSIST_SECONDS = 1` - 錯誤訊息持續秒數閾值（v1.6.0 新增）
 
 #### 重試與循環配置
 
