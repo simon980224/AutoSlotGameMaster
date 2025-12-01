@@ -321,7 +321,13 @@ class Constants:
     BETSIZE_DECREASE_BUTTON_Y = 370  # 減少金額按鈕 Y 座標
     BETSIZE_DISPLAY_X = 400          # 金額顯示位置 X 座標
     BETSIZE_DISPLAY_Y = 380          # 金額顯示位置 Y 座標
-    
+
+    # 錯誤訊息圖片識別座標（基於預設視窗大小）
+    LEFT_ERROR_MESSAGE_X = 240  # 左側錯誤訊息區域 X 座標
+    LEFT_ERROR_MESSAGE_Y = 190  # 左側錯誤訊息區域 Y 座標
+    RIGHT_ERROR_MESSAGE_X = 360  # 右側錯誤訊息區域 X 座標
+    RIGHT_ERROR_MESSAGE_Y = 190   # 右側錯誤訊息區域 Y 座標
+
     # 截圖裁切範圍（像素）
     BETSIZE_CROP_MARGIN_X = 50  # 金額模板水平裁切邊距
     BETSIZE_CROP_MARGIN_Y = 20  # 金額模板垂直裁切邊距
