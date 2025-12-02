@@ -81,12 +81,15 @@ __all__ = [
     # 日誌類別
     'LogLevel',
     'LoggerFactory',
+    # 輔助類別
+    'BrowserHelper',
     # 主要類別
     'ConfigReader',
     'BrowserManager',
     'LocalProxyServerManager',
     'SyncBrowserOperator',
     'ImageDetector',
+    'BrowserRecoveryManager',
     'GameControlCenter',
     'AutoSlotGameApp',
 ]
@@ -1645,22 +1648,7 @@ class SyncBrowserOperator:
             操作結果列表
         """
         def press_space_operation(context: BrowserContext, index: int, total: int) -> bool:
-            # 按下空白鍵
-            context.driver.execute_cdp_cmd("Input.dispatchKeyEvent", {
-                "type": "keyDown",
-                "key": " ",
-                "code": "Space",
-                "windowsVirtualKeyCode": 32,
-                "nativeVirtualKeyCode": 32
-            })
-            # 釋放空白鍵
-            context.driver.execute_cdp_cmd("Input.dispatchKeyEvent", {
-                "type": "keyUp",
-                "key": " ",
-                "code": "Space",
-                "windowsVirtualKeyCode": 32,
-                "nativeVirtualKeyCode": 32
-            })
+            BrowserHelper.execute_cdp_space_key(context.driver)
             return True
         
         return self.execute_sync(
@@ -1689,53 +1677,32 @@ class SyncBrowserOperator:
             driver = context.driver
             
             # === 第一次點擊（免費遊戲區域） ===
-            freegame_x = canvas_rect["x"] + canvas_rect["w"] * Constants.BUY_FREE_GAME_BUTTON_X_RATIO
-            freegame_y = canvas_rect["y"] + canvas_rect["h"] * Constants.BUY_FREE_GAME_BUTTON_Y_RATIO
+            freegame_x, freegame_y = BrowserHelper.calculate_click_position(
+                canvas_rect,
+                Constants.BUY_FREE_GAME_BUTTON_X_RATIO,
+                Constants.BUY_FREE_GAME_BUTTON_Y_RATIO
+            )
             
             self.logger.info(f"[{username}] 點擊免費遊戲區域 ({freegame_x:.1f}, {freegame_y:.1f})...")
-            for event_type in ["mousePressed", "mouseReleased"]:
-                driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
-                    "type": event_type,
-                    "x": freegame_x,
-                    "y": freegame_y,
-                    "button": "left",
-                    "clickCount": 1
-                })
+            BrowserHelper.execute_cdp_click(driver, freegame_x, freegame_y)
             time.sleep(Constants.FREE_GAME_CLICK_WAIT)
             
             # === 第二次點擊（確認按鈕） ===
-            confirm_x = canvas_rect["x"] + canvas_rect["w"] * Constants.BUY_FREE_GAME_CONFIRM_X_RATIO
-            confirm_y = canvas_rect["y"] + canvas_rect["h"] * Constants.BUY_FREE_GAME_CONFIRM_Y_RATIO
+            confirm_x, confirm_y = BrowserHelper.calculate_click_position(
+                canvas_rect,
+                Constants.BUY_FREE_GAME_CONFIRM_X_RATIO,
+                Constants.BUY_FREE_GAME_CONFIRM_Y_RATIO
+            )
             
             self.logger.info(f"[{username}] 點擊確認按鈕 ({confirm_x:.1f}, {confirm_y:.1f})...")
-            for event_type in ["mousePressed", "mouseReleased"]:
-                driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
-                    "type": event_type,
-                    "x": confirm_x,
-                    "y": confirm_y,
-                    "button": "left",
-                    "clickCount": 1
-                })
+            BrowserHelper.execute_cdp_click(driver, confirm_x, confirm_y)
             
             # === 購買完成後等待並自動按空白鍵 ===
             self.logger.info(f"[{username}] 購買完成，等待 {Constants.BUY_FREE_GAME_WAIT_SECONDS} 秒後開始遊戲...")
             time.sleep(Constants.BUY_FREE_GAME_WAIT_SECONDS)
             
             self.logger.info(f"[{username}] 按下空白鍵開始遊戲...")
-            driver.execute_cdp_cmd("Input.dispatchKeyEvent", {
-                "type": "keyDown",
-                "key": " ",
-                "code": "Space",
-                "windowsVirtualKeyCode": 32,
-                "nativeVirtualKeyCode": 32
-            })
-            driver.execute_cdp_cmd("Input.dispatchKeyEvent", {
-                "type": "keyUp",
-                "key": " ",
-                "code": "Space",
-                "windowsVirtualKeyCode": 32,
-                "nativeVirtualKeyCode": 32
-            })
+            BrowserHelper.execute_cdp_space_key(driver)
             
             self.logger.info(f"[{username}] 免費遊戲購買流程完成！")
             return True
@@ -1767,49 +1734,27 @@ class SyncBrowserOperator:
             
             try:
                 # === 第一次點擊（免費遊戲區域） ===
-                freegame_x = canvas_rect["x"] + canvas_rect["w"] * Constants.BUY_FREE_GAME_BUTTON_X_RATIO
-                freegame_y = canvas_rect["y"] + canvas_rect["h"] * Constants.BUY_FREE_GAME_BUTTON_Y_RATIO
+                freegame_x, freegame_y = BrowserHelper.calculate_click_position(
+                    canvas_rect,
+                    Constants.BUY_FREE_GAME_BUTTON_X_RATIO,
+                    Constants.BUY_FREE_GAME_BUTTON_Y_RATIO
+                )
                 
-                for event_type in ["mousePressed", "mouseReleased"]:
-                    driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
-                        "type": event_type,
-                        "x": freegame_x,
-                        "y": freegame_y,
-                        "button": "left",
-                        "clickCount": 1
-                    })
+                BrowserHelper.execute_cdp_click(driver, freegame_x, freegame_y)
                 time.sleep(Constants.FREE_GAME_CLICK_WAIT)
                 
                 # === 第二次點擊（確認按鈕） ===
-                confirm_x = canvas_rect["x"] + canvas_rect["w"] * Constants.BUY_FREE_GAME_CONFIRM_X_RATIO
-                confirm_y = canvas_rect["y"] + canvas_rect["h"] * Constants.BUY_FREE_GAME_CONFIRM_Y_RATIO
+                confirm_x, confirm_y = BrowserHelper.calculate_click_position(
+                    canvas_rect,
+                    Constants.BUY_FREE_GAME_CONFIRM_X_RATIO,
+                    Constants.BUY_FREE_GAME_CONFIRM_Y_RATIO
+                )
                 
-                for event_type in ["mousePressed", "mouseReleased"]:
-                    driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
-                        "type": event_type,
-                        "x": confirm_x,
-                        "y": confirm_y,
-                        "button": "left",
-                        "clickCount": 1
-                    })
+                BrowserHelper.execute_cdp_click(driver, confirm_x, confirm_y)
                 
                 # === 購買完成後等待並自動按空白鍵 ===
                 time.sleep(Constants.BUY_FREE_GAME_WAIT_SECONDS)
-                
-                driver.execute_cdp_cmd("Input.dispatchKeyEvent", {
-                    "type": "keyDown",
-                    "key": " ",
-                    "code": "Space",
-                    "windowsVirtualKeyCode": 32,
-                    "nativeVirtualKeyCode": 32
-                })
-                driver.execute_cdp_cmd("Input.dispatchKeyEvent", {
-                    "type": "keyUp",
-                    "key": " ",
-                    "code": "Space",
-                    "windowsVirtualKeyCode": 32,
-                    "nativeVirtualKeyCode": 32
-                })
+                BrowserHelper.execute_cdp_space_key(driver)
                 
                 return True
                 
@@ -2037,29 +1982,19 @@ class SyncBrowserOperator:
             x: X 座標 (基於預設視窗大小)
             y: Y 座標 (基於預設視窗大小)
         """
+        # 截取畫面獲取實際尺寸
         screenshot = driver.get_screenshot_as_png()
         screenshot_img = Image.open(io.BytesIO(screenshot))
-        
-        # 獲取實際截圖尺寸
         image_width, image_height = screenshot_img.size
         
-        # 計算相對座標比例（基於預設視窗大小）
-        x_ratio = x / Constants.DEFAULT_WINDOW_WIDTH
-        y_ratio = y / Constants.DEFAULT_WINDOW_HEIGHT
+        # 計算縮放後的實際座標
+        actual_x, actual_y = BrowserHelper.calculate_scaled_position(
+            x, y,
+            image_width, image_height
+        )
         
-        # 應用到實際截圖尺寸
-        actual_x = int(image_width * x_ratio)
-        actual_y = int(image_height * y_ratio)
-        
-        # 使用轉換後的實際座標進行點擊
-        for event_type in ["mousePressed", "mouseReleased"]:
-            driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
-                "type": event_type,
-                "x": actual_x,
-                "y": actual_y,
-                "button": "left",
-                "clickCount": 1
-            })
+        # 執行點擊
+        BrowserHelper.execute_cdp_click(driver, actual_x, actual_y)
     
     def adjust_betsize(self, driver: WebDriver, target_amount: float, max_attempts: int = None) -> bool:
         """調整下注金額到目標值（優化版）。
@@ -2202,6 +2137,108 @@ class SyncBrowserOperator:
         except Exception as e:
             self.logger.error(f"截取金額模板失敗: {e}")
             return False
+
+
+# ============================================================================
+# 瀏覽器操作輔助類
+# ============================================================================
+
+class BrowserHelper:
+    """瀏覽器操作輔助類別。
+    
+    提供常用的瀏覽器操作方法，避免程式碼重複。
+    包括 CDP 點擊、座標計算、按鍵模擬等。
+    """
+    
+    @staticmethod
+    def execute_cdp_click(driver: WebDriver, x: float, y: float) -> None:
+        """使用 Chrome DevTools Protocol 執行點擊操作。
+        
+        Args:
+            driver: WebDriver 實例
+            x: X 座標
+            y: Y 座標
+        """
+        for event_type in ["mousePressed", "mouseReleased"]:
+            driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
+                "type": event_type,
+                "x": x,
+                "y": y,
+                "button": "left",
+                "clickCount": 1
+            })
+    
+    @staticmethod
+    def execute_cdp_space_key(driver: WebDriver) -> None:
+        """使用 Chrome DevTools Protocol 按下空白鍵。
+        
+        Args:
+            driver: WebDriver 實例
+        """
+        # 按下空白鍵
+        driver.execute_cdp_cmd("Input.dispatchKeyEvent", {
+            "type": "keyDown",
+            "key": " ",
+            "code": "Space",
+            "windowsVirtualKeyCode": 32,
+            "nativeVirtualKeyCode": 32
+        })
+        # 釋放空白鍵
+        driver.execute_cdp_cmd("Input.dispatchKeyEvent", {
+            "type": "keyUp",
+            "key": " ",
+            "code": "Space",
+            "windowsVirtualKeyCode": 32,
+            "nativeVirtualKeyCode": 32
+        })
+    
+    @staticmethod
+    def calculate_click_position(
+        canvas_rect: Dict[str, float],
+        x_ratio: float,
+        y_ratio: float
+    ) -> Tuple[float, float]:
+        """根據 Canvas 區域和比例計算點擊座標。
+        
+        Args:
+            canvas_rect: Canvas 區域資訊 {"x", "y", "w", "h"}
+            x_ratio: X 座標比例
+            y_ratio: Y 座標比例
+            
+        Returns:
+            (x, y) 實際座標
+        """
+        x = canvas_rect["x"] + canvas_rect["w"] * x_ratio
+        y = canvas_rect["y"] + canvas_rect["h"] * y_ratio
+        return x, y
+    
+    @staticmethod
+    def calculate_scaled_position(
+        base_x: float,
+        base_y: float,
+        screenshot_width: int,
+        screenshot_height: int,
+        base_width: int = Constants.DEFAULT_WINDOW_WIDTH,
+        base_height: int = Constants.DEFAULT_WINDOW_HEIGHT
+    ) -> Tuple[int, int]:
+        """根據視窗大小計算縮放後的座標。
+        
+        Args:
+            base_x: 基準 X 座標（基於預設視窗大小）
+            base_y: 基準 Y 座標（基於預設視窗大小）
+            screenshot_width: 實際截圖寬度
+            screenshot_height: 實際截圖高度
+            base_width: 基準視窗寬度
+            base_height: 基準視窗高度
+            
+        Returns:
+            (actual_x, actual_y) 實際座標
+        """
+        x_ratio = base_x / base_width
+        y_ratio = base_y / base_height
+        actual_x = int(screenshot_width * x_ratio)
+        actual_y = int(screenshot_height * y_ratio)
+        return actual_x, actual_y
 
 
 # ============================================================================
@@ -2424,6 +2461,180 @@ class ImageDetector:
 
 
 # ============================================================================
+# 瀏覽器恢復管理器
+# ============================================================================
+
+class BrowserRecoveryManager:
+    """瀏覽器恢復管理器。
+    
+    負責處理瀏覽器錯誤檢測、自動重啟等恢復操作。
+    提供模組化的錯誤處理流程。
+    """
+    
+    def __init__(
+        self,
+        image_detector: 'ImageDetector',
+        browser_operator: 'SyncBrowserOperator',
+        logger: Optional[logging.Logger] = None
+    ):
+        """初始化恢復管理器。
+        
+        Args:
+            image_detector: 圖片檢測器
+            browser_operator: 瀏覽器操作器
+            logger: 日誌記錄器
+        """
+        self.image_detector = image_detector
+        self.browser_operator = browser_operator
+        self.logger = logger or LoggerFactory.get_logger()
+    
+    def detect_error_message(self, driver: WebDriver) -> bool:
+        """檢測瀏覽器中是否出現錯誤訊息（雙區域檢測）。
+        
+        Args:
+            driver: WebDriver 實例
+            
+        Returns:
+            是否檢測到錯誤訊息
+        """
+        # 檢測左側區域
+        left_error = self.image_detector.detect_error_message_in_region(
+            driver,
+            Constants.ERROR_MESSAGE_LEFT_X,
+            Constants.ERROR_MESSAGE_LEFT_Y,
+            Constants.TEMPLATE_CROP_MARGIN
+        )
+        
+        # 檢測右側區域
+        right_error = self.image_detector.detect_error_message_in_region(
+            driver,
+            Constants.ERROR_MESSAGE_RIGHT_X,
+            Constants.ERROR_MESSAGE_RIGHT_Y,
+            Constants.TEMPLATE_CROP_MARGIN
+        )
+        
+        # 兩個區域都檢測到才算有錯誤
+        return left_error and right_error
+    
+    def refresh_browser(self, context: BrowserContext) -> bool:
+        """重新整理單個瀏覽器。
+        
+        Args:
+            context: 瀏覽器上下文
+            
+        Returns:
+            是否成功
+        """
+        try:
+            context.driver.refresh()
+            time.sleep(Constants.DEFAULT_WAIT_SECONDS)
+            return True
+        except Exception as e:
+            self.logger.error(f"瀏覽器 {context.index} 重新整理失敗: {e}")
+            return False
+    
+    def wait_for_template(
+        self,
+        contexts: List[BrowserContext],
+        template_name: str,
+        max_attempts: int = Constants.MAX_DETECTION_ATTEMPTS
+    ) -> bool:
+        """等待所有瀏覽器顯示指定模板。
+        
+        Args:
+            contexts: 瀏覽器上下文列表
+            template_name: 模板名稱
+            max_attempts: 最大嘗試次數
+            
+        Returns:
+            是否所有瀏覽器都找到
+        """
+        attempt = 0
+        
+        while attempt < max_attempts:
+            attempt += 1
+            all_found = True
+            
+            for context in contexts:
+                try:
+                    result = self.image_detector.detect_in_browser(
+                        context.driver,
+                        template_name
+                    )
+                    if not result:
+                        all_found = False
+                        break
+                except Exception:
+                    all_found = False
+                    break
+            
+            if all_found:
+                return True
+            
+            # 顯示進度
+            if attempt % Constants.DETECTION_PROGRESS_INTERVAL == 0:
+                found_count = sum(
+                    1 for context in contexts
+                    if self.image_detector.detect_in_browser(
+                        context.driver,
+                        template_name
+                    ) is not None
+                )
+                self.logger.info(f"檢測中... ({found_count}/{len(contexts)})")
+            
+            time.sleep(Constants.DETECTION_INTERVAL)
+        
+        return False
+    
+    def restart_and_recover(
+        self,
+        contexts: List[BrowserContext],
+        canvas_rect: Dict[str, float]
+    ) -> bool:
+        """重啟瀏覽器並恢復到可用狀態。
+        
+        Args:
+            contexts: 需要重啟的瀏覽器上下文列表
+            canvas_rect: Canvas 區域資訊
+            
+        Returns:
+            是否成功
+        """
+        if not contexts:
+            return True
+        
+        # 1. 重新整理所有瀏覽器
+        for context in contexts:
+            self.refresh_browser(context)
+        
+        # 2. 等待 lobby_login 出現
+        if not self.wait_for_template(contexts, Constants.LOBBY_LOGIN):
+            self.logger.error("等待 lobby_login 超時")
+            return False
+        
+        # 3. 計算並點擊開始遊戲按鈕
+        start_x, start_y = BrowserHelper.calculate_click_position(
+            canvas_rect,
+            Constants.LOBBY_LOGIN_BUTTON_X_RATIO,
+            Constants.LOBBY_LOGIN_BUTTON_Y_RATIO
+        )
+        
+        time.sleep(Constants.TEMPLATE_CAPTURE_WAIT)
+        
+        # 同步點擊所有瀏覽器
+        for context in contexts:
+            try:
+                BrowserHelper.execute_cdp_click(context.driver, start_x, start_y)
+            except Exception as e:
+                self.logger.error(f"瀏覽器 {context.index} 點擊失敗: {e}")
+        
+        # 4. 等待 lobby_login 消失
+        time.sleep(Constants.DEFAULT_WAIT_SECONDS)
+        
+        return True
+
+
+# ============================================================================
 # 遊戲控制中心
 # ============================================================================
 
@@ -2514,30 +2725,13 @@ class GameControlCenter:
         username = context.credential.username
         driver = context.driver
         
-        # 預先建立 CDP 指令字典（減少重複建立）
-        key_down_cmd = {
-            "type": "keyDown",
-            "key": " ",
-            "code": "Space",
-            "windowsVirtualKeyCode": 32,
-            "nativeVirtualKeyCode": 32
-        }
-        key_up_cmd = {
-            "type": "keyUp",
-            "key": " ",
-            "code": "Space",
-            "windowsVirtualKeyCode": 32,
-            "nativeVirtualKeyCode": 32
-        }
-        
         while not self._stop_event.is_set():
             try:
                 press_count += 1
                 
                 # 執行按空白鍵
                 try:
-                    driver.execute_cdp_cmd("Input.dispatchKeyEvent", key_down_cmd)
-                    driver.execute_cdp_cmd("Input.dispatchKeyEvent", key_up_cmd)
+                    BrowserHelper.execute_cdp_space_key(driver)
                 except Exception as e:
                     self.logger.error(f"瀏覽器 {browser_index} ({username}) 按鍵失敗: {e}")
                 
@@ -2846,8 +3040,11 @@ class GameControlCenter:
                                 # 點擊 LOBBY_LOGIN_BUTTON 座標（連續 5 次，間隔 1 秒）- 快速跳過結算畫面
                                 self.logger.info("正在跳過結算畫面...")
                                 rect = self.browser_operator.last_canvas_rect
-                                lobby_x = rect["x"] + rect["w"] * Constants.LOBBY_LOGIN_BUTTON_X_RATIO
-                                lobby_y = rect["y"] + rect["h"] * Constants.LOBBY_LOGIN_BUTTON_Y_RATIO
+                                lobby_x, lobby_y = BrowserHelper.calculate_click_position(
+                                    rect,
+                                    Constants.LOBBY_LOGIN_BUTTON_X_RATIO,
+                                    Constants.LOBBY_LOGIN_BUTTON_Y_RATIO
+                                )
                                 
                                 def click_lobby_button(context: BrowserContext, index: int, total: int) -> bool:
                                     """跳過結算畫面"""
@@ -2855,14 +3052,7 @@ class GameControlCenter:
                                     try:
                                         time.sleep(Constants.FREE_GAME_SETTLE_INITIAL_WAIT)  # 等待後開始點擊
                                         for click_num in range(1, Constants.FREE_GAME_SETTLE_CLICK_COUNT + 1):  # 連續點擊跳過結算
-                                            for event_type in ["mousePressed", "mouseReleased"]:
-                                                driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
-                                                    "type": event_type,
-                                                    "x": lobby_x,
-                                                    "y": lobby_y,
-                                                    "button": "left",
-                                                    "clickCount": 1
-                                                })
+                                            BrowserHelper.execute_cdp_click(driver, lobby_x, lobby_y)
                                             if click_num < Constants.FREE_GAME_SETTLE_CLICK_COUNT:  # 最後一次不需要等待
                                                 time.sleep(Constants.FREE_GAME_SETTLE_CLICK_INTERVAL)  # 點擊間隔
                                         return True
@@ -2920,19 +3110,20 @@ class GameControlCenter:
                     rect = self.browser_operator.last_canvas_rect
                     
                     # 計算第一次點擊座標（自動轉按鈕）
-                    auto_x = rect["x"] + rect["w"] * Constants.AUTO_SPIN_BUTTON_X_RATIO
-                    auto_y = rect["y"] + rect["h"] * Constants.AUTO_SPIN_BUTTON_Y_RATIO
+                    auto_x, auto_y = BrowserHelper.calculate_click_position(
+                        rect,
+                        Constants.AUTO_SPIN_BUTTON_X_RATIO,
+                        Constants.AUTO_SPIN_BUTTON_Y_RATIO
+                    )
                     
                     # 根據次數選擇第二次點擊座標
-                    if spin_count == 10:
-                        count_x = rect["x"] + rect["w"] * Constants.AUTO_SPIN_10_X_RATIO
-                        count_y = rect["y"] + rect["h"] * Constants.AUTO_SPIN_10_Y_RATIO
-                    elif spin_count == 50:
-                        count_x = rect["x"] + rect["w"] * Constants.AUTO_SPIN_50_X_RATIO
-                        count_y = rect["y"] + rect["h"] * Constants.AUTO_SPIN_50_Y_RATIO
-                    else:  # 100
-                        count_x = rect["x"] + rect["w"] * Constants.AUTO_SPIN_100_X_RATIO
-                        count_y = rect["y"] + rect["h"] * Constants.AUTO_SPIN_100_Y_RATIO
+                    count_ratio_map = {
+                        10: (Constants.AUTO_SPIN_10_X_RATIO, Constants.AUTO_SPIN_10_Y_RATIO),
+                        50: (Constants.AUTO_SPIN_50_X_RATIO, Constants.AUTO_SPIN_50_Y_RATIO),
+                        100: (Constants.AUTO_SPIN_100_X_RATIO, Constants.AUTO_SPIN_100_Y_RATIO)
+                    }
+                    x_ratio, y_ratio = count_ratio_map[spin_count]
+                    count_x, count_y = BrowserHelper.calculate_click_position(rect, x_ratio, y_ratio)
                     
                     # 使用同步方式對所有瀏覽器執行點擊
                     def auto_spin_operation(context: BrowserContext, index: int, total: int) -> bool:
@@ -2942,25 +3133,11 @@ class GameControlCenter:
                         
                         try:
                             # 第一次點擊（自動轉按鈕）
-                            for event_type in ["mousePressed", "mouseReleased"]:
-                                driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
-                                    "type": event_type,
-                                    "x": auto_x,
-                                    "y": auto_y,
-                                    "button": "left",
-                                    "clickCount": 1
-                                })
+                            BrowserHelper.execute_cdp_click(driver, auto_x, auto_y)
                             time.sleep(Constants.AUTO_SPIN_MENU_WAIT)  # 等待選單出現
                             
                             # 第二次點擊（選擇次數）
-                            for event_type in ["mousePressed", "mouseReleased"]:
-                                driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
-                                    "type": event_type,
-                                    "x": count_x,
-                                    "y": count_y,
-                                    "button": "left",
-                                    "clickCount": 1
-                                })
+                            BrowserHelper.execute_cdp_click(driver, count_x, count_y)
                             
                             return True
                             
@@ -3132,7 +3309,17 @@ class AutoSlotGameApp:
         self.rules: List[BetRule] = []
         self.browser_contexts: List[BrowserContext] = []
         self.image_detector = ImageDetector(logger=self.logger)
+        self.recovery_manager: Optional[BrowserRecoveryManager] = None  # 延遲初始化
         self.last_canvas_rect = None  # 儲存 Canvas 區域資訊
+    
+    def _ensure_recovery_manager(self) -> None:
+        """確保 recovery_manager 已初始化。"""
+        if self.recovery_manager is None:
+            self.recovery_manager = BrowserRecoveryManager(
+                self.image_detector,
+                self.browser_operator,
+                self.logger
+            )
     
     def _print_step(self, step: Union[int, str], title: str) -> None:
         """輸出步驟標題。
@@ -3513,8 +3700,11 @@ class AutoSlotGameApp:
             raise
         
         # 4. 計算點擊座標（開始遊戲按鈕）
-        start_x = rect["x"] + rect["w"] * Constants.LOBBY_LOGIN_BUTTON_X_RATIO
-        start_y = rect["y"] + rect["h"] * Constants.LOBBY_LOGIN_BUTTON_Y_RATIO
+        start_x, start_y = BrowserHelper.calculate_click_position(
+            rect,
+            Constants.LOBBY_LOGIN_BUTTON_X_RATIO,
+            Constants.LOBBY_LOGIN_BUTTON_Y_RATIO
+        )
         
         # 5. 在所有瀏覽器中同步執行點擊
         time.sleep(Constants.TEMPLATE_CAPTURE_WAIT)
@@ -3559,8 +3749,11 @@ class AutoSlotGameApp:
         # 3. 計算點擊座標（確認按鈕）
         if hasattr(self, 'last_canvas_rect') and self.last_canvas_rect:
             rect = self.last_canvas_rect
-            confirm_x = rect["x"] + rect["w"] * Constants.LOBBY_CONFIRM_BUTTON_X_RATIO
-            confirm_y = rect["y"] + rect["h"] * Constants.LOBBY_CONFIRM_BUTTON_Y_RATIO
+            confirm_x, confirm_y = BrowserHelper.calculate_click_position(
+                rect,
+                Constants.LOBBY_CONFIRM_BUTTON_X_RATIO,
+                Constants.LOBBY_CONFIRM_BUTTON_Y_RATIO
+            )
             
             # 4. 在所有瀏覽器中同步執行點擊
             time.sleep(Constants.TEMPLATE_CAPTURE_WAIT)
@@ -3594,9 +3787,11 @@ class AutoSlotGameApp:
         流程：
         1. 同步檢測所有瀏覽器的 lobby_confirm（前 3 次）
         2. 如果未找到，同步檢測錯誤訊息
-        3. 如果檢測到錯誤且持續超過 3 秒，同步重啟所有錯誤的瀏覽器
+        3. 如果檢測到錯誤且持續超過設定秒數，同步重啟所有錯誤的瀏覽器
         4. 重複直到所有瀏覽器都顯示 lobby_confirm
         """
+        self._ensure_recovery_manager()  # 確保 recovery_manager 已初始化
+        
         template_name = Constants.LOBBY_CONFIRM
         total_browsers = len(self.browser_contexts)
         browser_states = {}  # 記錄每個瀏覽器的狀態
@@ -3613,14 +3808,17 @@ class AutoSlotGameApp:
         last_progress = -1
         
         while True:
-            # 同步檢測所有瀏覽器
-            pending_browsers = [i for i in range(1, total_browsers + 1) if not browser_states[i]['found_confirm']]
+            # 同步檢測所有待處理的瀏覽器
+            pending_browsers = [
+                i for i in range(1, total_browsers + 1)
+                if not browser_states[i]['found_confirm']
+            ]
             
             if not pending_browsers:
                 self.logger.info("✓ 所有瀏覽器都已檢測到 lobby_confirm")
                 break
             
-            # 同步檢測 lobby_confirm
+            # 檢測 lobby_confirm 和錯誤訊息
             current_time = time.time()
             errors_to_restart = []
             new_errors = []
@@ -3631,7 +3829,10 @@ class AutoSlotGameApp:
                 
                 try:
                     # 檢測 lobby_confirm
-                    result = self.image_detector.detect_in_browser(context.driver, template_name)
+                    result = self.image_detector.detect_in_browser(
+                        context.driver,
+                        template_name
+                    )
                     
                     if result:
                         # 找到 lobby_confirm
@@ -3639,27 +3840,14 @@ class AutoSlotGameApp:
                         browser_states[i]['error_start_time'] = None
                         continue
                     
-                    # 前 3 次不檢查錯誤訊息
+                    # 前幾次不檢查錯誤訊息
                     if browser_states[i]['lobby_confirm_attempts'] <= Constants.LOBBY_CONFIRM_CHECK_ATTEMPTS:
                         continue
                     
                     # 檢測錯誤訊息
-                    left_error = self.image_detector.detect_error_message_in_region(
-                        context.driver,
-                        Constants.ERROR_MESSAGE_LEFT_X,
-                        Constants.ERROR_MESSAGE_LEFT_Y,
-                        Constants.TEMPLATE_CROP_MARGIN
-                    )
+                    has_error = self.recovery_manager.detect_error_message(context.driver)
                     
-                    right_error = self.image_detector.detect_error_message_in_region(
-                        context.driver,
-                        Constants.ERROR_MESSAGE_RIGHT_X,
-                        Constants.ERROR_MESSAGE_RIGHT_Y,
-                        Constants.TEMPLATE_CROP_MARGIN
-                    )
-                    
-                    # 兩個區域都檢測到錯誤訊息
-                    if left_error and right_error:
+                    if has_error:
                         if browser_states[i]['error_start_time'] is None:
                             # 第一次檢測到錯誤
                             browser_states[i]['error_start_time'] = current_time
@@ -3677,14 +3865,14 @@ class AutoSlotGameApp:
                 except Exception as e:
                     self.logger.error(f"瀏覽器 {i} 檢測過程發生錯誤: {e}")
             
-            # 輸出新檢測到的錯誤（合併顯示）
+            # 輸出新檢測到的錯誤
             if new_errors:
                 self.logger.warning(f"檢測到錯誤訊息: 瀏覽器 {', '.join(map(str, new_errors))}")
             
             # 同步重啟所有需要重啟的瀏覽器
             if errors_to_restart:
                 self.logger.error(f"執行重啟: 瀏覽器 {', '.join(map(str, errors_to_restart))}")
-                self._restart_browsers_from_lobby_login(errors_to_restart, browser_states)
+                self._restart_browsers_simple(errors_to_restart, browser_states)
             
             # 顯示進度（只在變化時輸出）
             found_count = sum(1 for state in browser_states.values() if state['found_confirm'])
@@ -3695,150 +3883,44 @@ class AutoSlotGameApp:
             
             time.sleep(Constants.DETECTION_INTERVAL)
     
-    def _restart_browsers_from_lobby_login(self, browser_indices: List[int], browser_states: dict) -> None:
-        """同步重啟多個瀏覽器並從 lobby_login 階段開始檢測。
+    def _restart_browsers_simple(
+        self,
+        browser_indices: List[int],
+        browser_states: dict
+    ) -> None:
+        """簡化的瀏覽器重啟流程。
         
         Args:
             browser_indices: 需要重啟的瀏覽器索引列表
             browser_states: 瀏覽器狀態字典
         """
-        if not browser_indices:
+        if not browser_indices or not self.last_canvas_rect:
             return
         
-        browser_list = ', '.join(map(str, browser_indices))
+        self._ensure_recovery_manager()
         
-        # 1. 同步重新整理所有錯誤的瀏覽器
-        def refresh_operation(context: BrowserContext, index: int, total: int) -> bool:
-            """重新整理頁面"""
-            if index not in browser_indices:
-                return True
-            try:
-                context.driver.refresh()
-                return True
-            except Exception as e:
-                self.logger.error(f"瀏覽器 {index} 重新整理失敗: {e}")
-                return False
+        # 準備需要重啟的瀏覽器上下文
+        contexts_to_restart = [
+            self.browser_contexts[i - 1]
+            for i in browser_indices
+        ]
         
-        # 靜默執行重新整理
-        with ThreadPoolExecutor(max_workers=len(browser_indices)) as executor:
-            futures = []
+        # 使用 recovery_manager 執行重啟和恢復
+        success = self.recovery_manager.restart_and_recover(
+            contexts_to_restart,
+            self.last_canvas_rect
+        )
+        
+        if success:
+            # 重置狀態
             for i in browser_indices:
-                context = self.browser_contexts[i - 1]
-                future = executor.submit(refresh_operation, context, i, len(self.browser_contexts))
-                futures.append(future)
+                browser_states[i]['error_start_time'] = None
+                browser_states[i]['lobby_confirm_attempts'] = 0
             
-            for future in as_completed(futures):
-                future.result()
-        
-        # 2. 等待頁面載入後開始檢測 lobby_login
-        time.sleep(Constants.DEFAULT_WAIT_SECONDS)
-        
-        # 3. 只檢測需要重啟的瀏覽器
-        template_name = Constants.LOBBY_LOGIN
-        attempt = 0
-        
-        while True:
-            attempt += 1
-            all_found = True
-            
-            for i in browser_indices:
-                context = self.browser_contexts[i - 1]
-                try:
-                    result = self.image_detector.detect_in_browser(context.driver, template_name)
-                    if not result:
-                        all_found = False
-                        break
-                except Exception:
-                    all_found = False
-                    break
-            
-            if all_found:
-                self.logger.info(f"✓ 瀏覽器 {browser_list} 已檢測到 lobby_login")
-                break
-            
-            # 每 N 次檢測顯示一次進度
-            if attempt % Constants.DETECTION_PROGRESS_INTERVAL == 0:
-                found_count = sum(
-                    1 for i in browser_indices 
-                    if self.image_detector.detect_in_browser(
-                        self.browser_contexts[i - 1].driver, 
-                        template_name
-                    ) is not None
-                )
-                self.logger.info(f"檢測中... ({found_count}/{len(browser_indices)})")
-            
-            time.sleep(Constants.DETECTION_INTERVAL)
-        
-        # 4. 計算點擊座標並同步點擊
-        if hasattr(self, 'last_canvas_rect') and self.last_canvas_rect:
-            rect = self.last_canvas_rect
-            start_x = rect["x"] + rect["w"] * Constants.LOBBY_LOGIN_BUTTON_X_RATIO
-            start_y = rect["y"] + rect["h"] * Constants.LOBBY_LOGIN_BUTTON_Y_RATIO
-            
-            time.sleep(Constants.TEMPLATE_CAPTURE_WAIT)
-            
-            # 靜默執行點擊
-            with ThreadPoolExecutor(max_workers=len(browser_indices)) as executor:
-                futures = []
-                for i in browser_indices:
-                    context = self.browser_contexts[i - 1]
-                    future = executor.submit(
-                        lambda ctx: self._click_coordinate(ctx.driver, start_x, start_y),
-                        context
-                    )
-                    futures.append(future)
-                
-                for future in as_completed(futures):
-                    try:
-                        future.result()
-                    except Exception as e:
-                        self.logger.debug(f"點擊失敗: {e}")
-        
-        # 5. 等待 lobby_login 消失
-        time.sleep(Constants.DEFAULT_WAIT_SECONDS)
-        
-        # 6. 重置狀態
-        for i in browser_indices:
-            browser_states[i]['error_start_time'] = None
-            browser_states[i]['lobby_confirm_attempts'] = 0
-        
-        self.logger.info(f"✓ 瀏覽器 {browser_list} 已重啟並等待 lobby_confirm")
-    
-    def _restart_browser_to_game(self, context: BrowserContext, index: int) -> None:
-        """重新啟動瀏覽器到遊戲頁面。
-        
-        Args:
-            context: 瀏覽器上下文
-            index: 瀏覽器索引
-        """
-        try:
-            driver = context.driver
-            username = context.credential.username
-            
-            self.logger.info(f"瀏覽器 {index} ({username}) 開始重新整理...")
-            
-            # 重新整理頁面
-            driver.refresh()
-            
-            # 等待頁面載入
-            time.sleep(Constants.DEFAULT_WAIT_SECONDS)
-            
-            # 切換到 iframe
-            try:
-                iframe = WebDriverWait(driver, 10).until(
-                    EC.presence_of_element_located((By.ID, Constants.GAME_IFRAME))
-                )
-                driver.switch_to.frame(iframe)
-                self.logger.info(f"瀏覽器 {index} 已切換到遊戲 iframe")
-            except Exception as e:
-                self.logger.error(f"瀏覽器 {index} 切換 iframe 失敗: {e}")
-                raise
-            
-            self.logger.info(f"✓ 瀏覽器 {index} ({username}) 重啟完成，等待 lobby_confirm")
-            
-        except Exception as e:
-            self.logger.error(f"瀏覽器 {index} 重啟失敗: {e}")
-            raise
+            browser_list = ', '.join(map(str, browser_indices))
+            self.logger.info(f"✓ 瀏覽器 {browser_list} 已重啟並等待 lobby_confirm")
+        else:
+            self.logger.error("瀏覽器重啟失敗")
     
     def _click_coordinate(self, driver: WebDriver, x: float, y: float) -> None:
         """點擊指定座標。
@@ -3848,14 +3930,7 @@ class AutoSlotGameApp:
             x: X座標
             y: Y座標
         """
-        for event in ["mousePressed", "mouseReleased"]:
-            driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
-                "type": event,
-                "x": x,
-                "y": y,
-                "button": "left",
-                "clickCount": 1
-            })
+        BrowserHelper.execute_cdp_click(driver, x, y)
     
     def _auto_capture_lobby_confirm(self, reference_browser: BrowserContext) -> None:
         """自動截取 lobby_confirm 模板圖片。
@@ -4080,7 +4155,6 @@ class AutoSlotGameApp:
         """
         self.logger.info(f"找到 {display_name}，自動執行點擊操作")
         
-        # 使用同步操作器執行點擊
         def click_operation(context: BrowserContext, index: int, total: int) -> bool:
             """在單個瀏覽器中執行點擊操作"""
             result = detection_results[index - 1]
@@ -4088,28 +4162,11 @@ class AutoSlotGameApp:
                 return False
             
             x, y, confidence = result
-            driver = context.driver
             
             try:
-                # 使用 CDP (Chrome DevTools Protocol) 執行點擊
-                driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
-                    "type": "mousePressed",
-                    "x": x,
-                    "y": y,
-                    "button": "left",
-                    "clickCount": 1
-                })
-                driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
-                    "type": "mouseReleased",
-                    "x": x,
-                    "y": y,
-                    "button": "left",
-                    "clickCount": 1
-                })
-                
+                BrowserHelper.execute_cdp_click(context.driver, x, y)
                 self.logger.debug(f"瀏覽器 {index} 在座標 ({x}, {y}) 執行點擊成功")
                 return True
-                
             except Exception as e:
                 self.logger.error(f"瀏覽器 {index} 點擊失敗: {e}")
                 return False
