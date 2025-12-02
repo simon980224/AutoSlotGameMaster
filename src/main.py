@@ -61,6 +61,34 @@ import numpy as np
 from PIL import Image
 import io
 
+# 導入新模組化架構
+from autoslot import (
+    # 核心
+    Constants,
+    AutoSlotGameError,
+    ConfigurationError,
+    BrowserCreationError,
+    ProxyServerError,
+    ImageDetectionError,
+    UserCredential,
+    BetRule,
+    ProxyInfo,
+    BrowserContext,
+    OperationResult,
+    # 工具
+    LogLevel,
+    LoggerFactory,
+    cleanup_chromedriver_processes,
+    get_resource_path,
+    cv2_imread_unicode,
+    # 配置
+    ConfigReader,
+    # 管理器
+    BrowserHelper,
+    BrowserManager,
+    LocalProxyServerManager,
+)
+
 
 # 導出的公共 API
 __all__ = [

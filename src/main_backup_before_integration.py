@@ -40,7 +40,7 @@ import subprocess
 from typing import Optional, List, Dict, Tuple, Any, Callable, Protocol, Union
 from pathlib import Path
 from dataclasses import dataclass, field
-from contextlib import contextmanager, suppress
+from contextlib import suppress, contextmanager
 from concurrent.futures import ThreadPoolExecutor, as_completed, Future
 from enum import Enum
 import threading
@@ -49,10 +49,10 @@ import threading
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.webdriver import WebDriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.chrome.webdriver import WebDriver
 from webdriver_manager.chrome import ChromeDriverManager
 
 # 圖片處理相關
@@ -61,6 +61,33 @@ import numpy as np
 from PIL import Image
 import io
 
+# 導入新模組化架構
+from autoslot.core import (
+    Constants,
+    AutoSlotGameError,
+    ConfigurationError,
+    BrowserCreationError,
+    ProxyServerError,
+    ImageDetectionError,
+    UserCredential,
+    BetRule,
+    ProxyInfo,
+    BrowserContext,
+    OperationResult,
+)
+from autoslot.utils import (
+    LogLevel,
+    LoggerFactory,
+    cleanup_chromedriver_processes,
+    get_resource_path,
+    cv2_imread_unicode,
+)
+from autoslot.config import ConfigReader
+from autoslot.managers import (
+    BrowserHelper,
+    BrowserManager,
+    LocalProxyServerManager,
+)
 
 
 # 導出的公共 API
