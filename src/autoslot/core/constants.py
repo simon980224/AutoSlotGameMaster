@@ -8,6 +8,9 @@
 class Constants:
     """系統常量"""
     
+    # 版本資訊
+    VERSION = "2.0.0"
+    
     # 配置檔案相關
     DEFAULT_LIB_PATH = "lib"
     DEFAULT_CREDENTIALS_FILE = "用戶資料.txt"

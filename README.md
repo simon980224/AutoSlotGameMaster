@@ -438,6 +438,20 @@ google-chrome --version  # Linux
 
 ## 📝 版本歷史
 
+### v2.0.0 (2025-12-03)
+
+- 🏗️ **重大重構**：完成模組化架構遷移
+- 📦 建立 `autoslot` 套件，將功能拆分為獨立模組
+- 🎯 **core 模組**：constants（系統常數）、exceptions（例外類別）、models（資料模型）
+- 🛠️ **utils 模組**：logger（彩色日誌系統）、helpers（輔助函式）
+- ⚙️ **config 模組**：reader（配置讀取器）
+- 🔧 **managers 模組**：browser_manager（瀏覽器管理）、proxy_manager（Proxy 管理）、browser_helper（輔助工具）
+- ✨ 採用依賴注入、上下文管理器、執行緒安全設計
+- 📈 大幅提升程式碼可維護性、可測試性和可擴展性
+- 🔄 支援優先使用本機驅動程式，自動降級到 WebDriver Manager
+- 📚 完整的文檔和 API 說明（MODULAR_MIGRATION_GUIDE.md、MODULARIZATION_PROGRESS.md）
+- 🎉 所有模組通過語法檢查，無錯誤
+
 ### v1.6.0 (2025-12-01)
 
 - ✨ **新增錯誤訊息檢測與自動重啟機制**

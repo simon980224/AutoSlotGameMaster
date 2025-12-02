@@ -8,10 +8,11 @@
 
 ## 版本資訊
 
-**目前版本**: v1.6.0
+**目前版本**: v2.0.0
 
 **更新內容**:
 
+- v2.0.0: 完成模組化架構遷移，建立 autoslot 套件（core, utils, config, managers 模組）
 - v1.6.0: 新增 lobby_confirm 錯誤訊息檢測與自動重啟機制（雙區域檢測、1 秒閾值觸發）
 - v1.5.0: 統一管理所有魔法數字（視窗尺寸、座標、等待時間、重試次數等），提升程式碼可維護性
 - v1.4.3: 優化瀏覽器網路設定（啟用 QUIC、TCP Fast Open、NetworkService）
@@ -24,6 +25,33 @@
 - v1.0.0: 初始版本發布
 
 ## 架構特點
+
+### 0. 模組化架構 (v2.0.0 新增)
+
+專案採用模組化架構，功能拆分為獨立模組：
+
+```
+src/autoslot/
+├── core/           # 核心模組（常數、例外、資料模型）
+├── utils/          # 工具模組（日誌、輔助函式）
+├── config/         # 配置模組（配置讀取）
+├── managers/       # 管理器模組（瀏覽器、Proxy、輔助工具）
+├── operators/      # 操作器模組（待遷移）
+├── detectors/      # 檢測器模組（待遷移）
+└── app/            # 應用程式模組（待遷移）
+```
+
+**使用方式**:
+```python
+from autoslot import (
+    Constants,              # 核心常數
+    LoggerFactory,         # 日誌工廠
+    ConfigReader,          # 配置讀取
+    BrowserManager,        # 瀏覽器管理
+    LocalProxyServerManager,  # Proxy 管理
+    BrowserHelper,         # 瀏覽器輔助工具
+)
+```
 
 ### 1. 依賴注入與工廠模式
 

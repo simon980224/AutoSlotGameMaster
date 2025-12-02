@@ -3,7 +3,7 @@ AutoSlotGame 套件初始化
 
 金富翁遊戲自動化系統 - 模組化架構
 
-版本: 1.6.0
+版本: 2.0.0
 """
 
 # 核心模組
@@ -42,7 +42,7 @@ from .managers import (
     SimpleProxyServer,
 )
 
-__version__ = "1.6.0"
+__version__ = "2.0.0"
 
 __all__ = [
     # 版本
