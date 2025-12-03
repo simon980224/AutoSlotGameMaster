@@ -13,10 +13,11 @@
 - 完善的錯誤處理與重試機制
 
 作者: 凡臻科技
-版本: 1.7.0
+版本: 1.7.1
 Python: 3.8+
 
 版本歷史:
+- v1.7.1: 修正金額識別問題（統一使用 Constants 定義，移除重複定義和硬編碼數值）
 - v1.7.0: 新增規則執行功能（'r' 指令），支援自動切換金額並按空白鍵，規則循環執行
 - v1.6.2: 調整遊戲金額配置（GAME_BETSIZE 和 GAME_BETSIZE_TUPLE），從 73 種金額優化為 64 種金額
 - v1.6.1: 調整金額顯示和裁切參數（BETSIZE_DISPLAY_Y: 380→370, CROP_MARGIN_X: 50→40, CROP_MARGIN_Y: 20→10）
@@ -118,7 +119,7 @@ def cleanup_chromedriver_processes() -> None:
                 ["taskkill", "/F", "/IM", "chromedriver.exe"],
                 capture_output=True,
                 text=True,
-                timeout=10
+                timeout=Constants.CLEANUP_PROCESS_TIMEOUT
             )
             
             # 檢查結果
@@ -135,7 +136,7 @@ def cleanup_chromedriver_processes() -> None:
                 ["killall", "-9", "chromedriver"],
                 capture_output=True,
                 text=True,
-                timeout=10
+                timeout=Constants.CLEANUP_PROCESS_TIMEOUT
             )
             
             # killall 在沒有找到程序時會返回非 0，這是正常的
@@ -264,6 +265,7 @@ class Constants:
     LOBBY_CONFIRM = "lobby_confirm.png"
     ERROR_MESSAGE = "error_message.png"
     MATCH_THRESHOLD = 0.8  # 圖片匹配閾值
+    BETSIZE_MATCH_THRESHOLD = 0.85  # 金額識別匹配閾值
     DETECTION_INTERVAL = 1.0  # 檢測間隔（秒）
     MAX_DETECTION_ATTEMPTS = 60  # 最大檢測次數
     
@@ -310,6 +312,13 @@ class Constants:
     PROXY_SERVER_START_WAIT = 1  # Proxy 伺服器啟動等待時間
     TEMPLATE_CAPTURE_WAIT = 1    # 模板截取後等待時間
     DETECTION_COMPLETE_WAIT = 2  # 檢測完成後等待時間
+    RULE_SWITCH_WAIT = 1.0       # 規則切換等待時間
+    AUTO_PRESS_THREAD_JOIN_TIMEOUT = 2.0  # 自動按鍵執行緒結束等待時間
+    AUTO_PRESS_STOP_TIMEOUT = 5.0  # 自動按鍵停止等待超時時間
+    STOP_EVENT_WAIT_TIMEOUT = 5.0  # 停止事件等待超時時間
+    STOP_EVENT_ERROR_WAIT = 1.0    # 停止事件錯誤等待時間
+    SERVER_SOCKET_TIMEOUT = 1.0    # 伺服器 Socket 超時時間
+    CLEANUP_PROCESS_TIMEOUT = 10   # 清除程序超時時間（秒）
     
     # 重試與循環配置
     BETSIZE_ADJUST_MAX_ATTEMPTS = 200  # 調整金額最大嘗試次數
@@ -1092,7 +1101,7 @@ class SimpleProxyServer:
             
             while self.running:
                 try:
-                    self.server_socket.settimeout(1.0)
+                    self.server_socket.settimeout(Constants.SERVER_SOCKET_TIMEOUT)
                     client_socket, address = self.server_socket.accept()
                     
                     # 在新執行緒中處理客戶端
@@ -1895,15 +1904,6 @@ class SyncBrowserOperator:
         if retry_count is None:
             retry_count = Constants.BETSIZE_READ_MAX_RETRIES
         
-        # 定義可用金額列表（使用 set 提升查詢效率）
-        GAME_BETSIZE_SET = frozenset((
-            0.4, 0.8, 1, 1.2, 1.6, 2, 2.4, 2.8, 3, 3.2, 3.6, 4, 5, 6, 7, 8, 9, 10,
-            12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 48, 56, 60, 64, 72, 80, 100,
-            120, 140, 160, 180, 200, 240, 280, 300, 320, 360, 400, 420, 480, 500,
-            540, 560, 600, 640, 700, 720, 800, 840, 900, 960, 980, 1000, 1080,
-            1120, 1200, 1260, 1280, 1400, 1440, 1600, 1800, 2000
-        ))
-        
         for attempt in range(retry_count):
             try:
                 if attempt > 0:
@@ -1920,7 +1920,8 @@ class SyncBrowserOperator:
                 if matched_amount:
                     try:
                         amount_value = float(matched_amount)
-                        if amount_value in GAME_BETSIZE_SET:
+                        # 使用 Constants.GAME_BETSIZE 進行驗證
+                        if amount_value in Constants.GAME_BETSIZE:
                             self.logger.info(f"✓ 目前金額: {amount_value}")
                             return amount_value
                     except ValueError:
@@ -1986,8 +1987,8 @@ class SyncBrowserOperator:
             match_results.sort(key=lambda x: x[1], reverse=True)
             best_match_amount, best_match_score = match_results[0]
             
-            # 調整閾值：0.90 為可接受，0.85-0.90 為警告，< 0.85 為失敗
-            if best_match_score >= 0.85:
+            # 使用常數定義的閾值
+            if best_match_score >= Constants.BETSIZE_MATCH_THRESHOLD:
                 return best_match_amount, best_match_score
             else:
                 return None, best_match_score
@@ -2777,7 +2778,7 @@ class GameControlCenter:
                     
             except Exception as e:
                 self.logger.error(f"瀏覽器 {browser_index} ({username}) 執行錯誤: {e}")
-                self._stop_event.wait(timeout=1.0)
+                self._stop_event.wait(timeout=Constants.STOP_EVENT_ERROR_WAIT)
         
         self.logger.info(f"瀏覽器 {browser_index} ({username}) 已停止，共執行 {press_count} 次")
     
@@ -2820,7 +2821,7 @@ class GameControlCenter:
         stopped_count = 0
         for browser_index, thread in self.auto_press_threads.items():
             if thread and thread.is_alive():
-                thread.join(timeout=5.0)
+                thread.join(timeout=Constants.AUTO_PRESS_STOP_TIMEOUT)
                 
                 if not thread.is_alive():
                     stopped_count += 1
@@ -2859,7 +2860,7 @@ class GameControlCenter:
                     # 等待所有執行緒完全停止
                     for browser_index, thread in list(self.auto_press_threads.items()):
                         if thread and thread.is_alive():
-                            thread.join(timeout=2.0)
+                            thread.join(timeout=Constants.AUTO_PRESS_THREAD_JOIN_TIMEOUT)
                             if thread.is_alive():
                                 self.logger.warning(f"瀏覽器 {browser_index} 執行緒未能及時停止")
                     
@@ -2867,7 +2868,7 @@ class GameControlCenter:
                     self.auto_press_running = False
                     
                     # 等待畫面穩定
-                    time.sleep(1.0)
+                    time.sleep(Constants.RULE_SWITCH_WAIT)
                     self.logger.info("✓ 自動按鍵已停止")
                 
                 # 顯示規則資訊
@@ -2965,21 +2966,21 @@ class GameControlCenter:
                     self.logger.info("準備執行下一條規則...")
                 
                 # 規則之間短暫暫停（讓畫面穩定）
-                time.sleep(1.0)
+                time.sleep(Constants.RULE_SWITCH_WAIT)
                 
             except Exception as e:
                 self.logger.error(f"執行規則時發生錯誤: {e}")
                 # 確保清理自動按鍵執行緒
                 self.auto_press_threads.clear()
                 self.auto_press_running = False
-                if self._stop_event.wait(timeout=5.0):
+                if self._stop_event.wait(timeout=Constants.STOP_EVENT_WAIT_TIMEOUT):
                     break
         
         # 最終清理
         if self.auto_press_running:
             for browser_index, thread in self.auto_press_threads.items():
                 if thread and thread.is_alive():
-                    thread.join(timeout=2.0)
+                    thread.join(timeout=Constants.AUTO_PRESS_THREAD_JOIN_TIMEOUT)
         
         self.auto_press_threads.clear()
         self.auto_press_running = False
@@ -3043,7 +3044,7 @@ class GameControlCenter:
             stopped_count = 0
             for browser_index, thread in self.auto_press_threads.items():
                 if thread and thread.is_alive():
-                    thread.join(timeout=2.0)
+                    thread.join(timeout=Constants.AUTO_PRESS_THREAD_JOIN_TIMEOUT)
                     if not thread.is_alive():
                         stopped_count += 1
                 else:
@@ -3055,7 +3056,7 @@ class GameControlCenter:
         
         # 等待規則執行緒結束
         if self.rule_thread and self.rule_thread.is_alive():
-            self.rule_thread.join(timeout=5.0)
+            self.rule_thread.join(timeout=Constants.AUTO_PRESS_STOP_TIMEOUT)
             
             if not self.rule_thread.is_alive():
                 self.logger.info("✓ 規則執行已停止")
@@ -3452,9 +3453,6 @@ class GameControlCenter:
                     self.logger.error(f"設定自動旋轉時發生錯誤: {e}")
             
             elif cmd == 'c':
-                # 使用常數定義的金額列表
-                GAME_BETSIZE = Constants.GAME_BETSIZE_TUPLE
-                
                 self.logger.info("")
                 self.logger.info("=== 截取金額模板工具 ===")
                 self.logger.info("請輸入目前遊戲顯示的金額（例: 0.4, 2.4, 10）")
@@ -3472,8 +3470,8 @@ class GameControlCenter:
                         
                         amount = float(amount_input)
                         
-                        # 驗證金額是否在有效列表中
-                        if amount not in GAME_BETSIZE:
+                        # 使用 Constants.GAME_BETSIZE 驗證金額
+                        if amount not in Constants.GAME_BETSIZE:
                             self.logger.warning(f"⚠ 金額 {amount} 不在標準列表中，但仍會建立模板")
                         
                         # 使用第一個瀏覽器截取
@@ -3614,7 +3612,7 @@ class AutoSlotGameApp:
         """
         self.logger.info("")
         self.logger.info("━" * 60)
-        self.logger.info("金富翁遊戲自動化系統 v1.7.0")
+        self.logger.info("金富翁遊戲自動化系統 v1.7.1")
         self.logger.info("━" * 60)
         self.logger.info("")
         

@@ -448,6 +448,16 @@ google-chrome --version  # Linux
 
 ## 📝 版本歷史
 
+### v1.7.1 (2025-12-03)
+
+- 🔧 **修正金額識別問題**：統一使用 Constants 定義，提升系統穩定性
+- 🎯 **移除重複定義**：消除程式碼中的重複金額列表定義（GAME_BETSIZE_SET）
+- 📊 **統一常數管理**：所有硬編碼數值改為參照 Constants 類別
+- 🔢 **新增常數**：BETSIZE_MATCH_THRESHOLD、RULE_SWITCH_WAIT、AUTO_PRESS_THREAD_JOIN_TIMEOUT 等
+- ✨ **改善可維護性**：所有超時、等待時間、閾值統一在 Constants 中定義
+- 🐛 **修正 'c' 指令**：移除重複的 GAME_BETSIZE 定義，直接使用 Constants.GAME_BETSIZE
+- 📝 **程式碼品質提升**：消除所有魔法數字，提高程式碼可讀性和一致性
+
 ### v1.7.0 (2025-12-03)
 
 - ✨ **新增規則執行功能** - 全新的 `r` 指令，實現自動化金額切換策略
