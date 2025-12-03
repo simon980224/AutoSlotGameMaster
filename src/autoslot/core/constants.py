@@ -9,7 +9,7 @@ class Constants:
     """系統常量"""
     
     # 版本資訊
-    VERSION = "2.0.0"
+    VERSION = "2.0.1"
     
     # 配置檔案相關
     DEFAULT_LIB_PATH = "lib"
@@ -106,7 +106,7 @@ class Constants:
     BETSIZE_DECREASE_BUTTON_X = 360
     BETSIZE_DECREASE_BUTTON_Y = 370
     BETSIZE_DISPLAY_X = 400
-    BETSIZE_DISPLAY_Y = 380
+    BETSIZE_DISPLAY_Y = 370
     
     # 錯誤訊息圖片識別座標（基於預設視窗大小）
     ERROR_MESSAGE_LEFT_X = 240
@@ -116,8 +116,8 @@ class Constants:
     ERROR_MESSAGE_PERSIST_SECONDS = 1
     
     # 截圖裁切範圍（像素）
-    BETSIZE_CROP_MARGIN_X = 50
-    BETSIZE_CROP_MARGIN_Y = 20
+    BETSIZE_CROP_MARGIN_X = 40
+    BETSIZE_CROP_MARGIN_Y = 10
     TEMPLATE_CROP_MARGIN = 20
     
     # 遊戲金額配置（使用 frozenset 提升查詢效率）

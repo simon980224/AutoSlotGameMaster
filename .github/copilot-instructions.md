@@ -8,10 +8,11 @@
 
 ## 版本資訊
 
-**目前版本**: v2.0.0
+**目前版本**: v2.0.1
 
 **更新內容**:
 
+- v2.0.1: 調整金額顯示和裁切參數（BETSIZE_DISPLAY_Y: 380→370, CROP_MARGIN_X: 50→40, CROP_MARGIN_Y: 20→10）
 - v2.0.0: 完成模組化架構遷移，建立 autoslot 套件（core, utils, config, managers 模組）
 - v1.6.0: 新增 lobby_confirm 錯誤訊息檢測與自動重啟機制（雙區域檢測、1 秒閾值觸發）
 - v1.5.0: 統一管理所有魔法數字（視窗尺寸、座標、等待時間、重試次數等），提升程式碼可維護性
@@ -42,6 +43,7 @@ src/autoslot/
 ```
 
 **使用方式**:
+
 ```python
 from autoslot import (
     Constants,              # 核心常數

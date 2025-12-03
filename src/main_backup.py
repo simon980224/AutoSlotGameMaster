@@ -327,7 +327,7 @@ class Constants:
     BETSIZE_DECREASE_BUTTON_X = 360  # 減少金額按鈕 X 座標
     BETSIZE_DECREASE_BUTTON_Y = 370  # 減少金額按鈕 Y 座標
     BETSIZE_DISPLAY_X = 400          # 金額顯示位置 X 座標
-    BETSIZE_DISPLAY_Y = 380          # 金額顯示位置 Y 座標
+    BETSIZE_DISPLAY_Y = 370          # 金額顯示位置 Y 座標
 
     # 錯誤訊息圖片識別座標（基於預設視窗大小）
     ERROR_MESSAGE_LEFT_X = 240  # 左側錯誤訊息區域 X 座標
@@ -337,8 +337,8 @@ class Constants:
     ERROR_MESSAGE_PERSIST_SECONDS = 1  # 錯誤訊息持續秒數閾值
 
     # 截圖裁切範圍（像素）
-    BETSIZE_CROP_MARGIN_X = 50  # 金額模板水平裁切邊距
-    BETSIZE_CROP_MARGIN_Y = 20  # 金額模板垂直裁切邊距
+    BETSIZE_CROP_MARGIN_X = 40  # 金額模板水平裁切邊距
+    BETSIZE_CROP_MARGIN_Y = 10  # 金額模板垂直裁切邊距
     TEMPLATE_CROP_MARGIN = 20    # 通用模板裁切邊距
     
     # 遊戲金額配置（使用 frozenset 提升查詢效率）
