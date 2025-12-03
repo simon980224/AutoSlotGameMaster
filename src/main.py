@@ -13,10 +13,11 @@
 - 完善的錯誤處理與重試機制
 
 作者: 凡臻科技
-版本: 1.7.1
+版本: 1.8.0
 Python: 3.8+
 
 版本歷史:
+- v1.8.0: 優化關閉瀏覽器功能（'q' 指令），支援選擇性關閉指定瀏覽器
 - v1.7.1: 修正金額識別問題（統一使用 Constants 定義，移除重複定義和硬編碼數值）
 - v1.7.0: 新增規則執行功能（'r' 指令），支援自動切換金額並按空白鍵，規則循環執行
 - v1.6.2: 調整遊戲金額配置（GAME_BETSIZE 和 GAME_BETSIZE_TUPLE），從 73 種金額優化為 64 種金額
@@ -2740,7 +2741,11 @@ class GameControlCenter:
 
 【系統控制】
   h                顯示此幫助信息
-  q                退出控制中心
+  
+  q <編號>         關閉指定瀏覽器
+                   q 0      - 關閉所有瀏覽器並退出
+                   q 1      - 關閉第 1 個瀏覽器
+                   q 1,2,3  - 關閉第 1、2、3 個瀏覽器
 
 提示：所有指令都區分大小寫，請使用小寫字母
 """
@@ -3088,8 +3093,103 @@ class GameControlCenter:
         
         try:
             if cmd == 'q':
-                self.logger.info("正在退出控制中心")
-                return False
+                # 關閉瀏覽器指令
+                if not command_arguments:
+                    self.logger.error("指令格式錯誤，請使用: q <編號>")
+                    self.logger.info("  q 0      - 關閉所有瀏覽器並退出")
+                    self.logger.info("  q 1      - 關閉第 1 個瀏覽器")
+                    self.logger.info("  q 1,2,3  - 關閉第 1、2、3 個瀏覽器")
+                    return True
+                
+                try:
+                    # 解析參數
+                    target_indices = []
+                    
+                    # 處理逗號分隔的多個編號
+                    if ',' in command_arguments:
+                        try:
+                            indices = [int(x.strip()) for x in command_arguments.split(',')]
+                            for browser_index in indices:
+                                if browser_index < 1 or browser_index > len(self.browser_contexts):
+                                    self.logger.error(
+                                        f"瀏覽器編號 {browser_index} 無效，請輸入 1-{len(self.browser_contexts)} 之間的數字"
+                                    )
+                                    return True
+                            target_indices = indices
+                        except ValueError:
+                            self.logger.error(f"無效的編號格式: {command_arguments}，請使用數字和逗號 (例如: q 1,2,3)")
+                            return True
+                    else:
+                        # 單一數字
+                        try:
+                            index = int(command_arguments)
+                            if index == 0:
+                                # 0 表示所有瀏覽器
+                                target_indices = list(range(1, len(self.browser_contexts) + 1))
+                            elif index < 1 or index > len(self.browser_contexts):
+                                self.logger.error(
+                                    f"瀏覽器編號無效，請輸入 0 (全部) 或 1-{len(self.browser_contexts)} 之間的數字"
+                                )
+                                return True
+                            else:
+                                target_indices = [index]
+                        except ValueError:
+                            self.logger.error(f"無效的編號: {command_arguments}，請輸入數字 (例如: q 1 或 q 1,2)")
+                            return True
+                    
+                    # 顯示執行信息
+                    if len(target_indices) == len(self.browser_contexts):
+                        self.logger.info(f"開始關閉瀏覽器 (全部 {len(target_indices)} 個)")
+                    elif len(target_indices) == 1:
+                        username = self.browser_contexts[target_indices[0] - 1].credential.username
+                        self.logger.info(f"開始關閉瀏覽器 (瀏覽器 {target_indices[0]}: {username})")
+                    else:
+                        self.logger.info(f"開始關閉瀏覽器 ({len(target_indices)} 個)")
+                    
+                    # 關閉指定的瀏覽器
+                    closed_count = 0
+                    failed_browsers = []
+                    
+                    # 從後往前遍歷，避免索引問題
+                    for browser_index in sorted(target_indices, reverse=True):
+                        try:
+                            context = self.browser_contexts[browser_index - 1]
+                            username = context.credential.username
+                            
+                            # 關閉瀏覽器
+                            context.driver.quit()
+                            
+                            # 從列表中移除
+                            self.browser_contexts.pop(browser_index - 1)
+                            
+                            self.logger.info(f"✓ 已關閉瀏覽器 {browser_index} ({username})")
+                            closed_count += 1
+                            
+                        except Exception as e:
+                            username = self.browser_contexts[browser_index - 1].credential.username
+                            self.logger.error(f"關閉瀏覽器 {browser_index} ({username}) 失敗: {e}")
+                            failed_browsers.append((browser_index, username))
+                    
+                    # 顯示總結
+                    if closed_count == len(target_indices):
+                        self.logger.info(f"✓ 關閉完成: 全部 {closed_count} 個瀏覽器已關閉")
+                    else:
+                        self.logger.warning(
+                            f"⚠ 部分完成: {closed_count}/{len(target_indices)} 個瀏覽器已關閉"
+                        )
+                        if failed_browsers:
+                            for browser_index, username in failed_browsers:
+                                self.logger.error(f"  瀏覽器 {browser_index} ({username}) 失敗")
+                    
+                    # 如果所有瀏覽器都關閉了，退出控制中心
+                    if len(self.browser_contexts) == 0:
+                        self.logger.info("所有瀏覽器已關閉，退出控制中心")
+                        return False
+                    else:
+                        self.logger.info(f"剩餘 {len(self.browser_contexts)} 個瀏覽器仍在運行")
+                    
+                except Exception as e:
+                    self.logger.error(f"關閉瀏覽器時發生錯誤: {e}")
             
             elif cmd == 'h':
                 self.show_help()
@@ -3612,7 +3712,7 @@ class AutoSlotGameApp:
         """
         self.logger.info("")
         self.logger.info("━" * 60)
-        self.logger.info("金富翁遊戲自動化系統 v1.7.1")
+        self.logger.info("金富翁遊戲自動化系統 v1.8.0")
         self.logger.info("━" * 60)
         self.logger.info("")
         
