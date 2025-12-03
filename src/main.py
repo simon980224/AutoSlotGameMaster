@@ -337,7 +337,7 @@ class Constants:
 
     # 截圖裁切範圍（像素）
     BETSIZE_CROP_MARGIN_X = 40  # 金額模板水平裁切邊距
-    BETSIZE_CROP_MARGIN_Y = 20  # 金額模板垂直裁切邊距
+    BETSIZE_CROP_MARGIN_Y = 10  # 金額模板垂直裁切邊距
     TEMPLATE_CROP_MARGIN = 20    # 通用模板裁切邊距
     
     # 遊戲金額配置（使用 frozenset 提升查詢效率）
