@@ -61,34 +61,6 @@ import numpy as np
 from PIL import Image
 import io
 
-# 導入新模組化架構
-from autoslot import (
-    # 核心
-    Constants,
-    AutoSlotGameError,
-    ConfigurationError,
-    BrowserCreationError,
-    ProxyServerError,
-    ImageDetectionError,
-    UserCredential,
-    BetRule,
-    ProxyInfo,
-    BrowserContext,
-    OperationResult,
-    # 工具
-    LogLevel,
-    LoggerFactory,
-    cleanup_chromedriver_processes,
-    get_resource_path,
-    cv2_imread_unicode,
-    # 配置
-    ConfigReader,
-    # 管理器
-    BrowserHelper,
-    BrowserManager,
-    LocalProxyServerManager,
-)
-
 
 # 導出的公共 API
 __all__ = [
@@ -354,7 +326,7 @@ class Constants:
     BETSIZE_DECREASE_BUTTON_X = 360  # 減少金額按鈕 X 座標
     BETSIZE_DECREASE_BUTTON_Y = 370  # 減少金額按鈕 Y 座標
     BETSIZE_DISPLAY_X = 400          # 金額顯示位置 X 座標
-    BETSIZE_DISPLAY_Y = 380          # 金額顯示位置 Y 座標
+    BETSIZE_DISPLAY_Y = 370          # 金額顯示位置 Y 座標
 
     # 錯誤訊息圖片識別座標（基於預設視窗大小）
     ERROR_MESSAGE_LEFT_X = 240  # 左側錯誤訊息區域 X 座標
@@ -364,7 +336,7 @@ class Constants:
     ERROR_MESSAGE_PERSIST_SECONDS = 1  # 錯誤訊息持續秒數閾值
 
     # 截圖裁切範圍（像素）
-    BETSIZE_CROP_MARGIN_X = 50  # 金額模板水平裁切邊距
+    BETSIZE_CROP_MARGIN_X = 40  # 金額模板水平裁切邊距
     BETSIZE_CROP_MARGIN_Y = 20  # 金額模板垂直裁切邊距
     TEMPLATE_CROP_MARGIN = 20    # 通用模板裁切邊距
     
