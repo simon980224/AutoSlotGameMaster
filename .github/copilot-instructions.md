@@ -107,7 +107,7 @@ Chrome (使用本地 Proxy)
 所有資料類別使用 `@dataclass(frozen=True)` 確保不可變性：
 
 - `UserCredential(username, password, proxy)` - Proxy 格式: `host:port:username:password`
-- `BetRule(amount, duration)` - 下注金額與持續時間（分鐘）
+- `BetRule(amount, duration, min_seconds, max_seconds)` - 下注規則：金額、持續時間（分鐘）、最小間隔秒數、最大間隔秒數
 - `ProxyInfo.from_connection_string()` - 從連接字串建立實例
 
 ### 7. 常數管理 (v1.5.0 新增)
@@ -151,7 +151,7 @@ Chrome (使用本地 Proxy)
 ### 配置檔案
 
 - `lib/用戶資料.txt` - 格式: `帳號,密碼,IP:port:user:password`（第三欄為 Proxy，可為空）
-- `lib/用戶規則.txt` - 格式: `金額:時間(分鐘)`
+- `lib/用戶規則.txt` - 格式: `金額:時間(分鐘):最小(秒數):最大(秒數)`
 - 使用 `ConfigReader._read_file_lines()` 讀取，自動跳過標題行和註釋
 
 ### 圖片資源

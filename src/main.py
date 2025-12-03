@@ -388,6 +388,8 @@ class BetRule:
     """下注規則資料結構（不可變）。"""
     amount: float
     duration: int  # 分鐘
+    min_seconds: float  # 最小間隔秒數
+    max_seconds: float  # 最大間隔秒數
     
     def __post_init__(self) -> None:
         """驗證資料完整性"""
@@ -395,6 +397,12 @@ class BetRule:
             raise ValueError(f"下注金額必須大於 0: {self.amount}")
         if self.duration <= 0:
             raise ValueError(f"持續時間必須大於 0: {self.duration}")
+        if self.min_seconds <= 0:
+            raise ValueError(f"最小間隔秒數必須大於 0: {self.min_seconds}")
+        if self.max_seconds <= 0:
+            raise ValueError(f"最大間隔秒數必須大於 0: {self.max_seconds}")
+        if self.min_seconds > self.max_seconds:
+            raise ValueError(f"最小間隔不能大於最大間隔: {self.min_seconds} > {self.max_seconds}")
 
 
 @dataclass(frozen=True)
@@ -805,7 +813,7 @@ class ConfigReader:
     ) -> List[BetRule]:
         """讀取下注規則檔案。
         
-        檔案格式: 金額:時間(分鐘) (首行為標題)
+        檔案格式: 金額:時間(分鐘):最小(秒數):最大(秒數) (首行為標題)
         
         Args:
             filename: 檔案名稱
@@ -823,14 +831,21 @@ class ConfigReader:
             try:
                 parts = line.split(':')
                 
-                if len(parts) < 2:
+                if len(parts) < 4:
                     self.logger.warning(f"第 {line_number} 行格式不完整 已跳過 {line}")
                     continue
                 
                 amount = float(parts[0].strip())
                 duration = int(parts[1].strip())
+                min_seconds = float(parts[2].strip())
+                max_seconds = float(parts[3].strip())
                 
-                rules.append(BetRule(amount=amount, duration=duration))
+                rules.append(BetRule(
+                    amount=amount, 
+                    duration=duration,
+                    min_seconds=min_seconds,
+                    max_seconds=max_seconds
+                ))
                 
             except (ValueError, IndexError) as e:
                 self.logger.warning(f"第 {line_number} 行無法解析 {e}")
@@ -2702,6 +2717,8 @@ class GameControlCenter:
                    範例: s 1,2  (間隔 1~2 秒)
                    
   r                開始執行規則（依照用戶規則.txt自動切換金額）
+                   格式: 金額:時間(分鐘):最小(秒數):最大(秒數)
+                   範例: 4:10:1:1 表示金額4，持續10分鐘，間隔1~1秒
                    
   p                暫停自動按鍵/規則執行
   
@@ -2858,7 +2875,8 @@ class GameControlCenter:
                 self.logger.info("─" * 60)
                 self.logger.info(
                     f"規則 {rule_index + 1}/{len(self.bet_rules)}: "
-                    f"金額 {current_rule.amount}, 持續 {current_rule.duration} 分鐘"
+                    f"金額 {current_rule.amount}, 持續 {current_rule.duration} 分鐘, "
+                    f"間隔 {current_rule.min_seconds}~{current_rule.max_seconds} 秒"
                 )
                 
                 # === 步驟 2: 調整所有瀏覽器的下注金額 ===
@@ -2883,7 +2901,14 @@ class GameControlCenter:
                             self.logger.error(f"  [{username}] 調整失敗")
                 
                 # === 步驟 3: 啟動自動按鍵 ===
-                self.logger.info(f"啟動自動按鍵 (持續 {current_rule.duration} 分鐘)")
+                self.logger.info(
+                    f"啟動自動按鍵 (持續 {current_rule.duration} 分鐘, "
+                    f"間隔 {current_rule.min_seconds}~{current_rule.max_seconds} 秒)"
+                )
+                
+                # 設置每個瀏覽器的隨機間隔
+                self.min_interval = current_rule.min_seconds
+                self.max_interval = current_rule.max_seconds
                 
                 # 清除停止事件（確保自動按鍵可以運行）
                 self._stop_event.clear()
@@ -2980,7 +3005,10 @@ class GameControlCenter:
         # 顯示規則列表
         self.logger.info("載入的規則:")
         for i, rule in enumerate(self.bet_rules, 1):
-            self.logger.info(f"  {i}. 金額 {rule.amount}, 持續 {rule.duration} 分鐘")
+            self.logger.info(
+                f"  {i}. 金額 {rule.amount}, 持續 {rule.duration} 分鐘, "
+                f"間隔 {rule.min_seconds}~{rule.max_seconds} 秒"
+            )
         
         # 清除停止事件
         self._stop_event.clear()
@@ -3424,14 +3452,8 @@ class GameControlCenter:
                     self.logger.error(f"設定自動旋轉時發生錯誤: {e}")
             
             elif cmd == 'c':
-                # 定義可用金額列表
-                GAME_BETSIZE = (
-                    0.4, 0.8, 1, 1.2, 1.6, 2, 2.4, 2.8, 3, 3.2, 3.6, 4, 5, 6, 7, 8, 9, 10,
-                    12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 48, 56, 60, 64, 72, 80, 100,
-                    120, 140, 160, 180, 200, 240, 280, 300, 320, 360, 400, 420, 480, 500,
-                    540, 560, 600, 640, 700, 720, 800, 840, 900, 960, 980, 1000, 1080,
-                    1120, 1200, 1260, 1280, 1400, 1440, 1600, 1800, 2000
-                )
+                # 使用常數定義的金額列表
+                GAME_BETSIZE = Constants.GAME_BETSIZE_TUPLE
                 
                 self.logger.info("")
                 self.logger.info("=== 截取金額模板工具 ===")
