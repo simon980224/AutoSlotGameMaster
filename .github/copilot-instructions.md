@@ -8,12 +8,12 @@
 
 ## 版本資訊
 
-**目前版本**: v2.0.1
+**目前版本**: v1.6.2
 
 **更新內容**:
 
-- v2.0.1: 調整金額顯示和裁切參數（BETSIZE_DISPLAY_Y: 380→370, CROP_MARGIN_X: 50→40, CROP_MARGIN_Y: 20→10）
-- v2.0.0: 完成模組化架構遷移，建立 autoslot 套件（core, utils, config, managers 模組）
+- v1.6.2: 調整遊戲金額配置（GAME_BETSIZE 和 GAME_BETSIZE_TUPLE），從 73 種金額優化為 64 種金額
+- v1.6.1: 調整金額顯示和裁切參數（BETSIZE_DISPLAY_Y: 380→370, CROP_MARGIN_X: 50→40, CROP_MARGIN_Y: 20→10）
 - v1.6.0: 新增 lobby_confirm 錯誤訊息檢測與自動重啟機制（雙區域檢測、1 秒閾值觸發）
 - v1.5.0: 統一管理所有魔法數字（視窗尺寸、座標、等待時間、重試次數等），提升程式碼可維護性
 - v1.4.3: 優化瀏覽器網路設定（啟用 QUIC、TCP Fast Open、NetworkService）
@@ -244,7 +244,7 @@ python build.py
 
 ### 調整下注金額邏輯
 
-- **可用金額**: 定義在 `Constants.GAME_BETSIZE_TUPLE`（必須按順序排列）
+- **可用金額**: 定義在 `Constants.GAME_BETSIZE_TUPLE`（必須按順序排列，共 64 種金額）
 - **識別方法**: `SyncBrowserOperator.get_current_betsize()` 使用圖片比對
 - **調整方法**: `adjust_betsize()` 計算索引差異，點擊增加/減少按鈕
 - **按鈕座標**: 增加 `(440, 370)`，減少 `(360, 370)`（基於 600x400 視窗）

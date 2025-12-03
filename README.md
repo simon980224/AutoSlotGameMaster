@@ -13,7 +13,7 @@
 - 🚀 **多瀏覽器並行控制** - 使用執行緒池同步管理多個瀏覽器實例
 - 🔍 **圖片識別** - OpenCV 模板匹配，自動檢測遊戲畫面並執行操作
 - 🌐 **Proxy 中繼** - 本地無認證 Proxy 伺服器，自動轉發到遠端認證 Proxy
-- 💰 **自動下注** - 智慧識別和調整下注金額（支援 73 種金額）
+- 💰 **自動下注** - 智慧識別和調整下注金額（支援 64 種金額）
 - 🎮 **遊戲控制中心** - 互動式命令介面，即時控制所有瀏覽器
 - 🔄 **自動化流程** - 自動登入、導航、圖片檢測、點擊操作
 - 📦 **一鍵打包** - 使用 PyInstaller 打包成 Windows 可執行檔
@@ -69,11 +69,11 @@ AutoSlotGameMaster/
 │   ├── lobby_login.png      # 登入畫面模板
 │   ├── lobby_confirm.png    # 確認按鈕模板
 │   ├── error_message.png    # 錯誤訊息模板（v1.6.0 新增）
-│   └── bet_size/            # 金額識別模板（73 張圖片）
-│       ├── 0.4.png
-│       ├── 0.8.png
-│       ├── 1.png
-│       └── ... (共 73 種金額)
+│   └── bet_size/            # 金額識別模板（64 張圖片）
+│       ├── 2.png
+│       ├── 4.png
+│       ├── 6.png
+│       └── ... (共 64 種金額)
 ├── .github/
 │   └── copilot-instructions.md  # AI 代理指南
 ├── chromedriver             # Chrome 驅動程式 (macOS/Linux)
@@ -438,27 +438,20 @@ google-chrome --version  # Linux
 
 ## 📝 版本歷史
 
-### v2.0.1 (2025-12-03)
+### v1.6.2 (2025-12-03)
+
+- 🎯 **金額配置優化**：調整遊戲金額配置以符合實際遊戲設定
+- 🔢 更新 `GAME_BETSIZE` 和 `GAME_BETSIZE_TUPLE`：從 73 種金額優化為 64 種金額
+- 📊 移除不常用的金額選項（如 0.4, 0.8, 1.0 等小額），保留 2-2000 範圍
+- ✨ 提升金額識別準確度和調整效率
+
+### v1.6.1 (2025-12-03)
 
 - 🔧 **參數優化**：調整金額識別相關參數以提高準確度
 - 📐 `BETSIZE_DISPLAY_Y`: 380 → 370（金額顯示位置 Y 座標）
 - ✂️ `BETSIZE_CROP_MARGIN_X`: 50 → 40（金額模板水平裁切邊距）
 - ✂️ `BETSIZE_CROP_MARGIN_Y`: 20 → 10（金額模板垂直裁切邊距）
 - 📈 提升金額讀取和模板匹配的精確度
-
-### v2.0.0 (2025-12-03)
-
-- 🏗️ **重大重構**：完成模組化架構遷移
-- 📦 建立 `autoslot` 套件，將功能拆分為獨立模組
-- 🎯 **core 模組**：constants（系統常數）、exceptions（例外類別）、models（資料模型）
-- 🛠️ **utils 模組**：logger（彩色日誌系統）、helpers（輔助函式）
-- ⚙️ **config 模組**：reader（配置讀取器）
-- 🔧 **managers 模組**：browser_manager（瀏覽器管理）、proxy_manager（Proxy 管理）、browser_helper（輔助工具）
-- ✨ 採用依賴注入、上下文管理器、執行緒安全設計
-- 📈 大幅提升程式碼可維護性、可測試性和可擴展性
-- 🔄 支援優先使用本機驅動程式，自動降級到 WebDriver Manager
-- 📚 完整的文檔和 API 說明（MODULAR_MIGRATION_GUIDE.md、MODULARIZATION_PROGRESS.md）
-- 🎉 所有模組通過語法檢查，無錯誤
 
 ### v1.6.0 (2025-12-01)
 
