@@ -10,7 +10,7 @@ AutoSlotGameMaster 打包腳本
     pip install pyinstaller
 
 作者: simon980224
-版本: 2.0.1
+版本: 1.6.0
 """
 
 import os
@@ -37,8 +37,6 @@ def clean_build_artifacts() -> None:
         'dist', 
         '__pycache__',
         'src/__pycache__',
-        'src/autoslot/__pycache__',
-        'src/autoslot/*/__pycache__',
         '*.spec',
         '*.pyc',
         '*.pyo',
@@ -87,8 +85,7 @@ def check_requirements() -> bool:
     
     required_dirs = [
         'img',
-        'lib',
-        'src/autoslot'  # 新增：檢查 autoslot 模組目錄
+        'lib'
     ]
     
     all_exists = True
@@ -133,44 +130,6 @@ def check_pyinstaller() -> bool:
         return False
 
 
-def verify_autoslot_structure() -> bool:
-    """驗證 autoslot 模組結構完整性"""
-    print_step("模組", "驗證 autoslot 套件結構...")
-    
-    required_modules = [
-        'src/autoslot/__init__.py',
-        'src/autoslot/core/__init__.py',
-        'src/autoslot/core/constants.py',
-        'src/autoslot/core/exceptions.py',
-        'src/autoslot/core/models.py',
-        'src/autoslot/utils/__init__.py',
-        'src/autoslot/utils/logger.py',
-        'src/autoslot/utils/helpers.py',
-        'src/autoslot/config/__init__.py',
-        'src/autoslot/config/reader.py',
-        'src/autoslot/managers/__init__.py',
-        'src/autoslot/managers/browser_helper.py',
-        'src/autoslot/managers/browser_manager.py',
-        'src/autoslot/managers/proxy_manager.py',
-    ]
-    
-    all_exists = True
-    
-    for module in required_modules:
-        if os.path.isfile(module):
-            print(f"  ✓ {module}")
-        else:
-            print(f"  ✗ 缺少模組: {module}")
-            all_exists = False
-    
-    if all_exists:
-        print("\n  ✓ autoslot 套件結構完整")
-    else:
-        print("\n  ✗ autoslot 套件結構不完整")
-    
-    return all_exists
-
-
 def build_executable() -> bool:
     """使用 PyInstaller 構建可執行檔"""
     print_step("構建", "開始打包可執行檔...")
@@ -184,12 +143,6 @@ def build_executable() -> bool:
         '--icon=sett.ico',                    # 設定圖示（.ico 格式，包含多種尺寸）
         '--clean',                            # 清理臨時檔案
         '--noconfirm',                        # 覆蓋輸出目錄不提示
-        '--hidden-import=autoslot',           # 確保包含 autoslot 套件
-        '--hidden-import=autoslot.core',      # 包含 core 模組
-        '--hidden-import=autoslot.utils',     # 包含 utils 模組
-        '--hidden-import=autoslot.config',    # 包含 config 模組
-        '--hidden-import=autoslot.managers',  # 包含 managers 模組
-        '--collect-all=autoslot',             # 收集 autoslot 所有子模組
         # 注意：移除 --add-data 選項，讓 img 和 lib 目錄放在 exe 旁邊
         # 這樣使用者可以方便地編輯配置檔案和圖片模板
         'src/main.py'                         # 主程式入口
@@ -253,9 +206,7 @@ def clean_post_build() -> None:
         'build',
         '*.spec',
         '__pycache__',
-        'src/__pycache__',
-        'src/autoslot/__pycache__',
-        'src/autoslot/*/__pycache__'
+        'src/__pycache__'
     ]
     
     for artifact in artifacts:
@@ -322,8 +273,7 @@ def show_result() -> None:
 def main():
     """主函式"""
     print("\n" + "="*70)
-    print(" AutoSlotGameMaster v2.0.1 打包工具")
-    print(" 模組化架構版本")
+    print(" AutoSlotGameMaster v1.1.0 打包工具")
     print("="*70)
     
     # 1. 清理舊的構建檔案
@@ -339,23 +289,18 @@ def main():
         print("\n❌ PyInstaller 未安裝，無法繼續構建")
         sys.exit(1)
     
-    # 4. 驗證 autoslot 模組結構
-    if not verify_autoslot_structure():
-        print("\n❌ autoslot 套件結構不完整，無法繼續構建")
-        sys.exit(1)
-    
-    # 5. 構建可執行檔
+    # 4. 構建可執行檔
     if not build_executable():
         print("\n❌ 構建失敗")
         sys.exit(1)
     
-    # 6. 複製資源檔案
+    # 5. 複製資源檔案
     copy_resources()
     
-    # 7. 清理臨時檔案
+    # 6. 清理臨時檔案
     clean_post_build()
     
-    # 8. 顯示結果
+    # 7. 顯示結果
     show_result()
     
     print("\n✅ 打包完成!\n")
