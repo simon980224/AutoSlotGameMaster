@@ -13,10 +13,24 @@
 - 完善的錯誤處理與重試機制
 
 作者: 凡臻科技
-版本: 1.0.0
+版本: 1.1.2
 Python: 3.8+
 
 版本歷史:
+- v1.1.2: 瀏覽器建立時即固定視窗大小
+  * create_browser_context 自動啟動 WindowSizeLocker 監控
+  * 瀏覽器關閉時自動停止視窗監控執行緒
+- v1.1.1: 優化視窗管理機制
+  * WindowSizeLocker 自動監控視窗大小（預設 1280x720）
+  * 移除視窗排列功能，簡化為單純的大小控制
+  * resize_and_position 改為自動啟動視窗大小鎖定器
+  * 視窗大小改變時顯示重置通知（🔄 圖示）
+- v1.1.0: 優化座標系統與視窗管理
+  * 視窗大小從 600x400 升級至 1280x720
+  * 所有按鈕座標改為基於 Canvas 的動態比例計算
+  * 新增 WindowSizeLocker 類別，持續鎖定視窗大小
+  * BETSIZE 按鈕座標改為相對於 Canvas 的比例座標
+  * 新增 BrowserHelper.check_and_fix_window_size() 方法
 - v1.0.0: 賽特二初始版本發布
 """
 
@@ -74,6 +88,7 @@ __all__ = [
     'LoggerFactory',
     # 輔助類別
     'BrowserHelper',
+    'WindowSizeLocker',
     # 主要類別
     'ConfigReader',
     'BrowserManager',
@@ -248,7 +263,6 @@ class Constants:
     GAME_PROVIDER_BUTTON = "/html/body/div/div/div[2]/div/div/div[1]/div[8]/div[1]"
     START_GAME_BUTTON = "//*[@id='gameList']/div[2]/div[2]/button"
     
-    GAME_IFRAME = "gameFrame-0"
     GAME_CANVAS = "GameCanvas"
     
     # 圖片檢測配置
@@ -263,29 +277,29 @@ class Constants:
     
     # Canvas 動態計算比例（用於點擊座標）
     # lobby_login 按鈕座標比例
-    LOBBY_LOGIN_BUTTON_X_RATIO = 0.55  # lobby_login 開始遊戲按鈕 X 座標比例
-    LOBBY_LOGIN_BUTTON_Y_RATIO = 1.2   # lobby_login 開始遊戲按鈕 Y 座標比例
+    LOBBY_LOGIN_BUTTON_X_RATIO = 0.50  # lobby_login 開始遊戲按鈕 X 座標比例
+    LOBBY_LOGIN_BUTTON_Y_RATIO = 0.90  # lobby_login 開始遊戲按鈕 Y 座標比例
     
     # lobby_confirm 按鈕座標比例
-    LOBBY_CONFIRM_BUTTON_X_RATIO = 0.78  # lobby_confirm 確認按鈕 X 座標比例
-    LOBBY_CONFIRM_BUTTON_Y_RATIO = 1.15  # lobby_confirm 確認按鈕 Y 座標比例
+    LOBBY_CONFIRM_BUTTON_X_RATIO = 0.75  # lobby_confirm 確認按鈕 X 座標比例
+    LOBBY_CONFIRM_BUTTON_Y_RATIO = 0.86  # lobby_confirm 確認按鈕 Y 座標比例
     
     # 購買免費遊戲按鈕座標比例
-    BUY_FREE_GAME_BUTTON_X_RATIO = 0.23  # 免費遊戲區域按鈕 X 座標比例
-    BUY_FREE_GAME_BUTTON_Y_RATIO = 1.05  # 免費遊戲區域按鈕 Y 座標比例
-    BUY_FREE_GAME_CONFIRM_X_RATIO = 0.65  # 免費遊戲確認按鈕 X 座標比例
-    BUY_FREE_GAME_CONFIRM_Y_RATIO = 1.2   # 免費遊戲確認按鈕 Y 座標比例
+    BUY_FREE_GAME_BUTTON_X_RATIO = 0.14025  # 免費遊戲區域按鈕 X 座標比例
+    BUY_FREE_GAME_BUTTON_Y_RATIO = 0.75  # 免費遊戲區域按鈕 Y 座標比例
+    BUY_FREE_GAME_CONFIRM_X_RATIO = 0.597  # 免費遊戲確認按鈕 X 座標比例
+    BUY_FREE_GAME_CONFIRM_Y_RATIO = 0.89   # 免費遊戲確認按鈕 Y 座標比例
     BUY_FREE_GAME_WAIT_SECONDS = 10  # 購買後等待秒數
     
     # 自動旋轉按鈕座標比例
-    AUTO_SPIN_BUTTON_X_RATIO = 0.8  # 自動轉按鈕 X 座標比例
-    AUTO_SPIN_BUTTON_Y_RATIO = 1.05   # 自動轉按鈕 Y 座標比例
-    AUTO_SPIN_10_X_RATIO = 0.5        # 10次按鈕 X 座標比例
-    AUTO_SPIN_10_Y_RATIO = 0.83       # 10次按鈕 Y 座標比例
-    AUTO_SPIN_50_X_RATIO = 0.56       # 50次按鈕 X 座標比例
-    AUTO_SPIN_50_Y_RATIO = 0.83       # 50次按鈕 Y 座標比例
-    AUTO_SPIN_100_X_RATIO = 0.62      # 100次按鈕 X 座標比例
-    AUTO_SPIN_100_Y_RATIO = 0.83      # 100次按鈕 Y 座標比例
+    AUTO_SPIN_BUTTON_X_RATIO = 0.78  # 自動轉按鈕 X 座標比例
+    AUTO_SPIN_BUTTON_Y_RATIO = 0.75   # 自動轉按鈕 Y 座標比例
+    AUTO_SPIN_10_X_RATIO = 0.421875   # 10次按鈕 X 座標比例
+    AUTO_SPIN_10_Y_RATIO = 0.5        # 10次按鈕 Y 座標比例
+    AUTO_SPIN_50_X_RATIO = 0.5        # 50次按鈕 X 座標比例
+    AUTO_SPIN_50_Y_RATIO = 0.5        # 50次按鈕 Y 座標比例
+    AUTO_SPIN_100_X_RATIO = 0.578125  # 100次按鈕 X 座標比例
+    AUTO_SPIN_100_Y_RATIO = 0.5       # 100次按鈕 Y 座標比例
     
     # 操作相關常量
     DEFAULT_WAIT_SECONDS = 3  # 預設等待時間（秒）
@@ -323,17 +337,17 @@ class Constants:
     LOBBY_CONFIRM_CHECK_ATTEMPTS = 3   # lobby_confirm 檢測嘗試次數（之後檢查錯誤）
     
     # 視窗排列配置
-    DEFAULT_WINDOW_WIDTH = 600
-    DEFAULT_WINDOW_HEIGHT = 400
+    DEFAULT_WINDOW_WIDTH = 1280
+    DEFAULT_WINDOW_HEIGHT = 720
     DEFAULT_WINDOW_COLUMNS = 4
     
-    # 下注金額調整按鈕座標（基於預設視窗大小）
-    BETSIZE_INCREASE_BUTTON_X = 440  # 增加金額按鈕 X 座標
-    BETSIZE_INCREASE_BUTTON_Y = 370  # 增加金額按鈕 Y 座標
-    BETSIZE_DECREASE_BUTTON_X = 360  # 減少金額按鈕 X 座標
-    BETSIZE_DECREASE_BUTTON_Y = 370  # 減少金額按鈕 Y 座標
-    BETSIZE_DISPLAY_X = 400          # 金額顯示位置 X 座標
-    BETSIZE_DISPLAY_Y = 370          # 金額顯示位置 Y 座標
+    # 下注金額調整按鈕座標比例（基於 Canvas 區域）
+    BETSIZE_INCREASE_BUTTON_X_RATIO = 0.796   # 增加金額按鈕 X 座標比例
+    BETSIZE_INCREASE_BUTTON_Y_RATIO = 0.89    # 增加金額按鈕 Y 座標比例
+    BETSIZE_DECREASE_BUTTON_X_RATIO = 0.6325  # 減少金額按鈕 X 座標比例
+    BETSIZE_DECREASE_BUTTON_Y_RATIO = 0.89    # 減少金額按鈕 Y 座標比例
+    BETSIZE_DISPLAY_X_RATIO = 0.71          # 金額顯示位置 X 座標比例
+    BETSIZE_DISPLAY_Y_RATIO = 0.89            # 金額顯示位置 Y 座標比例
 
     # 錯誤訊息圖片識別座標（基於預設視窗大小）
     ERROR_MESSAGE_LEFT_X = 240  # 左側錯誤訊息區域 X 座標
@@ -342,9 +356,9 @@ class Constants:
     ERROR_MESSAGE_RIGHT_Y = 190   # 右側錯誤訊息區域 Y 座標
     ERROR_MESSAGE_PERSIST_SECONDS = 1  # 錯誤訊息持續秒數閾值
 
-    # 截圖裁切範圍（像素）
-    BETSIZE_CROP_MARGIN_X = 40  # 金額模板水平裁切邊距
-    BETSIZE_CROP_MARGIN_Y = 10  # 金額模板垂直裁切邊距
+    # 截圖裁切範圍（像素，Retina 顯示器會自動 2 倍縮放）
+    BETSIZE_CROP_MARGIN_X = 150   # 金額模板水平裁切邊距（實際 300px）
+    BETSIZE_CROP_MARGIN_Y = 40   # 金額模板垂直裁切邊距（實際 600px）
     TEMPLATE_CROP_MARGIN = 20    # 通用模板裁切邊距
     
     # 遊戲金額配置（使用 frozenset 提升查詢效率）
@@ -1269,6 +1283,9 @@ class BrowserManager:
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--no-sandbox")
         
+        # 視窗大小設定（固定 1280x720）
+        chrome_options.add_argument(f"--window-size={Constants.DEFAULT_WINDOW_WIDTH},{Constants.DEFAULT_WINDOW_HEIGHT}")
+        
         # 背景執行優化設定
         chrome_options.add_argument("--disable-backgrounding-occluded-windows")
         chrome_options.add_argument("--disable-renderer-backgrounding")
@@ -1389,6 +1406,10 @@ class BrowserManager:
             driver.set_script_timeout(Constants.DEFAULT_SCRIPT_TIMEOUT)
             driver.implicitly_wait(Constants.DEFAULT_IMPLICIT_WAIT)
         
+        # 視窗大小設定（確保為 1280x720）
+        with suppress(Exception):
+            driver.set_window_size(Constants.DEFAULT_WINDOW_WIDTH, Constants.DEFAULT_WINDOW_HEIGHT)
+        
         # 網路優化
         with suppress(Exception):
             driver.execute_cdp_cmd("Network.enable", {})
@@ -1463,16 +1484,34 @@ class BrowserManager:
             BrowserCreationError: 建立失敗
         """
         driver = None
+        size_locker = None
         try:
             driver = self.create_webdriver(local_proxy_port=proxy_port)
+            
+            # 立即啟動視窗大小鎖定器
+            size_locker = WindowSizeLocker(
+                driver, 
+                Constants.DEFAULT_WINDOW_WIDTH, 
+                Constants.DEFAULT_WINDOW_HEIGHT
+            )
+            size_locker.start()
+            
             context = BrowserContext(
                 driver=driver,
                 credential=credential,
                 index=index,
                 proxy_port=proxy_port
             )
+            # 將 size_locker 附加到 context，供後續使用
+            context.size_locker = size_locker
+            
             yield context
         finally:
+            # 先停止視窗監控
+            if size_locker:
+                with suppress(Exception):
+                    size_locker.stop()
+            # 再關閉瀏覽器
             if driver:
                 with suppress(Exception):
                     driver.quit()
@@ -1930,35 +1969,33 @@ class SyncBrowserOperator:
         columns: int = Constants.DEFAULT_WINDOW_COLUMNS,
         timeout: Optional[float] = None
     ) -> List[OperationResult]:
-        """調整所有瀏覽器視窗大小並進行排列。
+        """調整所有瀏覽器視窗大小（預設 1280x720）。
         
         Args:
             browser_contexts: 瀏覽器上下文列表
-            width: 視窗寬度
-            height: 視窗高度
-            columns: 每行視窗數量（預設4列）
+            width: 視窗寬度（預設 1280）
+            height: 視窗高度（預設 720）
+            columns: 已棄用，保留參數以維持相容性
             timeout: 超時時間
             
         Returns:
             操作結果列表
         """
-        def resize_and_position_operation(context: BrowserContext, index: int, total: int) -> bool:
-            # 計算視窗位置 (4x3 排列)
-            row = (index - 1) // columns
-            col = (index - 1) % columns
-            
-            x = col * width
-            y = row * height
-            
-            # 調整視窗大小和位置
+        def resize_operation(context: BrowserContext, index: int, total: int) -> bool:
+            # 只調整視窗大小，不再排列位置
             context.driver.set_window_size(width, height)
-            context.driver.set_window_position(x, y)
+            
+            # 啟動視窗大小鎖定器
+            if not hasattr(context, 'size_locker'):
+                context.size_locker = WindowSizeLocker(context.driver, width, height)
+                context.size_locker.start()
+            
             return True
         
         return self.execute_sync(
             browser_contexts,
-            resize_and_position_operation,
-            f"調整視窗大小為 {width}x{height} 並進行 {columns}列排列",
+            resize_operation,
+            f"調整視窗大小為 {width}x{height}",
             timeout=timeout
         )
     
@@ -2119,27 +2156,40 @@ class SyncBrowserOperator:
             self.logger.error(f"比對圖片時發生錯誤: {e}")
             return None, 0.0
     
-    def _click_betsize_button(self, driver: WebDriver, x: float, y: float) -> None:
-        """點擊下注金額調整按鈕。
+    def _click_betsize_button(self, driver: WebDriver, x_ratio: float, y_ratio: float) -> None:
+        """點擊下注金額調整按鈕（使用 Canvas 座標比例）。
         
         Args:
             driver: WebDriver 實例
-            x: X 座標 (基於預設視窗大小)
-            y: Y 座標 (基於預設視窗大小)
+            x_ratio: X 座標比例（相對於 Canvas）
+            y_ratio: Y 座標比例（相對於 Canvas）
         """
-        # 截取畫面獲取實際尺寸
-        screenshot = driver.get_screenshot_as_png()
-        screenshot_img = Image.open(io.BytesIO(screenshot))
-        image_width, image_height = screenshot_img.size
-        
-        # 計算縮放後的實際座標
-        actual_x, actual_y = BrowserHelper.calculate_scaled_position(
-            x, y,
-            image_width, image_height
-        )
-        
-        # 執行點擊
-        BrowserHelper.execute_cdp_click(driver, actual_x, actual_y)
+        # 取得 Canvas 區域
+        try:
+            rect = driver.execute_script(f"""
+                const canvas = document.getElementById('{Constants.GAME_CANVAS}');
+                if (!canvas) {{
+                    return {{error: 'Canvas not found'}};
+                }}
+                const r = canvas.getBoundingClientRect();
+                return {{x: r.left, y: r.top, w: r.width, h: r.height}};
+            """)
+            
+            if 'error' in rect:
+                self.logger.error(f"找不到 Canvas 元素 (ID: {Constants.GAME_CANVAS})")
+                return
+            
+            # 直接計算實際點擊座標（避免重複計算）
+            actual_x = rect["x"] + rect["w"] * x_ratio
+            actual_y = rect["y"] + rect["h"] * y_ratio
+            
+            # 除錯資訊
+            self.logger.debug(f"Canvas rect: {rect}, 點擊座標: ({actual_x}, {actual_y}), 比例: ({x_ratio}, {y_ratio})")
+            
+            # 執行點擊
+            BrowserHelper.execute_cdp_click(driver, actual_x, actual_y)
+        except Exception as e:
+            self.logger.error(f"點擊 BETSIZE 按鈕失敗: {e}")
     
     def adjust_betsize(self, driver: WebDriver, target_amount: float, max_attempts: int = None) -> bool:
         """調整下注金額到目標值（優化版）。
@@ -2177,21 +2227,21 @@ class SyncBrowserOperator:
             target_index = Constants.GAME_BETSIZE_TUPLE.index(target_amount)
             diff = target_index - current_index
             
-            # 設定點擊座標（基於預設視窗大小）
+            # 設定點擊座標比例（基於 Canvas）
             if diff > 0:
                 # 增加金額
-                click_x = Constants.BETSIZE_INCREASE_BUTTON_X
-                click_y = Constants.BETSIZE_INCREASE_BUTTON_Y
+                click_x_ratio = Constants.BETSIZE_INCREASE_BUTTON_X_RATIO
+                click_y_ratio = Constants.BETSIZE_INCREASE_BUTTON_Y_RATIO
                 estimated_steps = diff
             else:
                 # 減少金額
-                click_x = Constants.BETSIZE_DECREASE_BUTTON_X
-                click_y = Constants.BETSIZE_DECREASE_BUTTON_Y
+                click_x_ratio = Constants.BETSIZE_DECREASE_BUTTON_X_RATIO
+                click_y_ratio = Constants.BETSIZE_DECREASE_BUTTON_Y_RATIO
                 estimated_steps = abs(diff)
             
             # 開始調整
             for i in range(estimated_steps):
-                self._click_betsize_button(driver, click_x, click_y)
+                self._click_betsize_button(driver, click_x_ratio, click_y_ratio)
                 time.sleep(Constants.BETSIZE_ADJUST_STEP_WAIT)
             
             time.sleep(Constants.BETSIZE_ADJUST_VERIFY_WAIT)
@@ -2210,9 +2260,9 @@ class SyncBrowserOperator:
                 
                 # 根據當前金額決定點擊哪個按鈕
                 if current_amount < target_amount:
-                    self._click_betsize_button(driver, Constants.BETSIZE_INCREASE_BUTTON_X, Constants.BETSIZE_INCREASE_BUTTON_Y)  # 增加
+                    self._click_betsize_button(driver, Constants.BETSIZE_INCREASE_BUTTON_X_RATIO, Constants.BETSIZE_INCREASE_BUTTON_Y_RATIO)  # 增加
                 else:
-                    self._click_betsize_button(driver, Constants.BETSIZE_DECREASE_BUTTON_X, Constants.BETSIZE_DECREASE_BUTTON_Y)  # 減少
+                    self._click_betsize_button(driver, Constants.BETSIZE_DECREASE_BUTTON_X_RATIO, Constants.BETSIZE_DECREASE_BUTTON_Y_RATIO)  # 減少
                 
                 time.sleep(Constants.BETSIZE_ADJUST_RETRY_WAIT)
             
@@ -2224,7 +2274,7 @@ class SyncBrowserOperator:
             return False
     
     def capture_betsize_template(self, driver: WebDriver, amount: float) -> bool:
-        """截取下注金額模板。
+        """截取下注金額模板（使用 Canvas 座標比例）。
         
         Args:
             driver: WebDriver 實例
@@ -2234,9 +2284,28 @@ class SyncBrowserOperator:
             bool: 截取成功返回True
         """
         try:
-            # 固定座標：金額顯示位置（基於預設視窗大小）
-            target_x = Constants.BETSIZE_DISPLAY_X
-            target_y = Constants.BETSIZE_DISPLAY_Y
+            # 取得 Canvas 區域
+            rect = driver.execute_script(f"""
+                const canvas = document.getElementById('{Constants.GAME_CANVAS}');
+                if (!canvas) {{
+                    return {{error: 'Canvas not found'}};
+                }}
+                const r = canvas.getBoundingClientRect();
+                return {{x: r.left, y: r.top, w: r.width, h: r.height}};
+            """)
+            
+            if 'error' in rect:
+                self.logger.error(f"找不到 Canvas 元素 (ID: {Constants.GAME_CANVAS})")
+                return False
+            
+            # 直接計算金額顯示位置（避免重複計算）
+            display_x = rect["x"] + rect["w"] * Constants.BETSIZE_DISPLAY_X_RATIO
+            display_y = rect["y"] + rect["h"] * Constants.BETSIZE_DISPLAY_Y_RATIO
+            
+            # # 除錯資訊：顯示計算結果
+            # self.logger.info(f"📍 Canvas: x={rect['x']:.1f}, y={rect['y']:.1f}, w={rect['w']:.1f}, h={rect['h']:.1f}")
+            # self.logger.info(f"📍 計算公式: x = {rect['x']:.1f} + {rect['w']:.1f} × {Constants.BETSIZE_DISPLAY_X_RATIO} = {display_x:.1f}")
+            # self.logger.info(f"📍 計算公式: y = {rect['y']:.1f} + {rect['h']:.1f} × {Constants.BETSIZE_DISPLAY_Y_RATIO} = {display_y:.1f}")
             
             # 截取整個瀏覽器畫面
             screenshot = driver.get_screenshot_as_png()
@@ -2245,13 +2314,16 @@ class SyncBrowserOperator:
             # 獲取實際截圖尺寸
             image_width, image_height = screenshot_img.size
             
-            # 計算相對座標比例（基於預設視窗大小）
-            x_ratio = target_x / Constants.DEFAULT_WINDOW_WIDTH
-            y_ratio = target_y / Constants.DEFAULT_WINDOW_HEIGHT
+            # 計算縮放比例（Retina 顯示器會是 2 倍）
+            scale_x = image_width / rect["w"] if rect["w"] > 0 else 1
+            scale_y = image_height / rect["h"] if rect["h"] > 0 else 1
             
-            # 應用到實際截圖尺寸
-            actual_x = int(image_width * x_ratio)
-            actual_y = int(image_height * y_ratio)
+            # 轉換為截圖中的實際座標（乘以縮放比例）
+            actual_x = int(display_x * scale_x)
+            actual_y = int(display_y * scale_y)
+            
+            self.logger.info(f"📍 截圖尺寸: {image_width}x{image_height}, 縮放比例: {scale_x:.2f}x, {scale_y:.2f}x")
+            self.logger.info(f"📍 截圖座標: ({actual_x}, {actual_y})")
             
             # 裁切範圍（使用常數定義）
             crop_left = max(0, actual_x - Constants.BETSIZE_CROP_MARGIN_X)
@@ -2287,6 +2359,71 @@ class SyncBrowserOperator:
 # ============================================================================
 # 瀏覽器操作輔助類
 # ============================================================================
+
+class WindowSizeLocker:
+    """視窗大小鎖定器。
+    
+    持續監控並鎖定瀏覽器視窗大小，防止使用者或系統改變視窗尺寸。
+    使用背景執行緒定期檢查視窗大小，如果不符合目標則自動調整。
+    
+    Attributes:
+        driver: WebDriver 實例
+        target_width: 目標視窗寬度
+        target_height: 目標視窗高度
+        interval: 檢查間隔（秒）
+        running: 是否正在執行
+        thread: 背景執行緒
+    """
+    
+    def __init__(
+        self, 
+        driver: WebDriver, 
+        target_width: int = Constants.DEFAULT_WINDOW_WIDTH, 
+        target_height: int = Constants.DEFAULT_WINDOW_HEIGHT, 
+        interval: float = 0.5
+    ):
+        """初始化視窗大小鎖定器。
+        
+        Args:
+            driver: WebDriver 實例
+            target_width: 目標視窗寬度（預設 1280）
+            target_height: 目標視窗高度（預設 720）
+            interval: 檢查間隔秒數（預設 0.5）
+        """
+        self.driver = driver
+        self.target_width = target_width
+        self.target_height = target_height
+        self.interval = interval
+        self.running = False
+        self.thread: Optional[threading.Thread] = None
+    
+    def _monitor(self) -> None:
+        """監控視窗大小並自動修正（背景執行緒）"""
+        while self.running:
+            try:
+                current_size = self.driver.get_window_size()
+                if (current_size['width'] != self.target_width or 
+                    current_size['height'] != self.target_height):
+                    self.driver.set_window_size(self.target_width, self.target_height)
+                    print(f"🔄 視窗大小已重置為 {self.target_width}x{self.target_height}")
+            except:
+                # 忽略錯誤，可能是瀏覽器已關閉
+                pass
+            time.sleep(self.interval)
+    
+    def start(self) -> None:
+        """啟動視窗大小監控"""
+        if not self.running:
+            self.running = True
+            self.thread = threading.Thread(target=self._monitor, daemon=True)
+            self.thread.start()
+    
+    def stop(self) -> None:
+        """停止視窗大小監控"""
+        self.running = False
+        if self.thread:
+            self.thread.join(timeout=1)
+
 
 class BrowserHelper:
     """瀏覽器操作輔助類別。
@@ -2384,6 +2521,37 @@ class BrowserHelper:
         actual_x = int(screenshot_width * x_ratio)
         actual_y = int(screenshot_height * y_ratio)
         return actual_x, actual_y
+    
+    @staticmethod
+    def check_and_fix_window_size(
+        driver: WebDriver,
+        target_width: int = Constants.DEFAULT_WINDOW_WIDTH,
+        target_height: int = Constants.DEFAULT_WINDOW_HEIGHT,
+        logger: Optional[logging.Logger] = None
+    ) -> bool:
+        """檢查並修正視窗大小。
+        
+        如果視窗大小不符合目標，則自動調整。
+        
+        Args:
+            driver: WebDriver 實例
+            target_width: 目標視窗寬度
+            target_height: 目標視窗高度
+            logger: 日誌記錄器（選填）
+            
+        Returns:
+            是否進行了調整
+        """
+        current_size = driver.get_window_size()
+        current_width = current_size['width']
+        current_height = current_size['height']
+        
+        if current_width != target_width or current_height != target_height:
+            if logger:
+                logger.info(f"視窗大小不符 ({current_width}x{current_height})，調整為 {target_width}x{target_height}")
+            driver.set_window_size(target_width, target_height)
+            return True
+        return False
     
     @staticmethod
     def remove_maintenance_popup(driver: WebDriver) -> None:
@@ -4105,13 +4273,12 @@ class AutoSlotGameApp:
             self.browser_operator.click_start_game_all(self.browser_contexts)
             time.sleep(Constants.DEFAULT_WAIT_SECONDS)
             
-            # 步驟 10: 調整視窗排列
-            self._print_step(10, "調整視窗排列 (600x400)")
+            # 步驟 10: 設定視窗大小並啟動監控
+            self._print_step(10, f"設定視窗大小 ({Constants.DEFAULT_WINDOW_WIDTH}x{Constants.DEFAULT_WINDOW_HEIGHT})")
             resize_results = self.browser_operator.resize_and_arrange_all(
                 self.browser_contexts,
-                width=600,
-                height=400,
-                columns=4
+                width=Constants.DEFAULT_WINDOW_WIDTH,
+                height=Constants.DEFAULT_WINDOW_HEIGHT
             )
             
             time.sleep(Constants.DEFAULT_WAIT_SECONDS)  # 等待視窗調整完成
@@ -4208,26 +4375,7 @@ class AutoSlotGameApp:
         # 2. 持續檢測直到所有瀏覽器都找到圖片
         detection_results = self._continuous_detect_until_found(template_name, display_name)
         
-        # 3. 切換到 iframe（同步化操作）
-        def switch_to_iframe_operation(context: BrowserContext, index: int, total: int) -> bool:
-            """切換到遊戲 iframe"""
-            try:
-                iframe = WebDriverWait(context.driver, 10).until(
-                    EC.presence_of_element_located((By.ID, Constants.GAME_IFRAME))
-                )
-                context.driver.switch_to.frame(iframe)
-                return True
-            except Exception as e:
-                self.logger.error(f"切換 iframe 失敗: {e}")
-                return False
-        
-        iframe_results = self.browser_operator.execute_sync(
-            self.browser_contexts,
-            switch_to_iframe_operation,
-            "切換到遊戲 iframe"
-        )
-        
-        # 取得 Canvas 區域（使用第一個瀏覽器作為參考）
+        # 3. 取得 Canvas 區域（使用第一個瀏覽器作為參考）
         try:
             rect = reference_browser.driver.execute_script(f"""
                 const canvas = document.getElementById('{Constants.GAME_CANVAS}');
@@ -4318,10 +4466,7 @@ class AutoSlotGameApp:
         else:
             self.logger.warning("未找到 Canvas 座標，跳過自動點擊")
         
-        # 5. 等待所有瀏覽器中的圖片消失
-        self._wait_for_image_disappear(template_name)
-        
-        # 6. 所有瀏覽器都成功進入遊戲
+        # 5. 所有瀏覽器都成功進入遊戲
         self.logger.info("✓ 所有瀏覽器已準備就緒")
         time.sleep(Constants.DETECTION_COMPLETE_WAIT)
     
