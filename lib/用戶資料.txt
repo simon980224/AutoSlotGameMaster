@@ -1,5 +1,5 @@
 帳號,密碼,IP:port:user:password
-g274946,aaaa1111,195.40.12.74:7258:evuxkwoi:hsrmr72i08rc
+qwbnm520,zxiop520,195.40.12.74:7258:evuxkwoi:hsrmr72i08rc
 gc90949,aaaa1111,195.40.161.199:7382:evuxkwoi:hsrmr72i08rc
 ge29864,aaaa1111,92.112.84.51:6025:evuxkwoi:hsrmr72i08rc
 ge4466f,aaaa1111,192.95.86.51:5391:evuxkwoi:hsrmr72i08rc

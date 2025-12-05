@@ -1,5 +1,5 @@
 """
-金富翁遊戲自動化系統
+賽特二遊戲自動化系統
 
 核心特性:
 - 完整型別提示與協議 (Protocol)
@@ -13,25 +13,11 @@
 - 完善的錯誤處理與重試機制
 
 作者: 凡臻科技
-版本: 1.8.0
+版本: 1.0.0
 Python: 3.8+
 
 版本歷史:
-- v1.8.0: 優化關閉瀏覽器功能（'q' 指令），支援選擇性關閉指定瀏覽器
-- v1.7.1: 修正金額識別問題（統一使用 Constants 定義，移除重複定義和硬編碼數值）
-- v1.7.0: 新增規則執行功能（'r' 指令），支援自動切換金額並按空白鍵，規則循環執行
-- v1.6.2: 調整遊戲金額配置（GAME_BETSIZE 和 GAME_BETSIZE_TUPLE），從 73 種金額優化為 64 種金額
-- v1.6.1: 調整金額顯示和裁切參數（BETSIZE_DISPLAY_Y: 380→370, CROP_MARGIN_X: 50→40, CROP_MARGIN_Y: 20→10）
-- v1.6.0: 優化登入流程（新增錯誤訊息檢測與自動重啟機制）
-- v1.5.0: 統一管理所有魔法數字（視窗尺寸、座標、等待時間、重試次數等）
-- v1.4.3: 優化瀏覽器網路設定（啟用 QUIC、TCP Fast Open、NetworkService）
-- v1.4.2: 修正 Windows 中文路徑截圖儲存失敗問題
-- v1.4.1: 新增瀏覽器靜音功能，自動將所有瀏覽器設為靜音
-- v1.4.0: 優化免費遊戲結算流程（3秒後開始點擊，間隔3秒，共5次）
-- v1.3.0: 新增自動旋轉功能（支援 10、50、100 次）
-- v1.2.0: 新增專案啟動前自動清除 chromedriver 快取功能
-- v1.1.0: 修正 OpenCV 無法讀取中文路徑圖片的問題
-- v1.0.0: 初始版本發布
+- v1.0.0: 賽特二初始版本發布
 """
 
 import logging
@@ -250,13 +236,18 @@ class Constants:
     PROXY_SELECT_TIMEOUT = 1.0
     
     # URL 配置
-    LOGIN_PAGE = "https://m.jfw-win.com/#/login?redirect=%2Fhome%2Fpage"
-    GAME_PAGE = "https://m.jfw-win.com/#/home/loding?game_code=egyptian-mythology&factory_code=ATG&state=true&name=%E6%88%B0%E7%A5%9E%E8%B3%BD%E7%89%B9"
+    LOGIN_PAGE = "https://www.welove999.com/login?id=login"
     
     # 頁面元素選擇器
-    USERNAME_INPUT = "//input[@placeholder='請輸入帳號']"
+    USERNAME_INPUT = "//input[@placeholder='請輸入會員帳號']"
     PASSWORD_INPUT = "//input[@placeholder='請輸入密碼']"
-    LOGIN_BUTTON = "//div[contains(@class, 'login-btn')]//span[text()='立即登入']/.."
+    LOGIN_BUTTON = "/html/body/div[1]/div/div[1]/div/div/div[2]/div[4]/div[2]"
+    
+    # 遊戲導航選擇器
+    GAME_CATEGORY_URL = "https://www.welove999.com/game?type=slot&code=BNG&id=all"
+    GAME_PROVIDER_BUTTON = "/html/body/div/div/div[2]/div/div/div[1]/div[8]/div[1]"
+    START_GAME_BUTTON = "//*[@id='gameList']/div[2]/div[2]/button"
+    
     GAME_IFRAME = "gameFrame-0"
     GAME_CANVAS = "GameCanvas"
     
@@ -302,6 +293,9 @@ class Constants:
     
     # 操作等待時間（秒）
     LOGIN_WAIT_TIME = 5          # 登入後等待時間
+    POPUP_WAIT_TIME = 5          # 等待彈窗出現時間
+    GAME_NAVIGATION_WAIT = 3     # 遊戲導航等待時間
+    TAB_SWITCH_WAIT = 3          # 分頁切換等待時間
     BETSIZE_ADJUST_STEP_WAIT = 0.3  # 調整金額每步等待時間
     BETSIZE_ADJUST_VERIFY_WAIT = 1.0  # 調整金額驗證前等待時間
     BETSIZE_ADJUST_RETRY_WAIT = 0.5  # 調整金額重試等待時間
@@ -1311,8 +1305,15 @@ class BrowserManager:
         
         # 偏好設定
         chrome_options.add_experimental_option("prefs", {
+            # 完全停用密碼管理功能
             "credentials_enable_service": False,
             "profile.password_manager_enabled": False,
+            "profile.password_manager_leak_detection": False,
+            "password_manager_enabled": False,
+            # 停用自動填入
+            "autofill.profile_enabled": False,
+            "autofill.credit_card_enabled": False,
+            # 停用通知和彈窗
             "profile.default_content_setting_values.notifications": 2,
             "profile.default_content_settings.popups": 0,
             # 靜音設定（2 = 靜音，1 = 允許聲音）
@@ -1607,22 +1608,6 @@ class SyncBrowserOperator:
         """
         return self.navigate_all(browser_contexts, Constants.LOGIN_PAGE, timeout)
     
-    def navigate_to_game_page(
-        self,
-        browser_contexts: List[BrowserContext],
-        timeout: Optional[float] = None
-    ) -> List[OperationResult]:
-        """同步導航所有瀏覽器到遊戲頁面。
-        
-        Args:
-            browser_contexts: 瀏覽器上下文列表
-            timeout: 超時時間
-            
-        Returns:
-            操作結果列表
-        """
-        return self.navigate_all(browser_contexts, Constants.GAME_PAGE, timeout)
-    
     def perform_login_all(
         self,
         browser_contexts: List[BrowserContext],
@@ -1662,6 +1647,142 @@ class SyncBrowserOperator:
             browser_contexts,
             login_operation,
             "登入操作",
+            timeout=timeout
+        )
+    
+    def remove_popup_all(
+        self,
+        browser_contexts: List[BrowserContext],
+        timeout: Optional[float] = None
+    ) -> List[OperationResult]:
+        """同步移除所有瀏覽器的維護公告彈窗。
+        
+        Args:
+            browser_contexts: 瀏覽器上下文列表
+            timeout: 超時時間
+            
+        Returns:
+            操作結果列表
+        """
+        def remove_popup_operation(context: BrowserContext, index: int, total: int) -> bool:
+            BrowserHelper.remove_maintenance_popup(context.driver)
+            return True
+        
+        return self.execute_sync(
+            browser_contexts,
+            remove_popup_operation,
+            "移除維護公告彈窗",
+            timeout=timeout
+        )
+    
+    def navigate_to_game_category(
+        self,
+        browser_contexts: List[BrowserContext],
+        timeout: Optional[float] = None
+    ) -> List[OperationResult]:
+        """同步導航所有瀏覽器到遊戲分類頁面。
+        
+        Args:
+            browser_contexts: 瀏覽器上下文列表
+            timeout: 超時時間
+            
+        Returns:
+            操作結果列表
+        """
+        return self.navigate_all(browser_contexts, Constants.GAME_CATEGORY_URL, timeout)
+    
+    def click_game_provider_all(
+        self,
+        browser_contexts: List[BrowserContext],
+        timeout: Optional[float] = None
+    ) -> List[OperationResult]:
+        """同步點擊所有瀏覽器的遊戲供應商按鈕。
+        
+        Args:
+            browser_contexts: 瀏覽器上下文列表
+            timeout: 超時時間
+            
+        Returns:
+            操作結果列表
+        """
+        def click_provider_operation(context: BrowserContext, index: int, total: int) -> bool:
+            driver = context.driver
+            wait = WebDriverWait(driver, 15)
+            provider_button = wait.until(
+                EC.element_to_be_clickable((By.XPATH, Constants.GAME_PROVIDER_BUTTON))
+            )
+            provider_button.click()
+            return True
+        
+        return self.execute_sync(
+            browser_contexts,
+            click_provider_operation,
+            "點擊遊戲供應商",
+            timeout=timeout
+        )
+    
+    def switch_to_new_tab_all(
+        self,
+        browser_contexts: List[BrowserContext],
+        timeout: Optional[float] = None
+    ) -> List[OperationResult]:
+        """同步切換所有瀏覽器到新分頁。
+        
+        Args:
+            browser_contexts: 瀏覽器上下文列表
+            timeout: 超時時間
+            
+        Returns:
+            操作結果列表
+        """
+        def switch_tab_operation(context: BrowserContext, index: int, total: int) -> bool:
+            driver = context.driver
+            driver.switch_to.window(driver.window_handles[-1])
+            return True
+        
+        return self.execute_sync(
+            browser_contexts,
+            switch_tab_operation,
+            "切換到新分頁",
+            timeout=timeout
+        )
+    
+    def click_start_game_all(
+        self,
+        browser_contexts: List[BrowserContext],
+        timeout: Optional[float] = None
+    ) -> List[OperationResult]:
+        """同步點擊所有瀏覽器的開始遊戲按鈕。
+        
+        使用 JavaScript 點擊以處理隱藏元素。
+        
+        Args:
+            browser_contexts: 瀏覽器上下文列表
+            timeout: 超時時間
+            
+        Returns:
+            操作結果列表
+        """
+        def click_start_operation(context: BrowserContext, index: int, total: int) -> bool:
+            driver = context.driver
+            wait = WebDriverWait(driver, 15)
+            
+            try:
+                # 等待元素存在
+                start_button = wait.until(
+                    EC.presence_of_element_located((By.XPATH, Constants.START_GAME_BUTTON))
+                )
+                # 使用 JavaScript 點擊隱藏元素
+                driver.execute_script("arguments[0].click();", start_button)
+                return True
+            except Exception as e:
+                self.logger.error(f"找不到開始遊戲按鈕: {e}")
+                return False
+        
+        return self.execute_sync(
+            browser_contexts,
+            click_start_operation,
+            "點擊開始遊戲",
             timeout=timeout
         )
     
@@ -2263,6 +2384,39 @@ class BrowserHelper:
         actual_x = int(screenshot_width * x_ratio)
         actual_y = int(screenshot_height * y_ratio)
         return actual_x, actual_y
+    
+    @staticmethod
+    def remove_maintenance_popup(driver: WebDriver) -> None:
+        """移除維護公告彈窗和其他干擾性彈窗。
+        
+        使用 JavaScript 移除所有彈窗元素，包括：
+        - 維護公告彈窗（data-v-0ef3d734）
+        - Google 密碼管理工具彈窗
+        - 其他遮罩層
+        
+        Args:
+            driver: WebDriver 實例
+        """
+        js_script = """
+        // 刪掉所有 data-v-0ef3d734（彈窗所有 scope 元件）
+        document.querySelectorAll("div[data-v-0ef3d734]").forEach(el => el.remove());
+        
+        // 刪掉 Google 密碼管理工具彈窗
+        document.querySelectorAll("div[jsname], div[jsaction]").forEach(el => {
+            const text = el.textContent || "";
+            if (text.includes("變更你的密碼") || text.includes("密碼管理工具") || text.includes("資料侵害")) {
+                el.remove();
+            }
+        });
+        
+        // 刪掉外層黑色遮罩 (bg-opacity 60%)
+        document.querySelectorAll("div[class*='bg-opacity'], div[class*='z-20'], div[class*='fixed']").forEach(el => {
+            if (el.clientHeight > 400 && el.clientWidth > 400) {
+                el.remove();
+            }
+        });
+        """
+        driver.execute_script(js_script)
 
 
 # ============================================================================
@@ -3924,18 +4078,35 @@ class AutoSlotGameApp:
                 self.browser_contexts
             )
             
-            time.sleep(Constants.DEFAULT_WAIT_SECONDS)  # 等待登入後的頁面跳轉
+            # 等待維護公告彈窗出現
+            time.sleep(Constants.POPUP_WAIT_TIME)
             
-            # 步驟 5: 導航到遊戲頁面
-            self._print_step(5, "導航到遊戲頁面")
-            game_results = self.browser_operator.navigate_to_game_page(
-                self.browser_contexts
-            )
+            # 步驟 5: 移除維護公告彈窗
+            self._print_step(5, "移除維護公告彈窗")
+            self.browser_operator.remove_popup_all(self.browser_contexts)
             
-            time.sleep(Constants.DEFAULT_WAIT_SECONDS)  # 等待遊戲頁面載入
+            # 步驟 6: 導航到遊戲分類頁面
+            self._print_step(6, "導航到遊戲分類頁面")
+            self.browser_operator.navigate_to_game_category(self.browser_contexts)
+            time.sleep(Constants.GAME_NAVIGATION_WAIT)
             
-            # 調整視窗
-            self._print_step(6, "調整視窗排列 (600x400)")
+            # 步驟 7: 點擊遊戲供應商
+            self._print_step(7, "點擊遊戲供應商")
+            self.browser_operator.click_game_provider_all(self.browser_contexts)
+            time.sleep(Constants.DEFAULT_WAIT_SECONDS)
+            
+            # 步驟 8: 切換到新分頁
+            self._print_step(8, "切換到新分頁")
+            self.browser_operator.switch_to_new_tab_all(self.browser_contexts)
+            time.sleep(Constants.TAB_SWITCH_WAIT)
+            
+            # 步驟 9: 點擊開始遊戲
+            self._print_step(9, "點擊開始遊戲")
+            self.browser_operator.click_start_game_all(self.browser_contexts)
+            time.sleep(Constants.DEFAULT_WAIT_SECONDS)
+            
+            # 步驟 10: 調整視窗排列
+            self._print_step(10, "調整視窗排列 (600x400)")
             resize_results = self.browser_operator.resize_and_arrange_all(
                 self.browser_contexts,
                 width=600,
@@ -3945,12 +4116,12 @@ class AutoSlotGameApp:
             
             time.sleep(Constants.DEFAULT_WAIT_SECONDS)  # 等待視窗調整完成
             
-            # 步驟 7: 圖片檢測與遊戲流程
-            self._print_step(7, "圖片檢測與遊戲流程")
+            # 步驟 11: 圖片檢測與遊戲流程
+            self._print_step(11, "圖片檢測與遊戲流程")
             self._execute_image_detection_flow()
             
-            # 步驟 8: 啟動遊戲控制中心
-            self._print_step(8, "啟動遊戲控制中心")
+            # 步驟 12: 啟動遊戲控制中心
+            self._print_step(12, "啟動遊戲控制中心")
             control_center = GameControlCenter(
                 browser_contexts=self.browser_contexts,
                 browser_operator=self.browser_operator,
