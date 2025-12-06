@@ -14,10 +14,11 @@
 - 視窗大小鎖定功能（自動恢復視窗大小）
 
 作者: 凡臻科技
-版本: 1.10.0
+版本: 1.11.0
 Python: 3.8+
 
 版本歷史:
+- v1.11.0: 新增自動跳過點擊功能，每 30 秒自動點擊跳過區域（背景執行，持續運行）
 - v1.10.0: 新增視窗大小鎖定功能，自動監控並恢復視窗大小（位置可自由移動）
 - v1.9.0: 優化系統啟動流程（自動顯示完整指令列表，移除 emoji 符號，統一日誌格式）
 - v1.8.0: 優化關閉瀏覽器功能（'q' 指令），支援選擇性關閉指定瀏覽器
@@ -196,6 +197,7 @@ class Constants:
     STOP_EVENT_ERROR_WAIT = 1.0    # 停止事件錯誤等待時間
     SERVER_SOCKET_TIMEOUT = 1.0    # 伺服器 Socket 超時時間
     CLEANUP_PROCESS_TIMEOUT = 10   # 清除程序超時時間（秒）
+    AUTO_SKIP_CLICK_INTERVAL = 30  # 自動跳過點擊間隔時間（秒）
     
     # 重試與循環配置
     BETSIZE_ADJUST_MAX_ATTEMPTS = 200  # 調整金額最大嘗試次數
@@ -2866,6 +2868,11 @@ class GameControlCenter:
         self.rule_running = False  # 規則執行狀態
         self.rule_thread: Optional[threading.Thread] = None  # 規則執行執行緒
         
+        # 自動跳過點擊相關
+        self.auto_skip_running = False  # 自動跳過點擊運行狀態
+        self.auto_skip_thread: Optional[threading.Thread] = None  # 自動跳過點擊執行緒
+        self._auto_skip_stop_event = threading.Event()  # 自動跳過停止事件
+        
         # 視窗大小鎖定管理器
         self.window_lock_manager = WindowLockManager(
             browser_contexts=browser_contexts,
@@ -2923,6 +2930,7 @@ class GameControlCenter:
 
 ==========================================================
 [提示] 視窗大小鎖定功能已自動啟用，視窗大小固定為 600x400
+[提示] 自動跳過點擊功能已啟動，每 30 秒自動點擊一次跳過區域
 ==========================================================
 """
         self.logger.info(help_text)
@@ -2962,6 +2970,56 @@ class GameControlCenter:
                 self._stop_event.wait(timeout=Constants.STOP_EVENT_ERROR_WAIT)
         
         self.logger.info(f"瀏覽器 {browser_index} ({username}) 已停止，共執行 {press_count} 次")
+    
+    def _auto_skip_click_loop(self) -> None:
+        """自動跳過點擊循環（每30秒點擊一次所有瀏覽器）。
+        
+        持續運行直到收到停止信號，用於自動跳過結算畫面等。
+        """
+        self.logger.info("[啟動] 自動跳過點擊功能已啟動（每 30 秒點擊一次）")
+        
+        # 檢查 Canvas 區域是否已初始化
+        if not hasattr(self.browser_operator, 'last_canvas_rect') or \
+           self.browser_operator.last_canvas_rect is None:
+            self.logger.warning("Canvas 區域未初始化，自動跳過功能無法啟動")
+            return
+        
+        # 計算點擊座標
+        rect = self.browser_operator.last_canvas_rect
+        lobby_x, lobby_y = BrowserHelper.calculate_click_position(
+            rect,
+            Constants.LOBBY_LOGIN_BUTTON_X_RATIO,
+            Constants.LOBBY_LOGIN_BUTTON_Y_RATIO
+        )
+        
+        click_count = 0
+        
+        while not self._auto_skip_stop_event.is_set():
+            try:
+                # 等待指定間隔時間，如果收到停止信號則立即退出
+                if self._auto_skip_stop_event.wait(timeout=Constants.AUTO_SKIP_CLICK_INTERVAL):
+                    break
+                
+                click_count += 1
+                
+                # 對所有瀏覽器執行點擊
+                for i, context in enumerate(self.browser_contexts, 1):
+                    try:
+                        BrowserHelper.execute_cdp_click(context.driver, lobby_x, lobby_y)
+                    except Exception as e:
+                        # 靜默處理錯誤，避免日誌過多
+                        pass
+                
+                # 每隔一段時間顯示一次統計信息（例如每 10 次）
+                if click_count % 10 == 0:
+                    self.logger.debug(f"自動跳過已執行 {click_count} 次")
+                    
+            except Exception as e:
+                self.logger.error(f"自動跳過點擊發生錯誤: {e}")
+                self._auto_skip_stop_event.wait(timeout=Constants.STOP_EVENT_ERROR_WAIT)
+        
+        self.logger.info(f"[停止] 自動跳過點擊功能已停止（共執行 {click_count} 次）")
+
     
     def _start_auto_press(self) -> None:
         """為每個瀏覽器啟動獨立的自動按鍵執行緒。"""
@@ -3016,6 +3074,39 @@ class GameControlCenter:
         self.auto_press_threads.clear()
         self.auto_press_running = False
         self.game_running = False
+    
+    def _start_auto_skip_click(self) -> None:
+        """啟動自動跳過點擊功能。"""
+        if self.auto_skip_running:
+            self.logger.debug("自動跳過點擊功能已在運行中")
+            return
+        
+        # 清除停止事件
+        self._auto_skip_stop_event.clear()
+        
+        # 啟動自動跳過執行緒
+        self.auto_skip_thread = threading.Thread(
+            target=self._auto_skip_click_loop,
+            daemon=True,
+            name="AutoSkipClickThread"
+        )
+        self.auto_skip_thread.start()
+        self.auto_skip_running = True
+    
+    def _stop_auto_skip_click(self) -> None:
+        """停止自動跳過點擊功能。"""
+        if not self.auto_skip_running:
+            return
+        
+        # 設置停止事件
+        self._auto_skip_stop_event.set()
+        
+        # 等待執行緒結束
+        if self.auto_skip_thread and self.auto_skip_thread.is_alive():
+            self.auto_skip_thread.join(timeout=Constants.AUTO_PRESS_THREAD_JOIN_TIMEOUT)
+        
+        self.auto_skip_thread = None
+        self.auto_skip_running = False
     
     def _rule_execution_loop(self) -> None:
         """規則執行主循環（在獨立執行緒中運行）。"""
@@ -3805,6 +3896,9 @@ class GameControlCenter:
         # 自動啟動視窗鎖定功能（始終運行）
         self.window_lock_manager.start()
         
+        # 自動啟動跳過點擊功能（始終運行）
+        self._start_auto_skip_click()
+        
         # 自動顯示幫助訊息
         self.show_help()
         
@@ -3831,6 +3925,10 @@ class GameControlCenter:
             if self.window_lock_manager.running:
                 self.window_lock_manager.stop()
             
+            # 確保停止自動跳過點擊功能
+            if self.auto_skip_running:
+                self._stop_auto_skip_click()
+            
             # 確保停止所有自動操作
             if self.auto_press_running:
                 self._stop_auto_press()
@@ -3847,6 +3945,10 @@ class GameControlCenter:
         # 確保停止視窗大小鎖定功能
         if self.window_lock_manager.running:
             self.window_lock_manager.stop()
+        
+        # 確保停止自動跳過點擊功能
+        if self.auto_skip_running:
+            self._stop_auto_skip_click()
         
         # 確保停止自動按鍵
         if self.auto_press_running:

@@ -8,10 +8,12 @@
 
 ## 版本資訊
 
-**目前版本**: v1.9.0
+**目前版本**: v1.11.0
 
 **更新內容**:
 
+- v1.11.0: 新增自動跳過點擊功能，每 30 秒自動點擊跳過區域（背景執行，持續運行直到程式關閉）
+- v1.10.0: 新增視窗大小鎖定功能，自動監控並恢復視窗大小（位置可自由移動）
 - v1.9.0: 優化系統啟動流程（自動顯示完整指令列表，移除 emoji 符號，統一日誌格式）
 - v1.8.0: 優化關閉瀏覽器功能（'q' 指令），支援選擇性關閉指定瀏覽器
 - v1.7.1: 修正金額識別問題（統一使用 Constants 定義，移除重複定義和硬編碼數值）
@@ -76,6 +78,8 @@ from autoslot import (
 
 - **同步操作**: `SyncBrowserOperator.execute_sync()` 使用 `ThreadPoolExecutor` 對所有瀏覽器執行相同操作
 - **獨立執行緒**: `GameControlCenter._auto_press_loop_single()` 為每個瀏覽器啟動獨立執行緒，使用 `threading.Event` 控制停止
+- **背景自動化**（v1.11.0 新增）: `GameControlCenter._auto_skip_click_loop()` 在背景持續運行，每 30 秒自動點擊所有瀏覽器的跳過區域
+- **視窗監控**（v1.10.0 新增）: `WindowLockManager._monitor_window_loop()` 為每個瀏覽器啟動獨立監控執行緒，自動恢復視窗大小
 - **最大工作數**: `Constants.MAX_THREAD_WORKERS = 10`
 
 ### 4. Proxy 中繼架構
@@ -133,6 +137,7 @@ Chrome (使用本地 Proxy)
 - `FREE_GAME_SETTLE_INITIAL_WAIT = 3` - 免費遊戲結算初始等待
 - `PROXY_SERVER_START_WAIT = 1` - Proxy 伺服器啟動等待
 - `ERROR_MESSAGE_PERSIST_SECONDS = 1` - 錯誤訊息持續秒數閾值（v1.6.0 新增）
+- `AUTO_SKIP_CLICK_INTERVAL = 30` - 自動跳過點擊間隔時間（v1.11.0 新增）
 
 #### 重試與循環配置
 
