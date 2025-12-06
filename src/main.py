@@ -13,10 +13,11 @@
 - 完善的錯誤處理與重試機制
 
 作者: 凡臻科技
-版本: 1.8.0
+版本: 1.9.0
 Python: 3.8+
 
 版本歷史:
+- v1.9.0: 優化系統啟動流程（自動顯示完整指令列表，移除 emoji 符號，統一日誌格式）
 - v1.8.0: 優化關閉瀏覽器功能（'q' 指令），支援選擇性關閉指定瀏覽器
 - v1.7.1: 修正金額識別問題（統一使用 Constants 定義，移除重複定義和硬編碼數值）
 - v1.7.0: 新增規則執行功能（'r' 指令），支援自動切換金額並按空白鍵，規則循環執行
@@ -113,6 +114,10 @@ def cleanup_chromedriver_processes() -> None:
     logger = LoggerFactory.get_logger()
     system = platform.system().lower()
     
+    logger.info("=" * 60)
+    logger.info("【系統初始化】清理殘留程序")
+    logger.info("=" * 60)
+    
     try:
         if system == "windows":
             # Windows: 使用 taskkill 命令
@@ -125,9 +130,9 @@ def cleanup_chromedriver_processes() -> None:
             
             # 檢查結果
             if result.returncode == 0:
-                logger.info("✓ 已清除 Windows 上的 chromedriver 程序")
+                logger.info("[成功] 已清除 Windows 上的 chromedriver 程序")
             elif "找不到" in result.stdout or "not found" in result.stdout.lower():
-                logger.debug("沒有執行中的 chromedriver 程序")
+                logger.info("[成功] 沒有殘留的 chromedriver 程序")
             else:
                 logger.debug(f"taskkill 執行結果: {result.stdout.strip()}")
                 
@@ -142,18 +147,20 @@ def cleanup_chromedriver_processes() -> None:
             
             # killall 在沒有找到程序時會返回非 0，這是正常的
             if result.returncode == 0:
-                logger.info(f"✓ 已清除 {system.upper()} 上的 chromedriver 程序")
+                logger.info(f"[成功] 已清除 {system.upper()} 上的 chromedriver 程序")
             else:
-                logger.debug("沒有執行中的 chromedriver 程序")
+                logger.info("[成功] 沒有殘留的 chromedriver 程序")
         else:
-            logger.warning(f"不支援的作業系統: {system}，跳過清除 chromedriver")
+            logger.warning(f"[警告] 不支援的作業系統: {system}，跳過清除 chromedriver")
             
     except subprocess.TimeoutExpired:
-        logger.warning("清除 chromedriver 程序逾時")
+        logger.warning("[警告] 清除 chromedriver 程序逾時")
     except FileNotFoundError:
-        logger.debug(f"系統找不到清除命令（{system}），可能沒有執行中的 chromedriver")
+        logger.info("[成功] 沒有殘留的 chromedriver 程序")
     except Exception as e:
-        logger.warning(f"清除 chromedriver 程序時發生錯誤: {e}")
+        logger.warning(f"[警告] 清除程序時發生錯誤: {e}")
+    
+    logger.info("")
 
 
 def get_resource_path(relative_path: str = "") -> Path:
@@ -1188,7 +1195,7 @@ class LocalProxyServerManager:
             # 等待伺服器啟動
             time.sleep(Constants.PROXY_SERVER_START_WAIT)
             
-            self.logger.info(f"✓ Proxy 中繼已啟動 (埠: {local_port})")
+            self.logger.info(f"[成功] Proxy 中繼已啟動 (埠: {local_port})")
             return local_port
             
         except Exception as e:
@@ -1560,7 +1567,7 @@ class SyncBrowserOperator:
         
         success_count = sum(1 for r in results if r.success)
         if success_count < total:
-            self.logger.warning(f"⚠ 部分操作未成功: {success_count}/{total}")
+            self.logger.warning(f"[警告] 部分操作未成功: {success_count}/{total}")
         
         return results
     
@@ -1870,7 +1877,8 @@ class SyncBrowserOperator:
         self,
         browser_contexts: List[BrowserContext],
         target_amount: float,
-        timeout: Optional[float] = None
+        timeout: Optional[float] = None,
+        silent: bool = False
     ) -> List[OperationResult]:
         """同步調整所有瀏覽器的下注金額。
         
@@ -1878,12 +1886,13 @@ class SyncBrowserOperator:
             browser_contexts: 瀏覽器上下文列表
             target_amount: 目標金額
             timeout: 超時時間
+            silent: 是否靜默模式（不輸出詳細日誌）
             
         Returns:
             操作結果列表
         """
         def adjust_operation(context: BrowserContext, index: int, total: int) -> bool:
-            return self.adjust_betsize(context.driver, target_amount)
+            return self.adjust_betsize(context.driver, target_amount, silent=silent)
         
         return self.execute_sync(
             browser_contexts,
@@ -1923,7 +1932,7 @@ class SyncBrowserOperator:
                         amount_value = float(matched_amount)
                         # 使用 Constants.GAME_BETSIZE 進行驗證
                         if amount_value in Constants.GAME_BETSIZE:
-                            self.logger.info(f"✓ 目前金額: {amount_value}")
+                            self.logger.info(f"[成功] 目前金額: {amount_value}")
                             return amount_value
                     except ValueError:
                         pass
@@ -2020,13 +2029,14 @@ class SyncBrowserOperator:
         # 執行點擊
         BrowserHelper.execute_cdp_click(driver, actual_x, actual_y)
     
-    def adjust_betsize(self, driver: WebDriver, target_amount: float, max_attempts: int = None) -> bool:
+    def adjust_betsize(self, driver: WebDriver, target_amount: float, max_attempts: int = None, silent: bool = False) -> bool:
         """調整下注金額到目標值（優化版）。
         
         Args:
             driver: WebDriver 實例
             target_amount: 目標金額
             max_attempts: 最大嘗試次數（預設使用常數）
+            silent: 是否靜默模式（不輸出詳細日誌）
             
         Returns:
             bool: 調整成功返回True
@@ -2037,18 +2047,21 @@ class SyncBrowserOperator:
         try:
             # 檢查目標金額
             if target_amount not in Constants.GAME_BETSIZE:
-                self.logger.error(f"目標金額 {target_amount} 不在可用金額列表中")
+                if not silent:
+                    self.logger.error(f"目標金額 {target_amount} 不在可用金額列表中")
                 return False
             
             # 取得當前金額
             current_amount = self.get_current_betsize(driver)
             if current_amount is None:
-                self.logger.error("✗ 無法識別目前金額")
+                if not silent:
+                    self.logger.error("[錯誤] 無法識別目前金額")
                 return False
             
             # 檢查是否已是目標金額
             if current_amount == target_amount:
-                self.logger.info("✓ 金額已符合目標")
+                if not silent:
+                    self.logger.info("[成功] 金額已符合目標")
                 return True
             
             # 計算需要調整的次數和方向
@@ -2084,7 +2097,8 @@ class SyncBrowserOperator:
                     continue
                 
                 if current_amount == target_amount:
-                    self.logger.info(f"✓ 金額調整完成: {current_amount}")
+                    if not silent:
+                        self.logger.info(f"[成功] 金額調整完成: {current_amount}")
                     return True
                 
                 # 根據當前金額決定點擊哪個按鈕
@@ -2095,11 +2109,13 @@ class SyncBrowserOperator:
                 
                 time.sleep(Constants.BETSIZE_ADJUST_RETRY_WAIT)
             
-            self.logger.error("✗ 金額調整失敗")
+            if not silent:
+                self.logger.error("[錯誤] 金額調整失敗")
             return False
             
         except Exception as e:
-            self.logger.error(f"✗ 調整過程發生錯誤: {e}")
+            if not silent:
+                self.logger.error(f"[錯誤] 調整過程發生錯誤: {e}")
             return False
     
     def capture_betsize_template(self, driver: WebDriver, amount: float) -> bool:
@@ -2154,7 +2170,7 @@ class SyncBrowserOperator:
             output_path = bet_size_dir / filename
             cropped_img.save(output_path)
             
-            self.logger.info(f"✓ 模板已儲存: {filename}")
+            self.logger.info(f"[成功] 模板已儲存: {filename}")
             
             return True
             
@@ -2710,44 +2726,53 @@ class GameControlCenter:
     def show_help(self) -> None:
         """顯示幫助信息"""
         help_text = """
-╔══════════════════════════════════════════════════════════╗
-║            遊戲控制中心 - 指令說明                       ║
-╚══════════════════════════════════════════════════════════╝
+==========================================================
+                    【遊戲控制中心 - 指令說明】
+==========================================================
 
-【遊戲控制】
-  s <min>,<max>    開始自動按鍵（設定隨機間隔）
-                   範例: s 1,2  (間隔 1~2 秒)
+【自動操作】
+  s <最小>,<最大>     開始自動按鍵（設定隨機間隔秒數）
+                      範例: s 1,2  → 每次間隔 1~2 秒按空白鍵
+                      提示: 先用 'b' 調整好金額後再啟動
                    
-  r                開始執行規則（依照用戶規則.txt自動切換金額）
-                   格式: 金額:時間(分鐘):最小(秒數):最大(秒數)
-                   範例: 4:10:1:1 表示金額4，持續10分鐘，間隔1~1秒
+  r                   執行規則模式（依照 lib/用戶規則.txt）
+                      格式: 金額:分鐘:最小秒:最大秒
+                      範例: 4:10:1:2 → 金額4，持續10分鐘，間隔1~2秒
+                      提示: 會自動循環執行所有規則
                    
-  p                暫停自動按鍵/規則執行
-  
-  b <金額>         調整所有瀏覽器的下注金額
-                   範例: b 0.4, b 2.4, b 10
-  
-  f <編號>         購買免費遊戲
-                   f 0      - 所有瀏覽器都購買
-                   f 1      - 第 1 個瀏覽器購買
-                   f 1,2,3  - 第 1、2、3 個瀏覽器購買
-  
-  a <次數>         設定自動旋轉
-                   a 10     - 自動旋轉 10 次
-                   a 50     - 自動旋轉 50 次
-                   a 100    - 自動旋轉 100 次
-                   
-  c                截取金額模板（用於金額識別）
+  p                   暫停目前運行的自動操作（按鍵或規則）
 
-【系統控制】
-  h                顯示此幫助信息
+【金額與遊戲】  
+  b <金額>            調整所有瀏覽器的下注金額
+                      範例: b 2, b 4, b 10, b 100
+                      提示: 金額必須在系統支援範圍內
   
-  q <編號>         關閉指定瀏覽器
-                   q 0      - 關閉所有瀏覽器並退出
-                   q 1      - 關閉第 1 個瀏覽器
-                   q 1,2,3  - 關閉第 1、2、3 個瀏覽器
+  f <編號>            購買免費遊戲
+                      f 0      → 所有瀏覽器
+                      f 1      → 第 1 個瀏覽器
+                      f 1,2,3  → 第 1、2、3 個瀏覽器
+                      提示: 購買後需手動遊玩，結束後按 Enter
+  
+  a <次數>            設定自動旋轉次數
+                      a 10     → 自動旋轉 10 次
+                      a 50     → 自動旋轉 50 次  
+                      a 100    → 自動旋轉 100 次
+                      提示: 設定後會自動執行
 
-提示：所有指令都區分大小寫，請使用小寫字母
+【工具與系統】                   
+  c                   截取金額模板（用於優化金額識別）
+                      提示: 在遊戲中調整到特定金額後使用
+
+  h                   顯示此幫助信息
+
+  q <編號>            關閉指定瀏覽器
+                      q 0      → 關閉所有瀏覽器並退出程式
+                      q 1      → 關閉第 1 個瀏覽器
+                      q 1,2,3  → 關閉第 1、2、3 個瀏覽器
+
+==========================================================
+[提示] 提示: 所有指令都區分大小寫，請使用小寫字母輸入
+==========================================================
 """
         self.logger.info(help_text)
     
@@ -2811,7 +2836,7 @@ class GameControlCenter:
         self.auto_press_running = True
         self.game_running = True
         
-        self.logger.info(f"✓ 已啟動 {len(self.browser_contexts)} 個瀏覽器的自動按鍵")
+        self.logger.info(f"[成功] 已啟動 {len(self.browser_contexts)} 個瀏覽器的自動按鍵")
     
     def _stop_auto_press(self) -> None:
         """停止所有自動按鍵執行緒。"""
@@ -2835,7 +2860,7 @@ class GameControlCenter:
             else:
                 stopped_count += 1
         
-        self.logger.info(f"✓ 已停止 {stopped_count}/{len(self.auto_press_threads)} 個瀏覽器")
+        self.logger.info(f"[成功] 已停止 {stopped_count}/{len(self.auto_press_threads)} 個瀏覽器")
         
         self.auto_press_threads.clear()
         self.auto_press_running = False
@@ -2874,7 +2899,7 @@ class GameControlCenter:
                     
                     # 等待畫面穩定
                     time.sleep(Constants.RULE_SWITCH_WAIT)
-                    self.logger.info("✓ 自動按鍵已停止")
+                    self.logger.info("[成功] 自動按鍵已停止")
                 
                 # 顯示規則資訊
                 self.logger.info("")
@@ -2889,16 +2914,17 @@ class GameControlCenter:
                 self.logger.info(f"調整金額到 {current_rule.amount}...")
                 results = self.browser_operator.adjust_betsize_all(
                     self.browser_contexts,
-                    current_rule.amount
+                    current_rule.amount,
+                    silent=True  # 使用靜默模式，不輸出詳細調整日誌
                 )
                 
                 # 統計結果
                 success_count = sum(1 for r in results if r.success)
                 if success_count == len(self.browser_contexts):
-                    self.logger.info(f"✓ 全部 {success_count} 個瀏覽器金額調整完成")
+                    self.logger.info(f"[成功] 全部 {success_count} 個瀏覽器金額調整完成")
                 else:
                     self.logger.warning(
-                        f"⚠ {success_count}/{len(self.browser_contexts)} 個瀏覽器金額調整完成"
+                        f"[警告] {success_count}/{len(self.browser_contexts)} 個瀏覽器金額調整完成"
                     )
                     # 如果有失敗的，記錄詳情
                     for i, result in enumerate(results, 1):
@@ -2959,7 +2985,7 @@ class GameControlCenter:
                     break
                 
                 # 顯示完成訊息
-                self.logger.info(f"✓ 規則 {rule_index + 1} 執行完成")
+                self.logger.info(f"[成功] 規則 {rule_index + 1} 執行完成")
                 
                 # 移動到下一條規則（循環）
                 rule_index = (rule_index + 1) % len(self.bet_rules)
@@ -3029,7 +3055,7 @@ class GameControlCenter:
         self.rule_running = True
         self.game_running = True
         
-        self.logger.info("✓ 規則執行已啟動 (按 'p' 可暫停)")
+        self.logger.info("[成功] 規則執行已啟動 (按 'p' 可暫停)")
         self.logger.info("")
     
     def _stop_rule_execution(self) -> None:
@@ -3055,7 +3081,7 @@ class GameControlCenter:
                 else:
                     stopped_count += 1
             
-            self.logger.info(f"✓ 已停止 {stopped_count}/{len(self.auto_press_threads)} 個瀏覽器的自動按鍵")
+            self.logger.info(f"[成功] 已停止 {stopped_count}/{len(self.auto_press_threads)} 個瀏覽器的自動按鍵")
             self.auto_press_threads.clear()
             self.auto_press_running = False
         
@@ -3064,7 +3090,7 @@ class GameControlCenter:
             self.rule_thread.join(timeout=Constants.AUTO_PRESS_STOP_TIMEOUT)
             
             if not self.rule_thread.is_alive():
-                self.logger.info("✓ 規則執行已停止")
+                self.logger.info("[成功] 規則執行已停止")
             else:
                 self.logger.warning("規則執行執行緒未能正常結束")
         
@@ -3162,7 +3188,7 @@ class GameControlCenter:
                             # 從列表中移除
                             self.browser_contexts.pop(browser_index - 1)
                             
-                            self.logger.info(f"✓ 已關閉瀏覽器 {browser_index} ({username})")
+                            self.logger.info(f"[成功] 已關閉瀏覽器 {browser_index} ({username})")
                             closed_count += 1
                             
                         except Exception as e:
@@ -3172,10 +3198,10 @@ class GameControlCenter:
                     
                     # 顯示總結
                     if closed_count == len(target_indices):
-                        self.logger.info(f"✓ 關閉完成: 全部 {closed_count} 個瀏覽器已關閉")
+                        self.logger.info(f"[成功] 關閉完成: 全部 {closed_count} 個瀏覽器已關閉")
                     else:
                         self.logger.warning(
-                            f"⚠ 部分完成: {closed_count}/{len(target_indices)} 個瀏覽器已關閉"
+                            f"[警告] 部分完成: {closed_count}/{len(target_indices)} 個瀏覽器已關閉"
                         )
                         if failed_browsers:
                             for browser_index, username in failed_browsers:
@@ -3197,53 +3223,53 @@ class GameControlCenter:
             elif cmd == 's':
                 # 解析 's' 指令參數
                 if not command_arguments:
-                    self.logger.error("指令格式錯誤，請使用: s min,max (例如: s 1,2)")
+                    self.logger.error("[錯誤] 指令格式錯誤")
+                    self.logger.info("   正確格式: s <最小>,<最大>")
+                    self.logger.info("   範例: s 1,2  → 間隔 1~2 秒按空白鍵")
                     return True
                 
                 # 解析用戶輸入的間隔時間
                 try:
                     interval_parts = command_arguments.split(',')
                     if len(interval_parts) != 2:
-                        self.logger.error(
-                            "間隔時間格式錯誤，請使用: s min,max (例如: s 1,2)"
-                        )
+                        self.logger.error("[錯誤] 間隔格式錯誤，需要兩個數字")
+                        self.logger.info("   範例: s 1,2 或 s 1.5,3")
                         return True
                     
                     min_interval = float(interval_parts[0].strip())
                     max_interval = float(interval_parts[1].strip())
                     
                     if min_interval <= 0 or max_interval <= 0:
-                        self.logger.error("間隔時間必須大於 0")
+                        self.logger.error("[錯誤] 間隔時間必須大於 0")
                         return True
                     
                     if min_interval > max_interval:
-                        self.logger.error("最小間隔不能大於最大間隔")
+                        self.logger.error("[錯誤] 最小間隔不能大於最大間隔")
+                        self.logger.info(f"   您輸入的: 最小={min_interval}, 最大={max_interval}")
                         return True
                         
                 except ValueError:
-                    self.logger.error(
-                        "間隔時間格式錯誤，請輸入數字 (例如: s 1,2)"
-                    )
+                    self.logger.error("[錯誤] 間隔格式錯誤，請輸入有效的數字")
+                    self.logger.info("   範例: s 1,2 或 s 1.5,3")
                     return True
                 
                 # 檢查是否已在運行
                 if self.auto_press_running:
-                    self.logger.warning(
-                        f"自動按鍵已在運行中 (間隔: {self.min_interval}~{self.max_interval}秒)\n"
-                        f"請先使用 'p' 暫停，再重新啟動"
-                    )
+                    self.logger.warning("[警告] 自動按鍵已在運行中")
+                    self.logger.info(f"   目前設定: {self.min_interval}~{self.max_interval} 秒")
+                    self.logger.info("   提示: 請先使用 'p' 暫停，再重新啟動")
                     return True
                 
                 # 設置間隔時間
                 self.min_interval = min_interval
                 self.max_interval = max_interval
                 
-                self.logger.info(
-                    f"✓ 啟動自動運行\n"
-                    f"  間隔: {min_interval}~{max_interval} 秒\n"
-                    f"  瀏覽器: {len(self.browser_contexts)} 個\n"
-                    f"  按 'p' 可暫停"
-                )
+                self.logger.info("")
+                self.logger.info("[成功] 自動按鍵已啟動")
+                self.logger.info(f"  > 間隔時間: {min_interval}~{max_interval} 秒")
+                self.logger.info(f"  > 瀏覽器數: {len(self.browser_contexts)} 個")
+                self.logger.info("  > 暫停指令: p")
+                self.logger.info("")
                 
                 # 啟動自動按鍵
                 self._start_auto_press()
@@ -3252,17 +3278,26 @@ class GameControlCenter:
                 # 暫停指令 - 可暫停自動按鍵或規則執行
                 if self.auto_press_running:
                     self._stop_auto_press()
-                    self.logger.info("✓ 已暫停自動按鍵")
+                    self.logger.info("")
+                    self.logger.info("[成功] 已暫停自動按鍵")
+                    self.logger.info("")
+                    # 暫停後自動顯示幫助
+                    self.show_help()
                 elif self.rule_running:
                     self._stop_rule_execution()
-                    self.logger.info("✓ 已暫停規則執行")
+                    self.logger.info("")
+                    self.logger.info("[成功] 已暫停規則執行")
+                    self.logger.info("")
+                    # 暫停後自動顯示幫助
+                    self.show_help()
                 else:
-                    self.logger.warning("目前沒有運行中的自動操作")
+                    self.logger.warning("[警告] 目前沒有運行中的自動操作")
+                    self.logger.info("   提示: 使用 's 1,2' 啟動自動按鍵，或使用 'r' 啟動規則執行")
             
             elif cmd == 'r':
                 # 開始執行規則
                 if self.rule_running:
-                    self.logger.warning("規則執行已在運行中，請先使用 'p' 暫停")
+                    self.logger.warning("[警告] 規則執行已在運行中，請先使用 'p' 暫停")
                     return True
                 
                 if self.auto_press_running:
@@ -3292,10 +3327,10 @@ class GameControlCenter:
                     success_count = sum(1 for r in results if r.success)
                     
                     if success_count == len(self.browser_contexts):
-                        self.logger.info(f"✓ 金額調整完成: 全部 {success_count} 個瀏覽器成功")
+                        self.logger.info(f"[成功] 金額調整完成: 全部 {success_count} 個瀏覽器成功")
                     else:
                         self.logger.warning(
-                            f"⚠ 部分完成: {success_count}/{len(self.browser_contexts)} 個瀏覽器成功"
+                            f"[警告] 部分完成: {success_count}/{len(self.browser_contexts)} 個瀏覽器成功"
                         )
                         # 顯示失敗的瀏覽器
                         for i, result in enumerate(results, 1):
@@ -3385,10 +3420,10 @@ class GameControlCenter:
                     
                     # 顯示總結
                     if success_count == len(target_indices):
-                        self.logger.info(f"✓ 購買完成: 全部 {success_count} 個瀏覽器成功")
+                        self.logger.info(f"[成功] 購買完成: 全部 {success_count} 個瀏覽器成功")
                     else:
                         self.logger.warning(
-                            f"⚠ 部分完成: {success_count}/{len(target_indices)} 個瀏覽器成功"
+                            f"[警告] 部分完成: {success_count}/{len(target_indices)} 個瀏覽器成功"
                         )
                         if failed_browsers:
                             for browser_index, username in failed_browsers:
@@ -3416,7 +3451,7 @@ class GameControlCenter:
                                 press_results = self.browser_operator.press_space_all(successful_contexts)
                                 press_success = sum(1 for r in press_results if r.success)
                                 
-                                self.logger.info(f"✓ 已對 {press_success} 個瀏覽器執行結算")
+                                self.logger.info(f"[成功] 已對 {press_success} 個瀏覽器執行結算")
                                 
                                 # 點擊 LOBBY_LOGIN_BUTTON 座標（連續 5 次，間隔 1 秒）- 快速跳過結算畫面
                                 self.logger.info("正在跳過結算畫面...")
@@ -3448,7 +3483,7 @@ class GameControlCenter:
                                 )
                                 click_success = sum(1 for r in click_results if r.success)
                                 
-                                self.logger.info(f"✓ 已對 {click_success} 個瀏覽器跳過結算畫面")
+                                self.logger.info(f"[成功] 已對 {click_success} 個瀏覽器跳過結算畫面")
                                 self.logger.info("免費遊戲流程完成")
                             
                         except (EOFError, KeyboardInterrupt):
@@ -3536,10 +3571,10 @@ class GameControlCenter:
                     success_count = sum(1 for r in results if r.success)
                     
                     if success_count == len(self.browser_contexts):
-                        self.logger.info(f"✓ 自動旋轉設定完成: 全部 {success_count} 個瀏覽器成功")
+                        self.logger.info(f"[成功] 自動旋轉設定完成: 全部 {success_count} 個瀏覽器成功")
                     else:
                         self.logger.warning(
-                            f"⚠ 部分完成: {success_count}/{len(self.browser_contexts)} 個瀏覽器成功"
+                            f"[警告] 部分完成: {success_count}/{len(self.browser_contexts)} 個瀏覽器成功"
                         )
                         # 顯示失敗的瀏覽器
                         for i, result in enumerate(results, 1):
@@ -3572,13 +3607,13 @@ class GameControlCenter:
                         
                         # 使用 Constants.GAME_BETSIZE 驗證金額
                         if amount not in Constants.GAME_BETSIZE:
-                            self.logger.warning(f"⚠ 金額 {amount} 不在標準列表中，但仍會建立模板")
+                            self.logger.warning(f"[警告] 金額 {amount} 不在標準列表中，但仍會建立模板")
                         
                         # 使用第一個瀏覽器截取
                         if self.browser_contexts:
                             first_context = self.browser_contexts[0]
                             if self.browser_operator.capture_betsize_template(first_context.driver, amount):
-                                self.logger.info("✓ 模板截取成功")
+                                self.logger.info("[成功] 模板截取成功")
                             else:
                                 self.logger.error("✗ 模板截取失敗")
                         else:
@@ -3609,31 +3644,43 @@ class GameControlCenter:
         """啟動控制中心"""
         self.running = True
         self.logger.info("")
-        self.logger.info("━" * 60)
-        self.logger.info("遊戲控制中心")
-        self.logger.info("━" * 60)
+        self.logger.info("=" * 60)
+        self.logger.info("           【遊戲控制中心】已啟動")
+        self.logger.info("=" * 60)
+        self.logger.info("")
+        self.logger.info(f"[成功] 已連接 {len(self.browser_contexts)} 個瀏覽器")
+        self.logger.info("")
+        
+        # 自動顯示幫助訊息
         self.show_help()
         
         try:
             while self.running:
                 try:
-                    print("\n請輸入指令 > ", end="", flush=True)
+                    print(">>> ", end="", flush=True)
                     command = input().strip()
-                    if not self.process_command(command):
-                        break
+                    
+                    if command:
+                        if not self.process_command(command):
+                            break
+                    else:
+                        self.logger.warning("[警告] 請輸入指令（輸入 'h' 查看幫助）")
+                        
                 except EOFError:
-                    self.logger.info("檢測到 EOF 退出控制中心")
+                    self.logger.info("\n[警告] 檢測到 EOF，退出控制中心")
                     break
                 except KeyboardInterrupt:
-                    self.logger.info("用戶中斷 退出控制中心")
+                    self.logger.info("\n[警告] 使用者中斷，退出控制中心")
                     break
         finally:
-            # 確保停止自動按鍵
+            # 確保停止所有自動操作
             if self.auto_press_running:
                 self._stop_auto_press()
+            if self.rule_running:
+                self._stop_rule_execution()
             
             self.running = False
-            self.logger.info("✓ 控制中心已關閉")
+            self.logger.info("[成功] 控制中心已關閉")
     
     def stop(self) -> None:
         """停止控制中心"""
@@ -3711,21 +3758,25 @@ class AutoSlotGameApp:
             ConfigurationError: 配置載入失敗
         """
         self.logger.info("")
-        self.logger.info("━" * 60)
-        self.logger.info("金富翁遊戲自動化系統 v1.8.0")
-        self.logger.info("━" * 60)
+        self.logger.info("=" * 60)
+        self.logger.info("【金富翁遊戲自動化系統】v1.9.0")
+        self.logger.info("=" * 60)
+        self.logger.info("")
+        
+        self.logger.info("【步驟 1/8】載入配置檔案...")
         self.logger.info("")
         
         # 讀取使用者憑證（包含 proxy 資訊）
         self.credentials = self.config_reader.read_user_credentials()
+        self.logger.info(f"  > 已載入 {len(self.credentials)} 個使用者帳號")
         
         # 讀取下注規則
         self.rules = self.config_reader.read_bet_rules()
+        self.logger.info(f"  > 已載入 {len(self.rules)} 條下注規則")
         
-        self.logger.info(
-            f"✓ 配置載入完成: {len(self.credentials)} 個帳號, "
-            f"{len(self.rules)} 條規則"
-        )
+        self.logger.info("")
+        self.logger.info(f"[成功] 配置載入完成")
+        self.logger.info("")
     
     def prompt_browser_count(self) -> int:
         """提示使用者輸入要開啟的瀏覽器數量。
@@ -3736,25 +3787,34 @@ class AutoSlotGameApp:
         max_browsers = len(self.credentials)
         
         if max_browsers == 0:
-            raise ConfigurationError("沒有可用的使用者憑證")
+            raise ConfigurationError("[錯誤] 沒有可用的使用者憑證，請檢查 lib/用戶資料.txt")
+        
+        self.logger.info("【步驟 2/8】選擇瀏覽器數量")
+        self.logger.info("")
         
         while True:
             try:
-                self.logger.info("")
-                print(f"\n請輸入要開啟的瀏覽器數量 (1-{max_browsers}): ", end="", flush=True)
+                self.logger.info(f"[提示] 請輸入要開啟的瀏覽器數量")
+                print(f"   範圍: 1-{max_browsers} (共有 {max_browsers} 個帳號可用): ", end="", flush=True)
                 user_input = input().strip()
+                
+                if not user_input:
+                    self.logger.warning("[警告] 輸入不能為空，請重新輸入")
+                    continue
+                
                 browser_count = int(user_input)
                 
                 if 1 <= browser_count <= max_browsers:
-                    self.logger.info(f"將開啟 {browser_count} 個瀏覽器")
+                    self.logger.info(f"[成功] 已選擇開啟 {browser_count} 個瀏覽器")
+                    self.logger.info("")
                     return browser_count
                 else:
-                    self.logger.warning(f"請輸入 1 到 {max_browsers} 之間的數字")
+                    self.logger.warning(f"[警告] 數量超出範圍，請輸入 1 到 {max_browsers} 之間的數字")
                     
             except ValueError:
-                self.logger.warning("請輸入有效的數字")
+                self.logger.warning("[警告] 格式錯誤，請輸入有效的數字")
             except (EOFError, KeyboardInterrupt):
-                self.logger.warning("使用者取消輸入")
+                self.logger.warning("\n[警告] 使用者取消輸入")
                 raise KeyboardInterrupt()
     
     def setup_proxy_servers(self, browser_count: int) -> List[Optional[int]]:
@@ -3766,7 +3826,9 @@ class AutoSlotGameApp:
         Returns:
             Proxy 埠號列表
         """
-        self._print_step(1, "啟動 Proxy 中繼伺服器")
+        self.logger.info("【步驟 3/8】啟動 Proxy 中繼伺服器")
+        self.logger.info("")
+        
         proxy_ports: List[Optional[int]] = [None] * browser_count
         
         def start_single_proxy_server(
@@ -3790,20 +3852,15 @@ class AutoSlotGameApp:
                         
                         local_proxy_port = self.proxy_manager.start_proxy_server(proxy_info)
                         
-                        if local_proxy_port:
-                            pass  # 成功，但不輸出詳細資訊
-                        else:
+                        if not local_proxy_port:
                             self.logger.warning(
-                                f"瀏覽器 {index+1}: Proxy 啟動失敗，將直連網路"
+                                f"[警告] 瀏覽器 {index+1}: Proxy 啟動失敗，將使用直連"
                             )
                     else:
-                        self.logger.warning(f"瀏覽器 {index+1}: Proxy 格式錯誤")
+                        self.logger.warning(f"[警告] 瀏覽器 {index+1}: Proxy 格式錯誤，將使用直連")
                         
                 except Exception as e:
-                    self.logger.error(f"瀏覽器 {index+1}: Proxy 設定失敗 - {e}")
-            else:
-                # 沒有設定 proxy，將使用直連
-                pass  # 不顯示直連訊息
+                    self.logger.error(f"[錯誤] 瀏覽器 {index+1}: Proxy 設定失敗 - {e}")
             
             return index, local_proxy_port
         
@@ -3824,7 +3881,13 @@ class AutoSlotGameApp:
                 proxy_ports[index] = local_proxy_port
         
         active_count = sum(1 for p in proxy_ports if p is not None)
-        self.logger.info(f"✓ Proxy 伺服器完成: {active_count} 個使用 Proxy, {len(proxy_ports) - active_count} 個直連")
+        direct_count = len(proxy_ports) - active_count
+        
+        self.logger.info(f"[成功] Proxy 設定完成")
+        self.logger.info(f"  > {active_count} 個使用 Proxy 中繼")
+        self.logger.info(f"  > {direct_count} 個使用直連")
+        self.logger.info("")
+        
         return proxy_ports
     
     def create_browser_instances(
@@ -3841,7 +3904,8 @@ class AutoSlotGameApp:
         Returns:
             瀏覽器上下文列表
         """
-        self._print_step(2, "建立瀏覽器實例")
+        self.logger.info("【步驟 4/8】建立瀏覽器實例")
+        self.logger.info("")
         
         browser_results: List[Optional[BrowserContext]] = [None] * browser_count
         
@@ -3864,7 +3928,7 @@ class AutoSlotGameApp:
                 return index, context
                 
             except Exception as e:
-                self.logger.error(f"瀏覽器 {index+1}/{browser_count} 建立失敗: {e}")
+                self.logger.error(f"[錯誤] 瀏覽器 {index+1}/{browser_count} 建立失敗: {e}")
                 return index, None
         
         # 使用執行緒池建立瀏覽器
@@ -3883,9 +3947,13 @@ class AutoSlotGameApp:
         contexts = [context for context in browser_results if context is not None]
         
         if len(contexts) == browser_count:
-            self.logger.info(f"✓ 瀏覽器建立完成: {len(contexts)} 個")
+            self.logger.info(f"[成功] 瀏覽器建立完成: 成功建立 {len(contexts)} 個")
         else:
-            self.logger.warning(f"⚠ 部分失敗: {len(contexts)}/{browser_count} 個成功")
+            self.logger.warning(f"[警告] 部分瀏覽器建立失敗")
+            self.logger.warning(f"  > 成功: {len(contexts)} 個")
+            self.logger.warning(f"  > 失敗: {browser_count - len(contexts)} 個")
+        
+        self.logger.info("")
         return contexts
     
     def run(self) -> None:
@@ -3908,49 +3976,64 @@ class AutoSlotGameApp:
             self.browser_contexts = self.create_browser_instances(browser_count, proxy_ports)
             
             if not self.browser_contexts:
-                raise BrowserCreationError("沒有成功建立任何瀏覽器實例")
+                raise BrowserCreationError("[錯誤] 沒有成功建立任何瀏覽器實例")
             
-            # 步驟 3: 導航到登入頁面
-            self._print_step(3, "導航到登入頁面")
+            # 步驟 5: 導航到登入頁面
+            self.logger.info("【步驟 5/8】導航到登入頁面")
+            self.logger.info("")
             login_results = self.browser_operator.navigate_to_login_page(
                 self.browser_contexts
             )
+            self.logger.info("[成功] 登入頁面載入完成")
+            self.logger.info("")
+            time.sleep(Constants.DEFAULT_WAIT_SECONDS)
             
-            time.sleep(Constants.DEFAULT_WAIT_SECONDS)  # 等待頁面載入
-            
-            # 步驟 4: 執行登入操作（同步）
-            self._print_step(4, "執行登入操作")
+            # 步驟 6: 執行登入操作（同步）
+            self.logger.info("【步驟 6/8】執行登入操作")
+            self.logger.info("")
             login_results = self.browser_operator.perform_login_all(
                 self.browser_contexts
             )
+            self.logger.info("[成功] 登入操作完成")
+            self.logger.info("")
+            time.sleep(Constants.DEFAULT_WAIT_SECONDS)
             
-            time.sleep(Constants.DEFAULT_WAIT_SECONDS)  # 等待登入後的頁面跳轉
-            
-            # 步驟 5: 導航到遊戲頁面
-            self._print_step(5, "導航到遊戲頁面")
+            # 步驟 7: 導航到遊戲頁面
+            self.logger.info("【步驟 7/8】導航到遊戲頁面")
+            self.logger.info("")
             game_results = self.browser_operator.navigate_to_game_page(
                 self.browser_contexts
             )
+            self.logger.info("[成功] 遊戲頁面載入完成")
+            self.logger.info("")
+            time.sleep(Constants.DEFAULT_WAIT_SECONDS)
             
-            time.sleep(Constants.DEFAULT_WAIT_SECONDS)  # 等待遊戲頁面載入
-            
-            # 調整視窗
-            self._print_step(6, "調整視窗排列 (600x400)")
+            # 步驟 8: 調整視窗排列
+            self.logger.info("【步驟 8/8】調整視窗排列 (600x400)")
+            self.logger.info("")
             resize_results = self.browser_operator.resize_and_arrange_all(
                 self.browser_contexts,
                 width=600,
                 height=400,
                 columns=4
             )
+            self.logger.info("[成功] 視窗排列完成")
+            self.logger.info("")
+            time.sleep(Constants.DEFAULT_WAIT_SECONDS)
             
-            time.sleep(Constants.DEFAULT_WAIT_SECONDS)  # 等待視窗調整完成
-            
-            # 步驟 7: 圖片檢測與遊戲流程
-            self._print_step(7, "圖片檢測與遊戲流程")
+            # 圖片檢測與遊戲流程
+            self.logger.info("=" * 60)
+            self.logger.info("【圖片檢測與遊戲初始化】")
+            self.logger.info("=" * 60)
+            self.logger.info("")
             self._execute_image_detection_flow()
             
-            # 步驟 8: 啟動遊戲控制中心
-            self._print_step(8, "啟動遊戲控制中心")
+            # 啟動遊戲控制中心
+            self.logger.info("")
+            self.logger.info("=" * 60)
+            self.logger.info("【遊戲控制中心】")
+            self.logger.info("=" * 60)
+            self.logger.info("")
             control_center = GameControlCenter(
                 browser_contexts=self.browser_contexts,
                 browser_operator=self.browser_operator,
@@ -3960,9 +4043,9 @@ class AutoSlotGameApp:
             control_center.start()
             
         except KeyboardInterrupt:
-            self.logger.warning("使用者中斷程式執行")
+            self.logger.warning("\n[警告] 使用者中斷程式執行")
         except Exception as e:
-            self.logger.error(f"系統發生錯誤 {e}", exc_info=True)
+            self.logger.error(f"[錯誤] 系統發生錯誤: {e}", exc_info=True)
             raise
         finally:
             self.cleanup()
@@ -3973,21 +4056,26 @@ class AutoSlotGameApp:
         包含 lobby_login 和 lobby_confirm 的檢測與處理。
         """
         if not self.browser_contexts:
-            self.logger.error("沒有可用的瀏覽器實例")
+            self.logger.error("[錯誤] 沒有可用的瀏覽器實例")
             return
         
         # 使用第一個瀏覽器作為參考
         reference_browser = self.browser_contexts[0]
         
         # 階段 1: 處理 lobby_login
-        self.logger.info("檢測 lobby_login...")
+        self.logger.info("【階段 1】檢測 lobby_login 畫面")
+        self.logger.info("")
         self._handle_lobby_login(reference_browser)
         
         # 階段 2: 處理 lobby_confirm
-        self.logger.info("檢測 lobby_confirm...")
+        self.logger.info("")
+        self.logger.info("【階段 2】檢測 lobby_confirm 畫面")
+        self.logger.info("")
         self._handle_lobby_confirm(reference_browser)
         
-        self.logger.info("✓ 圖片檢測完成")
+        self.logger.info("")
+        self.logger.info("[成功] 圖片檢測與初始化完成")
+        self.logger.info("")
     
     def _handle_lobby_image(
         self, 
@@ -4151,7 +4239,7 @@ class AutoSlotGameApp:
         self._wait_for_image_disappear(template_name)
         
         # 6. 所有瀏覽器都成功進入遊戲
-        self.logger.info("✓ 所有瀏覽器已準備就緒")
+        self.logger.info("[成功] 所有瀏覽器已準備就緒")
         time.sleep(Constants.DETECTION_COMPLETE_WAIT)
     
     def _wait_for_lobby_confirm_with_error_handling(self) -> None:
@@ -4188,7 +4276,7 @@ class AutoSlotGameApp:
             ]
             
             if not pending_browsers:
-                self.logger.info("✓ 所有瀏覽器都已檢測到 lobby_confirm")
+                self.logger.info("[成功] 所有瀏覽器都已檢測到 lobby_confirm")
                 break
             
             # 檢測 lobby_confirm 和錯誤訊息
@@ -4291,7 +4379,7 @@ class AutoSlotGameApp:
                 browser_states[i]['lobby_confirm_attempts'] = 0
             
             browser_list = ', '.join(map(str, browser_indices))
-            self.logger.info(f"✓ 瀏覽器 {browser_list} 已重啟並等待 lobby_confirm")
+            self.logger.info(f"[成功] 瀏覽器 {browser_list} 已重啟並等待 lobby_confirm")
         else:
             self.logger.error("瀏覽器重啟失敗")
     
@@ -4342,7 +4430,7 @@ class AutoSlotGameApp:
             template_path.parent.mkdir(parents=True, exist_ok=True)
             cropped_img.save(template_path)
             
-            self.logger.info("✓ 模板建立成功")
+            self.logger.info("[成功] 模板建立成功")
             
         except Exception as e:
             self.logger.error(f"自動建立 lobby_confirm.png 失敗: {e}")
@@ -4356,8 +4444,11 @@ class AutoSlotGameApp:
             template_name: 模板檔名
             display_name: 顯示名稱
         """
-        self.logger.info(f"請準備截取 {display_name} 的參考圖片")
-        print(f"按 Enter 鍵截取第一個瀏覽器的畫面作為 {display_name} 模板", end="", flush=True)
+        self.logger.info(f"[警告] 模板圖片不存在: {template_name}")
+        self.logger.info("")
+        self.logger.info(f"[提示] 需要截取 {display_name} 的參考圖片")
+        self.logger.info("   請確保遊戲畫面已顯示目標內容")
+        print(f"\n按 Enter 鍵開始截取第一個瀏覽器的畫面...", end="", flush=True)
         
         try:
             input()
@@ -4365,10 +4456,11 @@ class AutoSlotGameApp:
             # 截取並儲存模板
             template_path = self.image_detector.get_template_path(template_name)
             self.image_detector.capture_screenshot(reference_browser.driver, template_path)
-            self.logger.info(f"模板圖片已建立 路徑 {template_path}")
+            self.logger.info(f"[成功] 模板圖片已建立: {template_path}")
+            self.logger.info("")
             
         except (EOFError, KeyboardInterrupt):
-            self.logger.warning("用戶取消截圖")
+            self.logger.warning("\n[警告] 使用者取消截圖")
             raise
     
     def _handle_image_not_found(self, reference_browser: BrowserContext, template_name: str, display_name: str) -> None:
@@ -4466,6 +4558,8 @@ class AutoSlotGameApp:
         attempt = 0
         total_browsers = len(self.browser_contexts)
         
+        self.logger.info(f"[檢測] 開始檢測 {display_name}...")
+        
         while True:
             attempt += 1
             detection_results = self._detect_in_all_browsers(template_name, silent=True)
@@ -4474,12 +4568,12 @@ class AutoSlotGameApp:
             # 只有當所有瀏覽器都找到圖片時才返回
             if found_count == total_browsers:
                 # 顯示最終找到的座標
-                self.logger.info(f"✓ 所有瀏覽器都已檢測到 {display_name}")
+                self.logger.info(f"[成功] 所有瀏覽器都已檢測到 {display_name}")
                 return detection_results
             
             # 每 N 次檢測顯示一次進度
             if attempt % Constants.DETECTION_PROGRESS_INTERVAL == 0:
-                self.logger.info(f"檢測中... ({found_count}/{total_browsers})")
+                self.logger.info(f"   檢測進度: {found_count}/{total_browsers} 個瀏覽器已就緒")
             
             time.sleep(Constants.DETECTION_INTERVAL)
     
@@ -4580,7 +4674,7 @@ class AutoSlotGameApp:
             
             # 如果所有瀏覽器都沒有找到圖片，則返回
             if not still_present:
-                self.logger.info(f"✓ 圖片已消失")
+                self.logger.info(f"[成功] 圖片已消失")
                 return
             
             # 每 10 次檢測顯示一次進度
@@ -4609,7 +4703,7 @@ class AutoSlotGameApp:
         except Exception as e:
             self.logger.error(f"停止 Proxy 伺服器時發生錯誤: {e}")
         
-        self.logger.info("✓ 清理完成")
+        self.logger.info("[成功] 清理完成")
 
 
 # ============================================================================
