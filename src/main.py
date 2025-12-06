@@ -111,6 +111,10 @@ __all__ = [
 
 class Constants:
     """系統常量"""
+    # 版本資訊
+    VERSION = "1.11.0"
+    SYSTEM_NAME = "金富翁遊戲自動化系統"
+    
     DEFAULT_LIB_PATH = "lib"
     DEFAULT_CREDENTIALS_FILE = "用戶資料.txt"
     DEFAULT_RULES_FILE = "用戶規則.txt"
@@ -4023,7 +4027,7 @@ class AutoSlotGameApp:
         """
         self.logger.info("")
         self.logger.info("=" * 60)
-        self.logger.info("【金富翁遊戲自動化系統】v1.9.0")
+        self.logger.info(f"【{Constants.SYSTEM_NAME}】v{Constants.VERSION}")
         self.logger.info("=" * 60)
         self.logger.info("")
         
