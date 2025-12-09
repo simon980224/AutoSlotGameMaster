@@ -13,10 +13,11 @@
 - 完善的錯誤處理與重試機制
 
 作者: 凡臻科技
-版本: 1.12.0
+版本: 1.12.1
 Python: 3.8+
 
 版本歷史:
+- v1.12.1: 修正規則執行中關閉瀏覽器導致程序停頓的問題（添加瀏覽器狀態檢測）
 - v1.12.0: 移除視窗大小鎖定功能，允許用戶自由調整視窗大小（初始仍為 600x400）
 - v1.11.0: 新增自動跳過點擊功能，每 30 秒自動點擊跳過區域（背景執行，持續運行）
 - v1.10.0: 新增視窗大小鎖定功能，自動監控並恢復視窗大小（位置可自由移動）
@@ -1540,9 +1541,26 @@ class SyncBrowserOperator:
         total = len(browser_contexts)
         results: List[OperationResult] = [OperationResult(False)] * total
         
+        def is_browser_alive(driver: WebDriver) -> bool:
+            """檢查瀏覽器是否仍然有效"""
+            try:
+                # 嘗試獲取當前 URL，如果瀏覽器已關閉會拋出異常
+                _ = driver.current_url
+                return True
+            except Exception:
+                return False
+        
         def execute_operation(index: int, context: BrowserContext) -> Tuple[int, OperationResult]:
             """在執行緒中執行操作"""
             try:
+                # 檢查瀏覽器是否仍然有效
+                if not is_browser_alive(context.driver):
+                    self.logger.warning(f"瀏覽器 {index+1}/{total} 已關閉，跳過 {operation_name}")
+                    return index, OperationResult(
+                        success=False,
+                        message="瀏覽器已關閉"
+                    )
+                
                 result_data = operation_func(context, index + 1, total)
                 return index, OperationResult(
                     success=True,
@@ -2790,6 +2808,21 @@ class GameControlCenter:
 """
         self.logger.info(help_text)
     
+    def _is_browser_alive(self, driver: WebDriver) -> bool:
+        """檢查瀏覽器是否仍然有效。
+        
+        Args:
+            driver: WebDriver 實例
+            
+        Returns:
+            bool: True 表示瀏覽器有效，False 表示已關閉
+        """
+        try:
+            _ = driver.current_url
+            return True
+        except Exception:
+            return False
+    
     def _auto_press_loop_single(self, context: BrowserContext, browser_index: int) -> None:
         """單個瀏覽器的自動按鍵循環（優化版）。
         
@@ -2805,6 +2838,13 @@ class GameControlCenter:
         
         while not self._stop_event.is_set():
             try:
+                # 檢查瀏覽器是否仍然有效
+                try:
+                    _ = driver.current_url
+                except Exception:
+                    self.logger.warning(f"瀏覽器 {browser_index} ({username}) 已關閉，停止自動按鍵")
+                    break
+                
                 press_count += 1
                 
                 # 執行按空白鍵
@@ -2860,6 +2900,13 @@ class GameControlCenter:
                 # 對所有瀏覽器執行點擊
                 for i, context in enumerate(self.browser_contexts, 1):
                     try:
+                        # 檢查瀏覽器是否仍然有效
+                        try:
+                            _ = context.driver.current_url
+                        except Exception:
+                            # 瀏覽器已關閉，跳過
+                            continue
+                        
                         BrowserHelper.execute_cdp_click(context.driver, lobby_x, lobby_y)
                     except Exception as e:
                         # 靜默處理錯誤，避免日誌過多
@@ -3017,17 +3064,20 @@ class GameControlCenter:
                 
                 # 統計結果
                 success_count = sum(1 for r in results if r.success)
-                if success_count == len(self.browser_contexts):
+                active_browsers = len([ctx for ctx in self.browser_contexts if self._is_browser_alive(ctx.driver)])
+                
+                if success_count == active_browsers:
                     self.logger.info(f"[成功] 全部 {success_count} 個瀏覽器金額調整完成")
                 else:
                     self.logger.warning(
-                        f"[警告] {success_count}/{len(self.browser_contexts)} 個瀏覽器金額調整完成"
+                        f"[警告] {success_count}/{active_browsers} 個瀏覽器金額調整完成"
                     )
                     # 如果有失敗的，記錄詳情
-                    for i, result in enumerate(results, 1):
-                        if not result.success:
-                            username = self.browser_contexts[i-1].credential.username
-                            self.logger.error(f"  [{username}] 調整失敗")
+                    for i, result in enumerate(results):
+                        if not result.success and i < len(self.browser_contexts):
+                            username = self.browser_contexts[i].credential.username
+                            if result.message != "瀏覽器已關閉":
+                                self.logger.error(f"  [{username}] 調整失敗")
                 
                 # === 步驟 3: 啟動自動按鍵 ===
                 self.logger.info(
@@ -3420,20 +3470,22 @@ class GameControlCenter:
                         target_amount
                     )
                     
-                    # 統計結果
+                    # 統計結果（只計算活躍瀏覽器）
                     success_count = sum(1 for r in results if r.success)
+                    active_browsers = len([ctx for ctx in self.browser_contexts if self._is_browser_alive(ctx.driver)])
                     
-                    if success_count == len(self.browser_contexts):
+                    if success_count == active_browsers:
                         self.logger.info(f"[成功] 金額調整完成: 全部 {success_count} 個瀏覽器成功")
                     else:
                         self.logger.warning(
-                            f"[警告] 部分完成: {success_count}/{len(self.browser_contexts)} 個瀏覽器成功"
+                            f"[警告] 部分完成: {success_count}/{active_browsers} 個瀏覽器成功"
                         )
-                        # 顯示失敗的瀏覽器
-                        for i, result in enumerate(results, 1):
-                            if not result.success:
-                                username = self.browser_contexts[i-1].credential.username
-                                self.logger.error(f"  瀏覽器 {i} ({username}) 失敗")
+                        # 顯示失敗的瀏覽器（排除已關閉的）
+                        for i, result in enumerate(results):
+                            if not result.success and i < len(self.browser_contexts):
+                                if result.message != "瀏覽器已關閉":
+                                    username = self.browser_contexts[i].credential.username
+                                    self.logger.error(f"  瀏覽器 {i+1} ({username}) 失敗")
                     
                 except ValueError:
                     self.logger.error(f"無效的金額: {command_arguments}，請輸入數字")
@@ -3493,13 +3545,33 @@ class GameControlCenter:
                     if len(target_indices) == len(self.browser_contexts):
                         self.logger.info(f"開始購買免費遊戲 (全部 {len(target_indices)} 個瀏覽器)")
                     elif len(target_indices) == 1:
-                        username = self.browser_contexts[target_indices[0] - 1].credential.username
-                        self.logger.info(f"開始購買免費遊戲 (瀏覽器 {target_indices[0]}: {username})")
+                        # 安全檢查：確保索引有效
+                        if target_indices[0] - 1 < len(self.browser_contexts):
+                            username = self.browser_contexts[target_indices[0] - 1].credential.username
+                            self.logger.info(f"開始購買免費遊戲 (瀏覽器 {target_indices[0]}: {username})")
+                        else:
+                            self.logger.error(f"瀏覽器 {target_indices[0]} 不存在或已關閉")
+                            return True
                     else:
                         self.logger.info(f"開始購買免費遊戲 ({len(target_indices)} 個瀏覽器)")
                     
-                    # 準備目標瀏覽器上下文列表
-                    target_contexts = [self.browser_contexts[browser_index - 1] for browser_index in target_indices]
+                    # 準備目標瀏覽器上下文列表（過濾已關閉的瀏覽器）
+                    target_contexts = []
+                    valid_indices = []
+                    for browser_index in target_indices:
+                        if browser_index - 1 < len(self.browser_contexts):
+                            context = self.browser_contexts[browser_index - 1]
+                            if self._is_browser_alive(context.driver):
+                                target_contexts.append(context)
+                                valid_indices.append(browser_index)
+                            else:
+                                self.logger.warning(f"瀏覽器 {browser_index} 已關閉，跳過")
+                        else:
+                            self.logger.warning(f"瀏覽器 {browser_index} 不存在，跳過")
+                    
+                    if not target_contexts:
+                        self.logger.error("沒有有效的瀏覽器可執行操作")
+                        return True
                     
                     # 使用同步方式執行購買
                     results = self.browser_operator.buy_free_game_all(
@@ -3510,17 +3582,17 @@ class GameControlCenter:
                     # 統計結果
                     success_count = sum(1 for r in results if r.success)
                     failed_browsers = [
-                        (target_indices[i], target_contexts[i].credential.username)
+                        (valid_indices[i], target_contexts[i].credential.username)
                         for i, r in enumerate(results)
                         if not r.success
                     ]
                     
                     # 顯示總結
-                    if success_count == len(target_indices):
+                    if success_count == len(target_contexts):
                         self.logger.info(f"[成功] 購買完成: 全部 {success_count} 個瀏覽器成功")
                     else:
                         self.logger.warning(
-                            f"[警告] 部分完成: {success_count}/{len(target_indices)} 個瀏覽器成功"
+                            f"[警告] 部分完成: {success_count}/{len(target_contexts)} 個瀏覽器成功"
                         )
                         if failed_browsers:
                             for browser_index, username in failed_browsers:
@@ -3666,18 +3738,20 @@ class GameControlCenter:
                     
                     # 統計結果
                     success_count = sum(1 for r in results if r.success)
+                    active_browsers = len([ctx for ctx in self.browser_contexts if self._is_browser_alive(ctx.driver)])
                     
-                    if success_count == len(self.browser_contexts):
+                    if success_count == active_browsers:
                         self.logger.info(f"[成功] 自動旋轉設定完成: 全部 {success_count} 個瀏覽器成功")
                     else:
                         self.logger.warning(
-                            f"[警告] 部分完成: {success_count}/{len(self.browser_contexts)} 個瀏覽器成功"
+                            f"[警告] 部分完成: {success_count}/{active_browsers} 個瀏覽器成功"
                         )
-                        # 顯示失敗的瀏覽器
-                        for i, result in enumerate(results, 1):
-                            if not result.success:
-                                username = self.browser_contexts[i-1].credential.username
-                                self.logger.error(f"  瀏覽器 {i} ({username}) 失敗")
+                        # 顯示失敗的瀏覽器（排除已關閉的）
+                        for i, result in enumerate(results):
+                            if not result.success and i < len(self.browser_contexts):
+                                if result.message != "瀏覽器已關閉":
+                                    username = self.browser_contexts[i].credential.username
+                                    self.logger.error(f"  瀏覽器 {i+1} ({username}) 失敗")
                     
                 except ValueError:
                     self.logger.error(f"無效的次數: {command_arguments}，請輸入 10、50 或 100")
@@ -3706,14 +3780,19 @@ class GameControlCenter:
                         if amount not in Constants.GAME_BETSIZE:
                             self.logger.warning(f"[警告] 金額 {amount} 不在標準列表中，但仍會建立模板")
                         
-                        # 使用第一個瀏覽器截取
-                        if self.browser_contexts:
-                            first_context = self.browser_contexts[0]
-                            if self.browser_operator.capture_betsize_template(first_context.driver, amount):
-                                self.logger.info("[成功] 模板截取成功")
-                            else:
-                                self.logger.error("✗ 模板截取失敗")
-                        else:
+                        # 使用第一個有效的瀏覽器截取
+                        valid_browser_found = False
+                        for context in self.browser_contexts:
+                            if self._is_browser_alive(context.driver):
+                                if self.browser_operator.capture_betsize_template(context.driver, amount):
+                                    self.logger.info("[成功] 模板截取成功")
+                                    valid_browser_found = True
+                                    break
+                                else:
+                                    self.logger.error("✗ 模板截取失敗")
+                                    break
+                        
+                        if not valid_browser_found:
                             self.logger.error("沒有可用的瀏覽器")
                             break
                             
@@ -4105,13 +4184,13 @@ class AutoSlotGameApp:
             time.sleep(Constants.DEFAULT_WAIT_SECONDS)
             
             # 步驟 8: 調整視窗排列
-            self.logger.info("【步驟 8/8】調整視窗排列 (600x400)")
+            self.logger.info(f"【步驟 8/8】調整視窗排列 ({Constants.DEFAULT_WINDOW_WIDTH}x{Constants.DEFAULT_WINDOW_HEIGHT})")
             self.logger.info("")
             resize_results = self.browser_operator.resize_and_arrange_all(
                 self.browser_contexts,
-                width=600,
-                height=400,
-                columns=4
+                width=Constants.DEFAULT_WINDOW_WIDTH,
+                height=Constants.DEFAULT_WINDOW_HEIGHT,
+                columns=Constants.DEFAULT_WINDOW_COLUMNS
             )
             self.logger.info("[成功] 視窗排列完成")
             self.logger.info("")

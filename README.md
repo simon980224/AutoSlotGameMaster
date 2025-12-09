@@ -2,6 +2,7 @@
 
 > 金富翁遊戲自動化系統 - 多瀏覽器並行控制、圖片識別、Proxy 中繼
 
+[![Version](https://img.shields.io/badge/version-1.12.1-brightgreen.svg)](https://github.com/simon980224/AutoSlotGameMaster)
 [![Python Version](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](https://github.com/simon980224/AutoSlotGameMaster)
@@ -447,6 +448,27 @@ google-chrome --version  # Linux
 - 常量使用 `UPPER_CASE`
 
 ## 📝 版本歷史
+
+### v1.12.1 (2025-12-09)
+
+- 🐛 **修正規則執行中關閉瀏覽器導致程序停頓的問題**：添加瀏覽器狀態檢測機制
+- 🔍 **智慧瀏覽器狀態檢測**：所有操作前自動檢查瀏覽器是否仍然有效
+- 🛡️ **防止操作停頓**：關閉的瀏覽器自動跳過，不再嘗試執行操作
+- 🔄 **規則執行優化**：規則執行中關閉部分瀏覽器時，系統自動調整計數並繼續運行
+- 📊 **準確的成功率統計**：只計算活躍瀏覽器的操作結果，排除已關閉的瀏覽器
+- ✨ **自動按鍵執行緒保護**：自動按鍵循環中檢測瀏覽器狀態，關閉時立即停止執行緒
+- 🎯 **自動跳過點擊優化**：跳過區域點擊時檢測瀏覽器狀態，關閉的瀏覽器自動跳過
+- 💡 **適用範圍**：修正涉及 `execute_sync()`、`_rule_execution_loop()`、`_auto_press_loop_single()` 等多個關鍵函式
+- 🚀 **提升穩定性**：避免對已關閉瀏覽器執行操作導致的異常和延遲
+
+**修正細節**：
+
+- `SyncBrowserOperator.execute_sync()`：操作前檢查瀏覽器有效性，無效時返回失敗結果並附帶 "瀏覽器已關閉" 訊息
+- `GameControlCenter._is_browser_alive()`：新增專用方法檢測瀏覽器狀態
+- `GameControlCenter._auto_press_loop_single()`：循環開始前檢查瀏覽器狀態，關閉時立即退出執行緒
+- `GameControlCenter._auto_skip_click_loop()`：點擊前檢查瀏覽器狀態，關閉的自動跳過
+- `GameControlCenter._rule_execution_loop()`：統計時只計算活躍瀏覽器，避免誤報錯誤
+- 所有命令處理：調整結果統計邏輯，排除 "瀏覽器已關閉" 的失敗記錄
 
 ### v1.12.0 (2025-12-09)
 
