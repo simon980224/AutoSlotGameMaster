@@ -11,13 +11,13 @@
 - 多瀏覽器實例管理
 - 彩色日誌系統
 - 完善的錯誤處理與重試機制
-- 視窗大小鎖定功能（自動恢復視窗大小）
 
 作者: 凡臻科技
-版本: 1.11.0
+版本: 1.12.0
 Python: 3.8+
 
 版本歷史:
+- v1.12.0: 移除視窗大小鎖定功能，允許用戶自由調整視窗大小（初始仍為 600x400）
 - v1.11.0: 新增自動跳過點擊功能，每 30 秒自動點擊跳過區域（背景執行，持續運行）
 - v1.10.0: 新增視窗大小鎖定功能，自動監控並恢復視窗大小（位置可自由移動）
 - v1.9.0: 優化系統啟動流程（自動顯示完整指令列表，移除 emoji 符號，統一日誌格式）
@@ -99,7 +99,6 @@ __all__ = [
     'SyncBrowserOperator',
     'ImageDetector',
     'BrowserRecoveryManager',
-    'WindowLockManager',
     'GameControlCenter',
     'AutoSlotGameApp',
 ]
@@ -112,7 +111,7 @@ __all__ = [
 class Constants:
     """系統常量"""
     # 版本資訊
-    VERSION = "1.11.0"
+    VERSION = "1.12.0"
     SYSTEM_NAME = "金富翁遊戲自動化系統"
     
     DEFAULT_LIB_PATH = "lib"
@@ -214,10 +213,6 @@ class Constants:
     DEFAULT_WINDOW_WIDTH = 600
     DEFAULT_WINDOW_HEIGHT = 400
     DEFAULT_WINDOW_COLUMNS = 4
-    
-    # 視窗大小鎖定配置
-    WINDOW_LOCK_CHECK_INTERVAL = 0.5  # 視窗大小鎖定檢查間隔（秒）
-    WINDOW_SIZE_TOLERANCE = 0  # 視窗大小容許誤差（像素），0 表示不允許任何偏差
     
     # 下注金額調整按鈕座標（基於預設視窗大小）
     BETSIZE_INCREASE_BUTTON_X = 440  # 增加金額按鈕 X 座標
@@ -2688,142 +2683,6 @@ class BrowserRecoveryManager:
 
 
 # ============================================================================
-# 視窗大小鎖定管理器
-# ============================================================================
-
-class WindowLockManager:
-    """視窗大小鎖定管理器。
-    
-    持續監控瀏覽器視窗的大小，當檢測到變化時自動恢復到預設大小。
-    位置可以自由移動，不受限制。
-    每個瀏覽器獨立執行緒監控，避免相互影響。
-    
-    Attributes:
-        browser_contexts: 瀏覽器上下文列表
-        target_width: 目標視窗寬度
-        target_height: 目標視窗高度
-        logger: 日誌記錄器
-        lock_threads: 視窗鎖定執行緒列表
-        stop_events: 停止事件列表
-        running: 是否正在運行
-    """
-    
-    def __init__(
-        self,
-        browser_contexts: List[BrowserContext],
-        target_width: int = Constants.DEFAULT_WINDOW_WIDTH,
-        target_height: int = Constants.DEFAULT_WINDOW_HEIGHT,
-        logger: Optional[logging.Logger] = None
-    ):
-        """初始化視窗大小鎖定管理器。
-        
-        Args:
-            browser_contexts: 瀏覽器上下文列表
-            target_width: 目標視窗寬度
-            target_height: 目標視窗高度
-            logger: 日誌記錄器
-        """
-        self.browser_contexts = browser_contexts
-        self.target_width = target_width
-        self.target_height = target_height
-        self.logger = logger or LoggerFactory.get_logger()
-        
-        self.lock_threads: List[threading.Thread] = []
-        self.stop_events: List[threading.Event] = []
-        self.running = False
-    
-    def start(self) -> None:
-        """啟動視窗大小鎖定功能。"""
-        if self.running:
-            self.logger.warning("視窗大小鎖定功能已在運行中")
-            return
-        
-        self.running = True
-        self.stop_events = [threading.Event() for _ in self.browser_contexts]
-        self.lock_threads = []
-        
-        for i, context in enumerate(self.browser_contexts):
-            stop_event = self.stop_events[i]
-            thread = threading.Thread(
-                target=self._monitor_window_loop,
-                args=(context, stop_event),
-                daemon=True,
-                name=f"WindowSizeLock-{context.index}"
-            )
-            thread.start()
-            self.lock_threads.append(thread)
-        
-        self.logger.info(f"[啟動] 視窗大小鎖定功能已啟動 ({len(self.browser_contexts)} 個瀏覽器)")
-    
-    def stop(self) -> None:
-        """停止視窗大小鎖定功能。"""
-        if not self.running:
-            return
-        
-        self.running = False
-        
-        # 設置所有停止事件
-        for event in self.stop_events:
-            event.set()
-        
-        # 等待所有執行緒結束
-        for thread in self.lock_threads:
-            thread.join(timeout=Constants.AUTO_PRESS_THREAD_JOIN_TIMEOUT)
-        
-        self.lock_threads.clear()
-        self.stop_events.clear()
-        
-        self.logger.info("[停止] 視窗大小鎖定功能已停止")
-    
-    def _monitor_window_loop(
-        self,
-        context: BrowserContext,
-        stop_event: threading.Event
-    ) -> None:
-        """單一瀏覽器的視窗大小監控循環。
-        
-        Args:
-            context: 瀏覽器上下文
-            stop_event: 停止事件
-        """
-        while not stop_event.is_set():
-            try:
-                # 獲取當前視窗大小
-                current_size = context.driver.get_window_size()
-                current_width = current_size.get('width', 0)
-                current_height = current_size.get('height', 0)
-                
-                # 檢查大小是否改變（不允許任何偏差）
-                size_changed = (
-                    current_width != self.target_width or
-                    current_height != self.target_height
-                )
-                
-                # 如果大小改變，立即恢復
-                if size_changed:
-                    context.driver.set_window_size(self.target_width, self.target_height)
-                    self.logger.info(
-                        f"[瀏覽器 {context.index}] 視窗大小已鎖定: "
-                        f"{current_width}x{current_height} → {self.target_width}x{self.target_height}"
-                    )
-                
-                # 等待下一次檢查
-                stop_event.wait(Constants.WINDOW_LOCK_CHECK_INTERVAL)
-                
-            except Exception as e:
-                # 瀏覽器可能已關閉或發生其他錯誤
-                if "invalid session id" in str(e).lower() or "no such window" in str(e).lower():
-                    # 瀏覽器已關閉，停止監控
-                    break
-                else:
-                    self.logger.error(
-                        f"[瀏覽器 {context.index}] 視窗大小監控發生錯誤: {e}",
-                        exc_info=False
-                    )
-                    stop_event.wait(Constants.STOP_EVENT_ERROR_WAIT)
-
-
-# ============================================================================
 # 遊戲控制中心
 # ============================================================================
 
@@ -2876,14 +2735,6 @@ class GameControlCenter:
         self.auto_skip_running = False  # 自動跳過點擊運行狀態
         self.auto_skip_thread: Optional[threading.Thread] = None  # 自動跳過點擊執行緒
         self._auto_skip_stop_event = threading.Event()  # 自動跳過停止事件
-        
-        # 視窗大小鎖定管理器
-        self.window_lock_manager = WindowLockManager(
-            browser_contexts=browser_contexts,
-            target_width=Constants.DEFAULT_WINDOW_WIDTH,
-            target_height=Constants.DEFAULT_WINDOW_HEIGHT,
-            logger=logger
-        )
     
     def show_help(self) -> None:
         """顯示幫助信息"""
@@ -2933,8 +2784,8 @@ class GameControlCenter:
                       q 1,2,3  → 關閉第 1、2、3 個瀏覽器
 
 ==========================================================
-[提示] 視窗大小鎖定功能已自動啟用，視窗大小固定為 600x400
 [提示] 自動跳過點擊功能已啟動，每 30 秒自動點擊一次跳過區域
+[提示] 初始視窗大小為 600x400，您可以自由調整視窗大小
 ==========================================================
 """
         self.logger.info(help_text)
@@ -3897,9 +3748,6 @@ class GameControlCenter:
         self.logger.info(f"[成功] 已連接 {len(self.browser_contexts)} 個瀏覽器")
         self.logger.info("")
         
-        # 自動啟動視窗鎖定功能（始終運行）
-        self.window_lock_manager.start()
-        
         # 自動啟動跳過點擊功能（始終運行）
         self._start_auto_skip_click()
         
@@ -3925,10 +3773,6 @@ class GameControlCenter:
                     self.logger.info("\n[警告] 使用者中斷，退出控制中心")
                     break
         finally:
-            # 確保停止視窗大小鎖定功能
-            if self.window_lock_manager.running:
-                self.window_lock_manager.stop()
-            
             # 確保停止自動跳過點擊功能
             if self.auto_skip_running:
                 self._stop_auto_skip_click()
@@ -3945,10 +3789,6 @@ class GameControlCenter:
     def stop(self) -> None:
         """停止控制中心"""
         self.running = False
-        
-        # 確保停止視窗大小鎖定功能
-        if self.window_lock_manager.running:
-            self.window_lock_manager.stop()
         
         # 確保停止自動跳過點擊功能
         if self.auto_skip_running:
@@ -4046,8 +3886,8 @@ class AutoSlotGameApp:
         self.logger.info(f"[成功] 配置載入完成")
         self.logger.info("")
     
-    def prompt_browser_count(self) -> int:
-        """提示使用者輸入要開啟的瀏覽器數量。
+    def auto_determine_browser_count(self) -> int:
+        """自動決定要開啟的瀏覽器數量（根據用戶資料檔案）。
         
         Returns:
             瀏覽器數量
@@ -4057,33 +3897,21 @@ class AutoSlotGameApp:
         if max_browsers == 0:
             raise ConfigurationError("[錯誤] 沒有可用的使用者憑證，請檢查 lib/用戶資料.txt")
         
-        self.logger.info("【步驟 2/8】選擇瀏覽器數量")
+        self.logger.info("【步驟 2/8】確定瀏覽器數量")
         self.logger.info("")
         
-        while True:
-            try:
-                self.logger.info(f"[提示] 請輸入要開啟的瀏覽器數量")
-                print(f"   範圍: 1-{max_browsers} (共有 {max_browsers} 個帳號可用): ", end="", flush=True)
-                user_input = input().strip()
-                
-                if not user_input:
-                    self.logger.warning("[警告] 輸入不能為空，請重新輸入")
-                    continue
-                
-                browser_count = int(user_input)
-                
-                if 1 <= browser_count <= max_browsers:
-                    self.logger.info(f"[成功] 已選擇開啟 {browser_count} 個瀏覽器")
-                    self.logger.info("")
-                    return browser_count
-                else:
-                    self.logger.warning(f"[警告] 數量超出範圍，請輸入 1 到 {max_browsers} 之間的數字")
-                    
-            except ValueError:
-                self.logger.warning("[警告] 格式錯誤，請輸入有效的數字")
-            except (EOFError, KeyboardInterrupt):
-                self.logger.warning("\n[警告] 使用者取消輸入")
-                raise KeyboardInterrupt()
+        # 如果帳號數量超過 12，提示用戶並限制為 12
+        if max_browsers > 12:
+            self.logger.warning(f"[警告] 偵測到 {max_browsers} 個帳號，但系統最多支援 12 個瀏覽器")
+            self.logger.warning(f"[警告] 將自動使用前 12 組帳號進行運行")
+            self.logger.info("")
+            browser_count = 12
+        else:
+            browser_count = max_browsers
+        
+        self.logger.info(f"[成功] 已確定開啟 {browser_count} 個瀏覽器")
+        self.logger.info("")
+        return browser_count
     
     def setup_proxy_servers(self, browser_count: int) -> List[Optional[int]]:
         """設定 Proxy 中繼伺服器（同步啟動）。
@@ -4234,8 +4062,8 @@ class AutoSlotGameApp:
             # 載入配置
             self.load_configurations()
             
-            # 詢問瀏覽器數量
-            browser_count = self.prompt_browser_count()
+            # 自動決定瀏覽器數量
+            browser_count = self.auto_determine_browser_count()
             
             # 設定 Proxy 伺服器
             proxy_ports = self.setup_proxy_servers(browser_count)

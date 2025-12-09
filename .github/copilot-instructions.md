@@ -8,10 +8,11 @@
 
 ## 版本資訊
 
-**目前版本**: v1.11.0
+**目前版本**: v1.12.0
 
 **更新內容**:
 
+- v1.12.0: 移除視窗大小鎖定功能，允許用戶自由調整視窗大小（初始仍為 600x400）；改為自動決定瀏覽器數量（最多 12 個）
 - v1.11.0: 新增自動跳過點擊功能，每 30 秒自動點擊跳過區域（背景執行，持續運行直到程式關閉）
 - v1.10.0: 新增視窗大小鎖定功能，自動監控並恢復視窗大小（位置可自由移動）
 - v1.9.0: 優化系統啟動流程（自動顯示完整指令列表，移除 emoji 符號，統一日誌格式）
@@ -79,7 +80,6 @@ from autoslot import (
 - **同步操作**: `SyncBrowserOperator.execute_sync()` 使用 `ThreadPoolExecutor` 對所有瀏覽器執行相同操作
 - **獨立執行緒**: `GameControlCenter._auto_press_loop_single()` 為每個瀏覽器啟動獨立執行緒，使用 `threading.Event` 控制停止
 - **背景自動化**（v1.11.0 新增）: `GameControlCenter._auto_skip_click_loop()` 在背景持續運行，每 30 秒自動點擊所有瀏覽器的跳過區域
-- **視窗監控**（v1.10.0 新增）: `WindowLockManager._monitor_window_loop()` 為每個瀏覽器啟動獨立監控執行緒，自動恢復視窗大小
 - **最大工作數**: `Constants.MAX_THREAD_WORKERS = 10`
 
 ### 4. Proxy 中繼架構
@@ -192,6 +192,8 @@ pip install -r requirements.txt
 python src/main.py
 ```
 
+**v1.12.0 變更**：程式會自動根據 `lib/用戶資料.txt` 中的帳號數量決定要開啟的瀏覽器數量（最多 12 個），無需手動輸入。
+
 ### 打包為可執行檔
 
 ```bash
@@ -205,7 +207,7 @@ python build.py
 ### 除錯技巧
 
 1. **調整日誌等級**: `LoggerFactory.get_logger(level=LogLevel.DEBUG)`
-2. **單一瀏覽器測試**: 修改 `prompt_browser_count()` 返回 1
+2. **單一瀏覽器測試**: 修改 `auto_determine_browser_count()` 返回 1（v1.12.0 後已改為自動決定）
 3. **跳過圖片檢測**: 在 `_execute_image_detection_flow()` 中註釋相關步驟
 4. **查看 Proxy 流量**: 使用 `self.logger.debug()` 輸出 Proxy 請求
 
