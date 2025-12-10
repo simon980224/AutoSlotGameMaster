@@ -114,7 +114,7 @@ __all__ = [
 class Constants:
     """系統常量"""
     # 版本資訊
-    VERSION = "1.14.2"
+    VERSION = "1.14.3"
     SYSTEM_NAME = "金富翁遊戲自動化系統"
     
     DEFAULT_LIB_PATH = "lib"
@@ -3309,6 +3309,11 @@ class GameControlCenter:
         self.logger.info("=" * 60)
         self.logger.info("")
         
+        # 在金額調整前檢查停止標記
+        if self._stop_event.is_set():
+            self.logger.info("[中斷] 收到停止信號，跳過當前規則")
+            return
+        
         # === 步驟 2: 調整所有瀏覽器的下注金額 ===
         self.logger.info(f"[步驟 1/2] 調整金額到 {rule.amount}...")
         results = self.browser_operator.adjust_betsize_all(
@@ -3335,6 +3340,12 @@ class GameControlCenter:
                         self.logger.error(f"  [{username}] 調整失敗")
         
         self.logger.info("")
+        
+        # 在啟動自動按鍵前檢查停止標記
+        if self._stop_event.is_set():
+            self.logger.info("[中斷] 收到停止信號，跳過自動按鍵")
+            return
+        
         # === 步驟 3: 啟動自動按鍵 ===
         self.logger.info(
             f"[步驟 2/2] 啟動自動按鍵 (持續 {rule.duration} 分鐘, "
@@ -3424,6 +3435,11 @@ class GameControlCenter:
         self.logger.info("=" * 60)
         self.logger.info("")
         
+        # 在金額調整前檢查停止標記
+        if self._stop_event.is_set():
+            self.logger.info("[中斷] 收到停止信號，跳過當前規則")
+            return
+        
         # === 步驟 2: 調整所有瀏覽器的下注金額 ===
         self.logger.info(f"[步驟 1/2] 調整金額到 {rule.amount}...")
         results = self.browser_operator.adjust_betsize_all(
@@ -3444,6 +3460,12 @@ class GameControlCenter:
             )
         
         self.logger.info("")
+        
+        # 在購買免費遊戲前檢查停止標記
+        if self._stop_event.is_set():
+            self.logger.info("[中斷] 收到停止信號，跳過免費遊戲購買")
+            return
+        
         # === 步驟 3: 購買免費遊戲 ===
         self.logger.info("[步驟 2/2] 開始購買免費遊戲...")
         

@@ -2,7 +2,7 @@
 
 > 金富翁遊戲自動化系統 - 多瀏覽器並行控制、圖片識別、Proxy 中繼
 
-[![Version](https://img.shields.io/badge/version-1.14.2-brightgreen.svg)](https://github.com/simon980224/AutoSlotGameMaster)
+[![Version](https://img.shields.io/badge/version-1.14.3-brightgreen.svg)](https://github.com/simon980224/AutoSlotGameMaster)
 [![Python Version](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](https://github.com/simon980224/AutoSlotGameMaster)
@@ -448,6 +448,21 @@ google-chrome --version  # Linux
 - 常量使用 `UPPER_CASE`
 
 ## 📝 版本歷史
+
+### v1.14.3 (2025-12-11)
+
+- 🐛 **修正按下 'p' 後規則仍繼續執行的問題**：在規則執行的關鍵步驟之間加入停止檢查
+- ⚡ **停止響應優化**：按下 'p' 後系統可立即中斷當前規則，無需等待完整執行
+- 🔍 **多重檢查點**：在金額調整前、自動按鍵啟動前、免費遊戲購買前都檢查停止標記
+- 🎯 **精準控制**：停止信號觸發後，當前規則立即跳過，進入停止流程
+- 💡 **使用體驗提升**：避免因長時間金額調整（可能超過 1 分鐘）導致停止延遲
+- 🚀 **適用範圍**：標準規則（'s'）和免費遊戲規則（'f'）都已加入停止檢查
+
+**修正細節**：
+
+- `_execute_standard_rule()`：在金額調整前和自動按鍵啟動前檢查 `self._stop_event.is_set()`
+- `_execute_free_game_rule()`：在金額調整前和免費遊戲購買前檢查 `self._stop_event.is_set()`
+- 檢查點位置：規則資訊顯示後、操作執行前，確保無效操作不會啟動
 
 ### v1.14.2 (2025-12-11)
 
