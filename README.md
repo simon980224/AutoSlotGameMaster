@@ -2,7 +2,7 @@
 
 > 金富翁遊戲自動化系統 - 多瀏覽器並行控制、圖片識別、Proxy 中繼
 
-[![Version](https://img.shields.io/badge/version-1.12.1-brightgreen.svg)](https://github.com/simon980224/AutoSlotGameMaster)
+[![Version](https://img.shields.io/badge/version-1.14.2-brightgreen.svg)](https://github.com/simon980224/AutoSlotGameMaster)
 [![Python Version](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](https://github.com/simon980224/AutoSlotGameMaster)
@@ -448,6 +448,62 @@ google-chrome --version  # Linux
 - 常量使用 `UPPER_CASE`
 
 ## 📝 版本歷史
+
+### v1.14.2 (2025-12-11)
+
+- 🐛 **修正規則執行循環問題**：'f' 規則執行後正確清除停止事件，確保循環繼續
+- 🔄 **停止事件管理優化**：標準規則（'s'）和免費遊戲規則（'f'）在停止自動按鍵後立即清除停止事件
+- 🎯 **循環執行改善**：規則執行主循環不再因停止事件殘留而意外退出
+- 📊 **日誌輸出優化**：調整執行緒啟動順序，避免主執行緒和規則執行執行緒的日誌交錯
+- 💡 **使用體驗提升**：規則循環（s → f → s → ...）現在可以正常運行，無需手動干預
+- 🚀 **背景自動化整合**：30 秒自動跳過功能與免費遊戲規則完美配合，自動處理結算畫面
+
+**修正細節**：
+
+- `_execute_standard_rule()`：停止自動按鍵後添加 `self._stop_event.clear()` 清除停止事件
+- `_execute_free_game_rule()`：停止自動按鍵後添加 `self._stop_event.clear()` 清除停止事件
+- `_start_rule_execution()`：調整執行緒啟動順序，先輸出提示訊息再啟動規則執行執行緒
+
+### v1.14.1 (2025-12-11)
+
+- 🐛 **修正規則執行中 'f' 規則 AttributeError 問題**：改用 `browser_operator.last_canvas_rect` 替代 `self.last_canvas_rect`
+- 📊 **優化金額識別失敗日誌**：即使在靜默模式（silent=True）下也記錄關鍵錯誤，避免調試困難
+- 🔍 **週期性警告輸出**：金額識別失敗時每 20 次重試輸出一次警告，避免日誌過載但保留診斷資訊
+- 🎯 **準確定位問題根源**：當金額調整時間過長（例如 2 分 29 秒）時，警告日誌可清楚指出是金額識別失敗導致
+- 💡 **改善除錯體驗**：提示用戶檢查 `img/bet_size/` 資料夾中的金額模板圖片
+
+**修正細節**：
+
+- `_execute_free_game_rule()`：使用 `self.browser_operator.last_canvas_rect` 替代 `self.last_canvas_rect`
+- `adjust_betsize()`：初始金額識別失敗時強制輸出錯誤日誌（即使 silent=True）
+- `adjust_betsize()`：重試循環中每 20 次輸出一次警告日誌，包含嘗試次數資訊
+
+### v1.14.0 (2025-12-10)
+
+- ✨ **擴展規則執行功能**：支援 'f' 類型規則（購買免費遊戲）
+- 🎮 **新規則格式**：`f:金額` - 購買指定金額的免費遊戲
+- 🔄 **完整規則循環**：支援 a（自動旋轉）、s（標準規則）、f（免費遊戲）三種規則類型混合執行
+- 🚀 **自動化流程**：免費遊戲購買完成後，背景自動跳過功能會自動處理結算畫面
+- 📝 **規則執行邏輯**：階段 1 執行所有 'a' 規則（一次性），階段 2 循環執行 's' 和 'f' 規則
+
+**規則設定範例**：
+
+```
+a:2:10          # 自動旋轉 10 次，金額 2
+s:4:1:1:1       # 標準規則，金額 4，持續 1 分鐘，間隔 1~1 秒
+f:8             # 購買免費遊戲，金額 8
+s:10:2:1:10     # 標準規則，金額 10，持續 2 分鐘，間隔 1~10 秒
+```
+
+### v1.13.0 (2025-12-10)
+
+- ✨ **擴展規則執行功能**：支援 'a' 類型規則（自動旋轉）和 's' 類型規則（標準規則）
+- 🎯 **多種規則格式**：
+  - `a:金額:次數` - 自動旋轉規則
+  - `s:金額:時間(分鐘):最小(秒數):最大(秒數)` - 標準規則
+- 🔄 **規則執行邏輯**：'a' 規則只執行一次，'s' 規則循環執行
+- 📊 **日誌輸出優化**：新增 silent 參數，規則執行時減少冗餘日誌
+- 🚀 **自動化流程改善**：規則執行更智慧，自動區分一次性規則和循環規則
 
 ### v1.12.1 (2025-12-09)
 

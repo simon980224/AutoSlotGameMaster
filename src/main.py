@@ -13,10 +13,12 @@
 - 完善的錯誤處理與重試機制
 
 作者: 凡臻科技
-版本: 1.12.1
+版本: 1.14.0
 Python: 3.8+
 
 版本歷史:
+- v1.14.0: 新增免費遊戲規則（'f' 類型），支援在規則執行中購買免費遊戲
+- v1.13.0: 擴展規則執行功能，支援自動旋轉規則（'a' 類型）和標準規則（'s' 類型）混合執行
 - v1.12.1: 修正規則執行中關閉瀏覽器導致程序停頓的問題（添加瀏覽器狀態檢測）
 - v1.12.0: 移除視窗大小鎖定功能，允許用戶自由調整視窗大小（初始仍為 600x400）
 - v1.11.0: 新增自動跳過點擊功能，每 30 秒自動點擊跳過區域（背景執行，持續運行）
@@ -112,7 +114,7 @@ __all__ = [
 class Constants:
     """系統常量"""
     # 版本資訊
-    VERSION = "1.12.0"
+    VERSION = "1.14.2"
     SYSTEM_NAME = "金富翁遊戲自動化系統"
     
     DEFAULT_LIB_PATH = "lib"
@@ -204,7 +206,7 @@ class Constants:
     AUTO_SKIP_CLICK_INTERVAL = 30  # 自動跳過點擊間隔時間（秒）
     
     # 重試與循環配置
-    BETSIZE_ADJUST_MAX_ATTEMPTS = 200  # 調整金額最大嘗試次數
+    BETSIZE_ADJUST_MAX_ATTEMPTS = 400  # 調整金額最大嘗試次數
     BETSIZE_READ_MAX_RETRIES = 2       # 讀取金額最大重試次數
     FREE_GAME_SETTLE_CLICK_COUNT = 5   # 免費遊戲結算點擊次數
     DETECTION_WAIT_MAX_ATTEMPTS = 20   # 檢測等待最大嘗試次數
@@ -411,24 +413,49 @@ class UserCredential:
 
 @dataclass(frozen=True)
 class BetRule:
-    """下注規則資料結構（不可變）。"""
+    """下注規則資料結構（不可變）。
+    
+    支援三種類型:
+    - 'a' (自動旋轉): amount, spin_count
+    - 's' (標準規則): amount, duration, min_seconds, max_seconds
+    - 'f' (購買免費遊戲): amount
+    """
+    rule_type: str  # 'a'、's' 或 'f'
     amount: float
-    duration: int  # 分鐘
-    min_seconds: float  # 最小間隔秒數
-    max_seconds: float  # 最大間隔秒數
+    spin_count: Optional[int] = None  # 'a' 類型使用
+    duration: Optional[int] = None  # 's' 類型使用（分鐘）
+    min_seconds: Optional[float] = None  # 's' 類型使用
+    max_seconds: Optional[float] = None  # 's' 類型使用
     
     def __post_init__(self) -> None:
         """驗證資料完整性"""
         if self.amount <= 0:
             raise ValueError(f"下注金額必須大於 0: {self.amount}")
-        if self.duration <= 0:
-            raise ValueError(f"持續時間必須大於 0: {self.duration}")
-        if self.min_seconds <= 0:
-            raise ValueError(f"最小間隔秒數必須大於 0: {self.min_seconds}")
-        if self.max_seconds <= 0:
-            raise ValueError(f"最大間隔秒數必須大於 0: {self.max_seconds}")
-        if self.min_seconds > self.max_seconds:
-            raise ValueError(f"最小間隔不能大於最大間隔: {self.min_seconds} > {self.max_seconds}")
+        
+        if self.rule_type == 'a':
+            # 自動旋轉規則驗證
+            if self.spin_count is None:
+                raise ValueError("自動旋轉規則必須指定次數")
+            if self.spin_count not in [10, 50, 100]:
+                raise ValueError(f"自動旋轉次數必須是 10、50 或 100: {self.spin_count}")
+        
+        elif self.rule_type == 's':
+            # 標準規則驗證
+            if self.duration is None or self.duration <= 0:
+                raise ValueError(f"持續時間必須大於 0: {self.duration}")
+            if self.min_seconds is None or self.min_seconds <= 0:
+                raise ValueError(f"最小間隔秒數必須大於 0: {self.min_seconds}")
+            if self.max_seconds is None or self.max_seconds <= 0:
+                raise ValueError(f"最大間隔秒數必須大於 0: {self.max_seconds}")
+            if self.min_seconds > self.max_seconds:
+                raise ValueError(f"最小間隔不能大於最大間隔: {self.min_seconds} > {self.max_seconds}")
+        
+        elif self.rule_type == 'f':
+            # 購買免費遊戲規則驗證（只需要金額）
+            pass
+        
+        else:
+            raise ValueError(f"無效的規則類型: {self.rule_type}，必須是 'a'、's' 或 'f'")
 
 
 @dataclass(frozen=True)
@@ -839,7 +866,10 @@ class ConfigReader:
     ) -> List[BetRule]:
         """讀取下注規則檔案。
         
-        檔案格式: 金額:時間(分鐘):最小(秒數):最大(秒數) (首行為標題)
+        支援三種格式:
+        - a:金額:次數 (自動旋轉規則)
+        - s:金額:時間(分鐘):最小(秒數):最大(秒數) (標準規則)
+        - f:金額 (購買免費遊戲)
         
         Args:
             filename: 檔案名稱
@@ -857,21 +887,58 @@ class ConfigReader:
             try:
                 parts = line.split(':')
                 
-                if len(parts) < 4:
+                if len(parts) < 2:
                     self.logger.warning(f"第 {line_number} 行格式不完整 已跳過 {line}")
                     continue
                 
-                amount = float(parts[0].strip())
-                duration = int(parts[1].strip())
-                min_seconds = float(parts[2].strip())
-                max_seconds = float(parts[3].strip())
+                rule_type = parts[0].strip().lower()
                 
-                rules.append(BetRule(
-                    amount=amount, 
-                    duration=duration,
-                    min_seconds=min_seconds,
-                    max_seconds=max_seconds
-                ))
+                if rule_type == 'a':
+                    # 自動旋轉規則: a:金額:次數
+                    if len(parts) < 3:
+                        self.logger.warning(f"第 {line_number} 行格式不完整 已跳過 {line}")
+                        continue
+                    
+                    amount = float(parts[1].strip())
+                    spin_count = int(parts[2].strip())
+                    
+                    rules.append(BetRule(
+                        rule_type='a',
+                        amount=amount,
+                        spin_count=spin_count
+                    ))
+                    
+                elif rule_type == 's':
+                    # 標準規則: s:金額:時間:最小秒數:最大秒數
+                    if len(parts) < 5:
+                        self.logger.warning(f"第 {line_number} 行格式不完整 已跳過 {line}")
+                        continue
+                    
+                    amount = float(parts[1].strip())
+                    duration = int(parts[2].strip())
+                    min_seconds = float(parts[3].strip())
+                    max_seconds = float(parts[4].strip())
+                    
+                    rules.append(BetRule(
+                        rule_type='s',
+                        amount=amount,
+                        duration=duration,
+                        min_seconds=min_seconds,
+                        max_seconds=max_seconds
+                    ))
+                    
+                elif rule_type == 'f':
+                    # 購買免費遊戲規則: f:金額
+                    amount = float(parts[1].strip())
+                    
+                    rules.append(BetRule(
+                        rule_type='f',
+                        amount=amount
+                    ))
+                    
+                else:
+                    self.logger.warning(f"第 {line_number} 行無效的規則類型 '{rule_type}' 已跳過")
+                    continue
                 
             except (ValueError, IndexError) as e:
                 self.logger.warning(f"第 {line_number} 行無法解析 {e}")
@@ -1927,12 +1994,13 @@ class SyncBrowserOperator:
             timeout=timeout
         )
     
-    def get_current_betsize(self, driver: WebDriver, retry_count: int = None) -> Optional[float]:
+    def get_current_betsize(self, driver: WebDriver, retry_count: int = None, silent: bool = False) -> Optional[float]:
         """取得當前下注金額（優化版）。
         
         Args:
             driver: WebDriver 實例
             retry_count: 重試次數（預設使用常數）
+            silent: 是否靜默模式（不輸出詳細日誌）
             
         Returns:
             Optional[float]: 當前金額，失敗返回None
@@ -1958,7 +2026,8 @@ class SyncBrowserOperator:
                         amount_value = float(matched_amount)
                         # 使用 Constants.GAME_BETSIZE 進行驗證
                         if amount_value in Constants.GAME_BETSIZE:
-                            self.logger.info(f"[成功] 目前金額: {amount_value}")
+                            if not silent:
+                                self.logger.info(f"[成功] 目前金額: {amount_value}")
                             return amount_value
                     except ValueError:
                         pass
@@ -2078,10 +2147,10 @@ class SyncBrowserOperator:
                 return False
             
             # 取得當前金額
-            current_amount = self.get_current_betsize(driver)
+            current_amount = self.get_current_betsize(driver, silent=silent)
             if current_amount is None:
-                if not silent:
-                    self.logger.error("[錯誤] 無法識別目前金額")
+                # 即使在 silent 模式下也要記錄識別失敗，這是關鍵錯誤
+                self.logger.error("[錯誤] 無法識別目前金額，請確認 img/bet_size/ 中有對應的金額模板")
                 return False
             
             # 檢查是否已是目標金額
@@ -2116,9 +2185,12 @@ class SyncBrowserOperator:
             
             # 驗證並微調
             for attempt in range(max_attempts):
-                current_amount = self.get_current_betsize(driver)
+                current_amount = self.get_current_betsize(driver, silent=silent)
                 
                 if current_amount is None:
+                    # 記錄金額識別失敗（但不要過於頻繁）
+                    if attempt == 0 or attempt % 20 == 0:
+                        self.logger.warning(f"[警告] 金額識別失敗 (嘗試 {attempt + 1}/{max_attempts})")
                     time.sleep(Constants.BETSIZE_ADJUST_RETRY_WAIT)
                     continue
                 
@@ -2802,7 +2874,6 @@ class GameControlCenter:
                       q 1,2,3  → 關閉第 1、2、3 個瀏覽器
 
 ==========================================================
-[提示] 自動跳過點擊功能已啟動，每 30 秒自動點擊一次跳過區域
 [提示] 初始視窗大小為 600x400，您可以自由調整視窗大小
 ==========================================================
 """
@@ -3011,120 +3082,62 @@ class GameControlCenter:
         self.auto_skip_running = False
     
     def _rule_execution_loop(self) -> None:
-        """規則執行主循環（在獨立執行緒中運行）。"""
+        """規則執行主循環（在獨立執行緒中運行）。
+        
+        執行邏輯:
+        1. 如果有 'a' 規則，先執行一次
+        2. 然後循環執行所有 's' 和 'f' 規則
+        """
         if not self.bet_rules:
             self.logger.error("沒有可執行的規則")
             return
         
         self.logger.info(f"開始執行規則，共 {len(self.bet_rules)} 條")
         
+        # 分離 'a' 規則和其他規則（'s' 和 'f'）
+        a_rules = [r for r in self.bet_rules if r.rule_type == 'a']
+        loop_rules = [r for r in self.bet_rules if r.rule_type in ['s', 'f']]
+        
+        # === 第一階段: 執行所有 'a' 規則（只執行一次）===
+        if a_rules:
+            self.logger.info(f"[階段 1] 執行 {len(a_rules)} 條自動旋轉規則...")
+            
+            for rule_index, a_rule in enumerate(a_rules):
+                if self._stop_event.is_set():
+                    self.logger.info("收到停止信號")
+                    break
+                
+                try:
+                    self._execute_auto_spin_rule(a_rule, rule_index + 1, len(a_rules))
+                except Exception as e:
+                    self.logger.error(f"執行自動旋轉規則時發生錯誤: {e}")
+                    continue
+                
+                # 規則之間短暫暫停
+                if rule_index < len(a_rules) - 1:
+                    time.sleep(Constants.RULE_SWITCH_WAIT)
+            
+            self.logger.info("[階段 1 完成] 所有自動旋轉規則已執行")
+            time.sleep(Constants.RULE_SWITCH_WAIT)
+        
+        # === 第二階段: 循環執行 's' 和 'f' 規則 ===
+        if not loop_rules:
+            self.logger.warning("沒有循環規則 ('s' 或 'f')，規則執行結束")
+            self.rule_running = False
+            return
+        
+        self.logger.info(f"[階段 2] 開始循環執行 {len(loop_rules)} 條規則...")
+        
         rule_index = 0
         while not self._stop_event.is_set() and self.rule_running:
             try:
-                # 取得當前規則
-                current_rule = self.bet_rules[rule_index]
+                current_rule = loop_rules[rule_index]
                 
-                # === 步驟 1: 確保自動按鍵已完全停止 ===
-                if self.auto_press_running:
-                    self.logger.info("停止自動按鍵...")
-                    
-                    # 設置停止事件
-                    self._stop_event.set()
-                    
-                    # 等待所有執行緒完全停止
-                    for browser_index, thread in list(self.auto_press_threads.items()):
-                        if thread and thread.is_alive():
-                            thread.join(timeout=Constants.AUTO_PRESS_THREAD_JOIN_TIMEOUT)
-                            if thread.is_alive():
-                                self.logger.warning(f"瀏覽器 {browser_index} 執行緒未能及時停止")
-                    
-                    self.auto_press_threads.clear()
-                    self.auto_press_running = False
-                    
-                    # 等待畫面穩定
-                    time.sleep(Constants.RULE_SWITCH_WAIT)
-                    self.logger.info("[成功] 自動按鍵已停止")
-                
-                # 顯示規則資訊
-                self.logger.info("")
-                self.logger.info("─" * 60)
-                self.logger.info(
-                    f"規則 {rule_index + 1}/{len(self.bet_rules)}: "
-                    f"金額 {current_rule.amount}, 持續 {current_rule.duration} 分鐘, "
-                    f"間隔 {current_rule.min_seconds}~{current_rule.max_seconds} 秒"
-                )
-                
-                # === 步驟 2: 調整所有瀏覽器的下注金額 ===
-                self.logger.info(f"調整金額到 {current_rule.amount}...")
-                results = self.browser_operator.adjust_betsize_all(
-                    self.browser_contexts,
-                    current_rule.amount,
-                    silent=True  # 使用靜默模式，不輸出詳細調整日誌
-                )
-                
-                # 統計結果
-                success_count = sum(1 for r in results if r.success)
-                active_browsers = len([ctx for ctx in self.browser_contexts if self._is_browser_alive(ctx.driver)])
-                
-                if success_count == active_browsers:
-                    self.logger.info(f"[成功] 全部 {success_count} 個瀏覽器金額調整完成")
-                else:
-                    self.logger.warning(
-                        f"[警告] {success_count}/{active_browsers} 個瀏覽器金額調整完成"
-                    )
-                    # 如果有失敗的，記錄詳情
-                    for i, result in enumerate(results):
-                        if not result.success and i < len(self.browser_contexts):
-                            username = self.browser_contexts[i].credential.username
-                            if result.message != "瀏覽器已關閉":
-                                self.logger.error(f"  [{username}] 調整失敗")
-                
-                # === 步驟 3: 啟動自動按鍵 ===
-                self.logger.info(
-                    f"啟動自動按鍵 (持續 {current_rule.duration} 分鐘, "
-                    f"間隔 {current_rule.min_seconds}~{current_rule.max_seconds} 秒)"
-                )
-                
-                # 設置每個瀏覽器的隨機間隔
-                self.min_interval = current_rule.min_seconds
-                self.max_interval = current_rule.max_seconds
-                
-                # 清除停止事件（確保自動按鍵可以運行）
-                self._stop_event.clear()
-                
-                # 為每個瀏覽器啟動自動按鍵執行緒
-                for i, context in enumerate(self.browser_contexts, 1):
-                    thread = threading.Thread(
-                        target=self._auto_press_loop_single,
-                        args=(context, i),
-                        daemon=True,
-                        name=f"RuleAutoPress-{i}"
-                    )
-                    self.auto_press_threads[i] = thread
-                    thread.start()
-                
-                self.auto_press_running = True
-                
-                # === 步驟 4: 等待指定時間 ===
-                wait_seconds = current_rule.duration * 60
-                elapsed_time = 0
-                check_interval = 1.0  # 每秒檢查一次
-                
-                # 只在第一次顯示進度提示
-                progress_shown = False
-                
-                while elapsed_time < wait_seconds and not self._stop_event.is_set():
-                    if self._stop_event.wait(timeout=check_interval):
-                        break
-                    elapsed_time += check_interval
-                    
-                    # 每 60 秒顯示一次剩餘時間
-                    if int(elapsed_time) % 60 == 0 and elapsed_time > 0:
-                        remaining_minutes = int((wait_seconds - elapsed_time) / 60)
-                        if remaining_minutes > 0:
-                            if not progress_shown:
-                                progress_shown = True
-                            self.logger.info(f"剩餘 {remaining_minutes} 分鐘...")
+                # 根據規則類型執行對應的操作
+                if current_rule.rule_type == 's':
+                    self._execute_standard_rule(current_rule, rule_index + 1, len(loop_rules))
+                elif current_rule.rule_type == 'f':
+                    self._execute_free_game_rule(current_rule, rule_index + 1, len(loop_rules))
                 
                 # 檢查是否被停止
                 if self._stop_event.is_set():
@@ -3135,7 +3148,7 @@ class GameControlCenter:
                 self.logger.info(f"[成功] 規則 {rule_index + 1} 執行完成")
                 
                 # 移動到下一條規則（循環）
-                rule_index = (rule_index + 1) % len(self.bet_rules)
+                rule_index = (rule_index + 1) % len(loop_rules)
                 
                 # 顯示下一步提示
                 if rule_index == 0:
@@ -3143,7 +3156,7 @@ class GameControlCenter:
                 else:
                     self.logger.info("準備執行下一條規則...")
                 
-                # 規則之間短暫暫停（讓畫面穩定）
+                # 規則之間短暫暫停
                 time.sleep(Constants.RULE_SWITCH_WAIT)
                 
             except Exception as e:
@@ -3162,9 +3175,302 @@ class GameControlCenter:
         
         self.auto_press_threads.clear()
         self.auto_press_running = False
+        
+        # 停止自動跳過點擊功能
+        if self.auto_skip_running:
+            self._stop_auto_skip_click()
+        
         self.logger.info("")
         self.logger.info("規則執行已停止")
         self.rule_running = False
+    
+    def _execute_auto_spin_rule(self, rule: BetRule, rule_num: int, total_rules: int) -> None:
+        """執行自動旋轉規則 ('a' 類型)。
+        
+        Args:
+            rule: 自動旋轉規則
+            rule_num: 規則編號（顯示用）
+            total_rules: 總規則數（顯示用）
+        """
+        self.logger.info("")
+        self.logger.info("=" * 60)
+        self.logger.info(
+            f"【自動旋轉規則 {rule_num}/{total_rules}】"
+            f"金額 {rule.amount}, 次數 {rule.spin_count}"
+        )
+        self.logger.info("=" * 60)
+        self.logger.info("")
+        
+        # 步驟 1: 調整金額
+        self.logger.info(f"[步驟 1/2] 調整金額到 {rule.amount}...")
+        results = self.browser_operator.adjust_betsize_all(
+            self.browser_contexts,
+            rule.amount,
+            silent=True
+        )
+        
+        success_count = sum(1 for r in results if r.success)
+        active_browsers = len([ctx for ctx in self.browser_contexts if self._is_browser_alive(ctx.driver)])
+        
+        if success_count == active_browsers:
+            self.logger.info(f"[成功] 全部 {success_count} 個瀏覽器金額調整完成")
+        else:
+            self.logger.warning(f"[警告] {success_count}/{active_browsers} 個瀏覽器金額調整完成")
+        
+        # 步驟 2: 設定自動旋轉（使用內建的 'a' 命令邏輯）
+        self.logger.info(f"設定自動旋轉 {rule.spin_count} 次...")
+        
+        # 檢查 Canvas 區域
+        if not hasattr(self.browser_operator, 'last_canvas_rect') or \
+           self.browser_operator.last_canvas_rect is None:
+            self.logger.error("Canvas 區域未初始化，跳過此規則")
+            return
+        
+        rect = self.browser_operator.last_canvas_rect
+        
+        # 計算點擊座標
+        auto_x, auto_y = BrowserHelper.calculate_click_position(
+            rect,
+            Constants.AUTO_SPIN_BUTTON_X_RATIO,
+            Constants.AUTO_SPIN_BUTTON_Y_RATIO
+        )
+        
+        count_ratio_map = {
+            10: (Constants.AUTO_SPIN_10_X_RATIO, Constants.AUTO_SPIN_10_Y_RATIO),
+            50: (Constants.AUTO_SPIN_50_X_RATIO, Constants.AUTO_SPIN_50_Y_RATIO),
+            100: (Constants.AUTO_SPIN_100_X_RATIO, Constants.AUTO_SPIN_100_Y_RATIO)
+        }
+        x_ratio, y_ratio = count_ratio_map[rule.spin_count]
+        count_x, count_y = BrowserHelper.calculate_click_position(rect, x_ratio, y_ratio)
+        
+        # 對所有瀏覽器執行自動旋轉設定
+        def auto_spin_operation(context: BrowserContext, index: int, total: int) -> bool:
+            try:
+                BrowserHelper.execute_cdp_click(context.driver, auto_x, auto_y)
+                time.sleep(Constants.AUTO_SPIN_MENU_WAIT)
+                BrowserHelper.execute_cdp_click(context.driver, count_x, count_y)
+                return True
+            except Exception as e:
+                self.logger.error(f"[{context.credential.username}] 設定自動旋轉失敗: {e}")
+                return False
+        
+        results = self.browser_operator.execute_sync(
+            self.browser_contexts,
+            auto_spin_operation,
+            f"設定自動旋轉 {rule.spin_count} 次"
+        )
+        
+        success_count = sum(1 for r in results if r.success)
+        if success_count == active_browsers:
+            self.logger.info(f"[成功] 自動旋轉設定完成: 全部 {success_count} 個瀏覽器成功")
+        else:
+            self.logger.warning(f"[警告] {success_count}/{active_browsers} 個瀏覽器設定成功")
+    
+    def _execute_standard_rule(self, rule: BetRule, rule_num: int, total_rules: int) -> None:
+        """執行標準規則 ('s' 類型)。
+        
+        Args:
+            rule: 標準規則
+            rule_num: 規則編號（顯示用）
+            total_rules: 總規則數（顯示用）
+        """
+        # === 步驟 1: 確保自動按鍵已完全停止 ===
+        if self.auto_press_running:
+            self.logger.info("停止自動按鍵...")
+            
+            # 設置停止事件
+            self._stop_event.set()
+            
+            # 等待所有執行緒完全停止
+            for browser_index, thread in list(self.auto_press_threads.items()):
+                if thread and thread.is_alive():
+                    thread.join(timeout=Constants.AUTO_PRESS_THREAD_JOIN_TIMEOUT)
+                    if thread.is_alive():
+                        self.logger.warning(f"瀏覽器 {browser_index} 執行緒未能及時停止")
+            
+            self.auto_press_threads.clear()
+            self.auto_press_running = False
+            
+            # 等待畫面穩定
+            time.sleep(Constants.RULE_SWITCH_WAIT)
+            self.logger.info("[成功] 自動按鍵已停止")
+            
+            # 清除停止事件，讓主循環可以繼續執行
+            self._stop_event.clear()
+        
+        # 顯示規則資訊
+        self.logger.info("")
+        self.logger.info("=" * 60)
+        self.logger.info(
+            f"【標準規則 {rule_num}/{total_rules}】"
+            f"金額 {rule.amount}, 持續 {rule.duration} 分鐘, "
+            f"間隔 {rule.min_seconds}~{rule.max_seconds} 秒"
+        )
+        self.logger.info("=" * 60)
+        self.logger.info("")
+        
+        # === 步驟 2: 調整所有瀏覽器的下注金額 ===
+        self.logger.info(f"[步驟 1/2] 調整金額到 {rule.amount}...")
+        results = self.browser_operator.adjust_betsize_all(
+            self.browser_contexts,
+            rule.amount,
+            silent=True
+        )
+        
+        # 統計結果
+        success_count = sum(1 for r in results if r.success)
+        active_browsers = len([ctx for ctx in self.browser_contexts if self._is_browser_alive(ctx.driver)])
+        
+        if success_count == active_browsers:
+            self.logger.info(f"[成功] 全部 {success_count} 個瀏覽器金額調整完成")
+        else:
+            self.logger.warning(
+                f"[警告] {success_count}/{active_browsers} 個瀏覽器金額調整完成"
+            )
+            # 如果有失敗的，記錄詳情
+            for i, result in enumerate(results):
+                if not result.success and i < len(self.browser_contexts):
+                    username = self.browser_contexts[i].credential.username
+                    if result.message != "瀏覽器已關閉":
+                        self.logger.error(f"  [{username}] 調整失敗")
+        
+        self.logger.info("")
+        # === 步驟 3: 啟動自動按鍵 ===
+        self.logger.info(
+            f"[步驟 2/2] 啟動自動按鍵 (持續 {rule.duration} 分鐘, "
+            f"間隔 {rule.min_seconds}~{rule.max_seconds} 秒)"
+        )
+        
+        # 設置每個瀏覽器的隨機間隔
+        self.min_interval = rule.min_seconds
+        self.max_interval = rule.max_seconds
+        
+        # 清除停止事件（確保自動按鍵可以運行）
+        self._stop_event.clear()
+        
+        # 為每個瀏覽器啟動自動按鍵執行緒
+        for i, context in enumerate(self.browser_contexts, 1):
+            thread = threading.Thread(
+                target=self._auto_press_loop_single,
+                args=(context, i),
+                daemon=True,
+                name=f"RuleAutoPress-{i}"
+            )
+            self.auto_press_threads[i] = thread
+            thread.start()
+        
+        self.auto_press_running = True
+        
+        # === 步驟 4: 等待指定時間 ===
+        wait_seconds = rule.duration * 60
+        elapsed_time = 0
+        check_interval = 1.0  # 每秒檢查一次
+        
+        # 只在第一次顯示進度提示
+        progress_shown = False
+        
+        while elapsed_time < wait_seconds and not self._stop_event.is_set():
+            if self._stop_event.wait(timeout=check_interval):
+                break
+            elapsed_time += check_interval
+            
+            # 每 60 秒顯示一次剩餘時間
+            if int(elapsed_time) % 60 == 0 and elapsed_time > 0:
+                remaining_minutes = int((wait_seconds - elapsed_time) / 60)
+                if remaining_minutes > 0:
+                    if not progress_shown:
+                        progress_shown = True
+                    self.logger.info(f"剩餘 {remaining_minutes} 分鐘...")
+    
+    def _execute_free_game_rule(self, rule: BetRule, rule_num: int, total_rules: int) -> None:
+        """執行購買免費遊戲規則 ('f' 類型)。
+        
+        Args:
+            rule: 免費遊戲規則
+            rule_num: 規則編號（顯示用）
+            total_rules: 總規則數（顯示用）
+        """
+        # === 步驟 1: 確保自動按鍵已完全停止 ===
+        if self.auto_press_running:
+            self.logger.info("停止自動按鍵...")
+            
+            # 設置停止事件
+            self._stop_event.set()
+            
+            # 等待所有執行緒完全停止
+            for browser_index, thread in list(self.auto_press_threads.items()):
+                if thread and thread.is_alive():
+                    thread.join(timeout=Constants.AUTO_PRESS_THREAD_JOIN_TIMEOUT)
+                    if thread.is_alive():
+                        self.logger.warning(f"瀏覽器 {browser_index} 執行緒未能及時停止")
+            
+            self.auto_press_threads.clear()
+            self.auto_press_running = False
+            
+            # 等待畫面穩定
+            time.sleep(Constants.RULE_SWITCH_WAIT)
+            self.logger.info("[成功] 自動按鍵已停止")
+            
+            # 清除停止事件，讓主循環可以繼續執行
+            self._stop_event.clear()
+        
+        # 顯示規則資訊
+        self.logger.info("")
+        self.logger.info("=" * 60)
+        self.logger.info(
+            f"【免費遊戲規則 {rule_num}/{total_rules}】"
+            f"金額 {rule.amount}"
+        )
+        self.logger.info("=" * 60)
+        self.logger.info("")
+        
+        # === 步驟 2: 調整所有瀏覽器的下注金額 ===
+        self.logger.info(f"[步驟 1/2] 調整金額到 {rule.amount}...")
+        results = self.browser_operator.adjust_betsize_all(
+            self.browser_contexts,
+            rule.amount,
+            silent=True
+        )
+        
+        # 統計結果
+        success_count = sum(1 for r in results if r.success)
+        active_browsers = len([ctx for ctx in self.browser_contexts if self._is_browser_alive(ctx.driver)])
+        
+        if success_count == active_browsers:
+            self.logger.info(f"[成功] 全部 {success_count} 個瀏覽器金額調整完成")
+        else:
+            self.logger.warning(
+                f"[警告] {success_count}/{active_browsers} 個瀏覽器金額調整完成"
+            )
+        
+        self.logger.info("")
+        # === 步驟 3: 購買免費遊戲 ===
+        self.logger.info("[步驟 2/2] 開始購買免費遊戲...")
+        
+        # 檢查 Canvas 區域
+        if not hasattr(self.browser_operator, 'last_canvas_rect') or \
+           self.browser_operator.last_canvas_rect is None:
+            self.logger.error("Canvas 區域未初始化，跳過此規則")
+            return
+        
+        # 使用 buy_free_game_all 方法購買免費遊戲
+        try:
+            results = self.browser_operator.buy_free_game_all(
+                self.browser_contexts,
+                self.browser_operator.last_canvas_rect
+            )
+            
+            success_count = sum(1 for r in results if r.success)
+            if success_count == active_browsers:
+                self.logger.info(f"[成功] 全部 {success_count} 個瀏覽器購買完成")
+            else:
+                self.logger.warning(f"[警告] {success_count}/{active_browsers} 個瀏覽器購買完成")
+            
+            self.logger.info("")
+            self.logger.info("[提示] 免費遊戲進行中，自動跳過功能會處理結算畫面")
+        
+        except Exception as e:
+            self.logger.error(f"購買免費遊戲時發生錯誤: {e}")
     
     def _start_rule_execution(self) -> None:
         """啟動規則執行。"""
@@ -3184,15 +3490,31 @@ class GameControlCenter:
         # 顯示規則列表
         self.logger.info("載入的規則:")
         for i, rule in enumerate(self.bet_rules, 1):
-            self.logger.info(
-                f"  {i}. 金額 {rule.amount}, 持續 {rule.duration} 分鐘, "
-                f"間隔 {rule.min_seconds}~{rule.max_seconds} 秒"
-            )
+            if rule.rule_type == 'a':
+                self.logger.info(
+                    f"  {i}. [自動旋轉] 金額 {rule.amount}, 次數 {rule.spin_count}"
+                )
+            elif rule.rule_type == 's':
+                self.logger.info(
+                    f"  {i}. [標準規則] 金額 {rule.amount}, 持續 {rule.duration} 分鐘, "
+                    f"間隔 {rule.min_seconds}~{rule.max_seconds} 秒"
+                )
+            elif rule.rule_type == 'f':
+                self.logger.info(
+                    f"  {i}. [免費遊戲] 金額 {rule.amount}"
+                )
         
         # 清除停止事件
         self._stop_event.clear()
         
-        # 啟動規則執行執行緒
+        # 啟動自動跳過點擊功能（每30秒點擊一次）
+        self._start_auto_skip_click()
+        
+        self.logger.info("")
+        self.logger.info("[成功] 規則執行已啟動 (按 'p' 可暫停)")
+        self.logger.info("")
+        
+        # 啟動規則執行執行緒（放在最後，確保提示訊息先輸出）
         self.rule_thread = threading.Thread(
             target=self._rule_execution_loop,
             daemon=True,
@@ -3201,9 +3523,6 @@ class GameControlCenter:
         self.rule_thread.start()
         self.rule_running = True
         self.game_running = True
-        
-        self.logger.info("[成功] 規則執行已啟動 (按 'p' 可暫停)")
-        self.logger.info("")
     
     def _stop_rule_execution(self) -> None:
         """停止規則執行。"""
@@ -3244,6 +3563,10 @@ class GameControlCenter:
         self.rule_running = False
         self.game_running = False
         self.rule_thread = None
+        
+        # 停止自動跳過點擊功能
+        if self.auto_skip_running:
+            self._stop_auto_skip_click()
     
     def process_command(self, command: str) -> bool:
         """處理用戶指令。
@@ -3826,9 +4149,6 @@ class GameControlCenter:
         self.logger.info("")
         self.logger.info(f"[成功] 已連接 {len(self.browser_contexts)} 個瀏覽器")
         self.logger.info("")
-        
-        # 自動啟動跳過點擊功能（始終運行）
-        self._start_auto_skip_click()
         
         # 自動顯示幫助訊息
         self.show_help()
