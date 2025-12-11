@@ -8,26 +8,15 @@
 
 ## 版本資訊
 
-**目前版本**: v1.14.3
+**目前版本**: v1.15.0
 
 **更新內容**:
 
+- v1.15.0: 新增錯誤訊息自動監控與重整功能（每 10 秒檢測，雙區域模板匹配，'e' 命令截取左右兩張模板）
 - v1.14.3: 修正按下 'p' 後規則仍繼續執行的問題（在規則執行的關鍵步驟之間加入停止檢查，包括金額調整前、自動按鍵啟動前、免費遊戲購買前）
 - v1.14.2: 修正規則執行循環問題（'f' 規則執行後正確清除停止事件，確保循環繼續；優化日誌輸出順序，避免執行緒日誌交錯）
 - v1.14.1: 修正規則執行中 'f' 規則 AttributeError 問題（改用 browser_operator.last_canvas_rect），並優化金額識別失敗日誌（即使在靜默模式下也記錄關鍵錯誤，每 20 次重試輸出一次警告）
 - v1.14.0: 擴展規則執行功能，支援 'f' 類型規則（購買免費遊戲），規則格式: f:金額
-- v1.13.0: 擴展規則執行功能，支援 'a' 類型規則（自動旋轉）和 's' 類型規則（標準規則），優化日誌輸出（新增 silent 參數）
-- v1.12.1: 修正規則執行中關閉瀏覽器導致程序停頓的問題（添加瀏覽器狀態檢測機制，自動跳過已關閉的瀏覽器）
-- v1.12.0: 移除視窗大小鎖定功能，允許用戶自由調整視窗大小（初始仍為 600x400）；改為自動決定瀏覽器數量（最多 12 個）
-- v1.11.0: 新增自動跳過點擊功能，每 30 秒自動點擊跳過區域（背景執行，持續運行直到程式關閉）
-- v1.10.0: 新增視窗大小鎖定功能，自動監控並恢復視窗大小（位置可自由移動）
-- v1.9.0: 優化系統啟動流程（自動顯示完整指令列表，移除 emoji 符號，統一日誌格式）
-- v1.8.0: 優化關閉瀏覽器功能（'q' 指令），支援選擇性關閉指定瀏覽器
-- v1.7.1: 修正金額識別問題（統一使用 Constants 定義，移除重複定義和硬編碼數值）
-- v1.7.0: 新增規則執行功能（'r' 指令），支援自動切換金額並按空白鍵，規則循環執行
-- v1.6.2: 調整遊戲金額配置（GAME_BETSIZE 和 GAME_BETSIZE_TUPLE），從 73 種金額優化為 64 種金額
-- v1.6.1: 調整金額顯示和裁切參數（BETSIZE_DISPLAY_Y: 380→370, CROP_MARGIN_X: 50→40, CROP_MARGIN_Y: 20→10）
-- v1.6.0: 新增 lobby_confirm 錯誤訊息檢測與自動重啟機制（雙區域檢測、1 秒閾值觸發）
 - v1.5.0: 統一管理所有魔法數字（視窗尺寸、座標、等待時間、重試次數等），提升程式碼可維護性
 - v1.4.3: 優化瀏覽器網路設定（啟用 QUIC、TCP Fast Open、NetworkService）
 - v1.4.2: 修正 Windows 中文路徑截圖儲存失敗問題
@@ -88,6 +77,7 @@ from autoslot import (
 - **獨立執行緒**: `GameControlCenter._auto_press_loop_single()` 為每個瀏覽器啟動獨立執行緒，使用 `threading.Event` 控制停止
 - **執行緒保護**（v1.12.1 新增）: 自動按鍵循環中檢測瀏覽器狀態，關閉時立即停止執行緒，避免無效操作
 - **背景自動化**（v1.11.0 新增）: `GameControlCenter._auto_skip_click_loop()` 在背景持續運行，每 30 秒自動點擊所有瀏覽器的跳過區域
+- **錯誤監控**（v1.15.0 新增）: `GameControlCenter._error_monitor_loop()` 在背景持續運行，每 10 秒檢測所有瀏覽器的錯誤訊息，檢測到異常時自動重新整理
 - **最大工作數**: `Constants.MAX_THREAD_WORKERS = 10`
 - **狀態檢測方法**: `_is_browser_alive()` 透過嘗試讀取 `driver.current_url` 判斷瀏覽器是否仍然有效
 
@@ -107,16 +97,20 @@ Chrome (使用本地 Proxy)
 
 ### 5. 圖片識別流程
 
-- **模板位置**: `img/lobby_login.png`, `img/lobby_confirm.png`, `img/error_message.png`（v1.6.0 新增）, `img/bet_size/*.png`
+- **模板位置**: `img/lobby_login.png`, `img/lobby_confirm.png`, `img/error_message_left.png`（v1.15.0 更新）, `img/error_message_right.png`（v1.15.0 更新）, `img/bet_size/*.png`
 - **檢測方法**: OpenCV `cv2.matchTemplate()` with `TM_CCOEFF_NORMED`
 - **閾值**: `Constants.MATCH_THRESHOLD = 0.8`
 - **座標計算**: 使用 Canvas 區域比例計算點擊座標
   - `LOBBY_LOGIN_BUTTON_X_RATIO = 0.55`, `LOBBY_LOGIN_BUTTON_Y_RATIO = 1.2`
   - `LOBBY_CONFIRM_BUTTON_X_RATIO = 0.78`, `LOBBY_CONFIRM_BUTTON_Y_RATIO = 1.15`
-- **錯誤檢測**（v1.6.0 新增）:
-  - 雙區域檢測：左側 `(240, 190)` 和右側 `(360, 190)`
-  - 時間閾值：錯誤訊息持續 1 秒即觸發自動重啟
-  - 自動重啟流程：重新整理 → 檢測 lobby_login → 點擊 → 等待 lobby_confirm
+- **錯誤檢測**（v1.15.0 更新）:
+  - 雙區域雙模板檢測：左側使用 `error_message_left.png`，右側使用 `error_message_right.png`
+  - 檢測座標：左側 `(240, 190)`，右側 `(360, 190)`
+  - 裁切邊距：`TEMPLATE_CROP_MARGIN = 20`
+  - 匹配閾值：`MATCH_THRESHOLD = 0.8`
+  - 監控頻率：每 10 秒檢測一次（在背景執行緒中持續運行）
+  - 觸發條件：左右兩側都檢測到錯誤訊息時立即觸發
+  - 自動處理：檢測到錯誤時自動重新整理瀏覽器
 
 ### 6. 資料結構（不可變）
 

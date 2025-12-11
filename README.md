@@ -2,12 +2,12 @@
 
 > 金富翁遊戲自動化系統 - 多瀏覽器並行控制、圖片識別、Proxy 中繼
 
-[![Version](https://img.shields.io/badge/version-1.14.3-brightgreen.svg)](https://github.com/simon980224/AutoSlotGameMaster)
+[![Version](https://img.shields.io/badge/version-1.15.0-brightgreen.svg)](https://github.com/simon980224/AutoSlotGameMaster)
 [![Python Version](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](https://github.com/simon980224/AutoSlotGameMaster)
 
-一個使用 Selenium WebDriver、OpenCV 圖片識別和 Chrome DevTools Protocol 實現的遊戲自動化系統。支援多瀏覽器並行控制、本地 Proxy 中繼、自動下注和免費遊戲購買等功能。
+一個使用 Selenium WebDriver、OpenCV 圖片識別和 Chrome DevTools Protocol 實現的遊戲自動化系統。支援多瀏覽器並行控制、本地 Proxy 中繼、自動下注、錯誤自動恢復和免費遊戲購買等功能。
 
 ## ✨ 核心特性
 
@@ -17,6 +17,7 @@
 - 💰 **自動下注** - 智慧識別和調整下注金額（支援 64 種金額）
 - 🎮 **遊戲控制中心** - 互動式命令介面，即時控制所有瀏覽器
 - 🔄 **自動化流程** - 自動登入、導航、圖片檢測、點擊操作
+- 🛡️ **錯誤自動恢復** - 自動監控錯誤訊息，檢測到異常時自動重新整理（v1.15.0 新增）
 - 📦 **一鍵打包** - 使用 PyInstaller 打包成 Windows 可執行檔
 
 ## 🏗️ 系統架構
@@ -60,7 +61,7 @@ Chrome (透過本地 Proxy 連接)
 ```
 AutoSlotGameMaster/
 ├── src/
-│   ├── main.py              # 主程式（3500+ 行，包含所有類別）
+│   ├── main.py              # 主程式（5500+ 行，包含所有類別）
 │   ├── main_backup.py       # 備份檔案
 │   └── test.py              # 測試腳本
 ├── lib/
@@ -69,7 +70,8 @@ AutoSlotGameMaster/
 ├── img/
 │   ├── lobby_login.png      # 登入畫面模板
 │   ├── lobby_confirm.png    # 確認按鈕模板
-│   ├── error_message.png    # 錯誤訊息模板（v1.6.0 新增）
+│   ├── error_message_left.png   # 左側錯誤訊息模板（v1.15.0 新增）
+│   ├── error_message_right.png  # 右側錯誤訊息模板（v1.15.0 新增）
 │   └── bet_size/            # 金額識別模板（64 張圖片）
 │       ├── 2.png
 │       ├── 4.png
@@ -218,6 +220,9 @@ a 100          # 自動旋轉 100 次
 
 # 截取金額模板（用於金額識別）
 c
+
+# 截取錯誤訊息模板（用於錯誤檢測）
+e              # 同時截取左側和右側兩張模板
 ```
 
 #### 系統控制
@@ -238,6 +243,17 @@ q
 2. 在控制中心輸入 `c` 進入截圖模式
 3. 輸入當前金額（例如：`0.4`）
 4. 系統自動截取並儲存模板為 `img/bet_size/0.4.png`
+
+### 錯誤訊息模板建立（v1.15.0 新增）
+
+如果需要更新錯誤訊息檢測模板：
+
+1. 等待遊戲出現錯誤訊息畫面
+2. 在控制中心輸入 `e` 進入截圖模式
+3. 按 Enter 鍵確認截取
+4. 系統自動截取並儲存：
+   - `img/error_message_left.png` - 左側錯誤訊息區域
+   - `img/error_message_right.png` - 右側錯誤訊息區域
 
 ## 📦 打包為可執行檔
 
@@ -265,7 +281,8 @@ dist/
 ├── img/
 │   ├── lobby_login.png
 │   ├── lobby_confirm.png
-│   ├── error_message.png
+│   ├── error_message_left.png
+│   ├── error_message_right.png
 │   └── bet_size/
 └── lib/
     ├── 用戶資料.txt
@@ -291,7 +308,7 @@ class Constants:
     MATCH_THRESHOLD = 0.8  # 匹配閾值（0-1）
     DETECTION_INTERVAL = 1.0  # 檢測間隔（秒）
 
-    # 錯誤檢測（v1.6.0 新增）
+    # 錯誤檢測（v1.15.0 更新）
     ERROR_MESSAGE_LEFT_X = 240  # 左側錯誤訊息區域 X 座標
     ERROR_MESSAGE_LEFT_Y = 190  # 左側錯誤訊息區域 Y 座標
     ERROR_MESSAGE_RIGHT_X = 360  # 右側錯誤訊息區域 X 座標
