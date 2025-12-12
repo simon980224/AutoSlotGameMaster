@@ -11529,30 +11529,26 @@ System.register(
                       a = e.engine.gameState.spinId;
                     t &&
                       (Log.e("spin資料(view)重複"),
-                      App.senderManager
-                        .get(u)
-                        .debugLog({
-                          level: d.ERROR,
-                          id: a,
-                          message: "spin資料(view)重複",
-                          data: {
-                            resData: e.engine.gameState,
-                            currentData: this.data.getData().gameState,
-                            preData: this.data.preData.gameState,
-                          },
-                          tag: "repeatSpinData",
-                        }));
+                      App.senderManager.get(u).debugLog({
+                        level: d.ERROR,
+                        id: a,
+                        message: "spin資料(view)重複",
+                        data: {
+                          resData: e.engine.gameState,
+                          currentData: this.data.getData().gameState,
+                          preData: this.data.preData.gameState,
+                        },
+                        tag: "repeatSpinData",
+                      }));
                   }
                 } else {
                   var n = e.engine.gameState.spinId;
-                  App.senderManager
-                    .get(u)
-                    .debugLog({
-                      level: d.ERROR,
-                      id: n,
-                      message: "沒有盤面資料",
-                      data: e.engine.gameState,
-                    });
+                  App.senderManager.get(u).debugLog({
+                    level: d.ERROR,
+                    id: n,
+                    message: "沒有盤面資料",
+                    data: e.engine.gameState,
+                  });
                 }
               }),
               t(e, null, [
