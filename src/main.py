@@ -141,8 +141,10 @@ class Constants:
     PROXY_SELECT_TIMEOUT = 1.0
     
     # URL 配置
-    LOGIN_PAGE = "https://m.jfw-win.com/#/login?redirect=%2Fhome%2Fpage"
-    GAME_PAGE = "https://m.jfw-win.com/#/home/loding?game_code=egyptian-mythology&factory_code=ATG&state=true&name=%E6%88%B0%E7%A5%9E%E8%B3%BD%E7%89%B9"
+    # LOGIN_PAGE = "https://m.jfw-win.com/#/login?redirect=%2Fhome%2Fpage"
+    LOGIN_PAGE = "https://www.sf-16888.com/#/login?redirect=%2Fhome%2Fpage"
+    # GAME_PAGE = "https://m.jfw-win.com/#/home/loding?game_code=egyptian-mythology&factory_code=ATG&state=true&name=%E6%88%B0%E7%A5%9E%E8%B3%BD%E7%89%B9"
+    GAME_PAGE = "https://www.sf-16888.com/#/home/loding?game_code=egyptian-mythology&factory_code=ATG&state=true&name=戰神賽特"
     
     # 頁面元素選擇器
     USERNAME_INPUT = "//input[@placeholder='請輸入帳號']"
@@ -216,7 +218,7 @@ class Constants:
     RULE_EXECUTION_TIME_CHECK_INTERVAL = 10  # 規則執行時間檢查間隔（秒）
     
     # 重試與循環配置
-    BETSIZE_ADJUST_MAX_ATTEMPTS = 50  # 調整金額最大嘗試次數
+    BETSIZE_ADJUST_MAX_ATTEMPTS = 200  # 調整金額最大嘗試次數
     BETSIZE_READ_MAX_RETRIES = 2       # 讀取金額最大重試次數
     FREE_GAME_SETTLE_CLICK_COUNT = 5   # 免費遊戲結算點擊次數
     DETECTION_WAIT_MAX_ATTEMPTS = 20   # 檢測等待最大嘗試次數
