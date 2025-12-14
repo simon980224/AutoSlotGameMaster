@@ -13,10 +13,11 @@
 - 完善的錯誤處理與重試機制
 
 作者: 凡臻科技
-版本: 1.16.1
+版本: 1.17.0
 Python: 3.8+
 
 版本歷史:
+- v1.17.0: 優化調整金額功能（每次調整間隔改為3秒，超過最大嘗試次數自動關閉該瀏覽器）
 - v1.16.1: 修正規則執行時間控制功能（優化時間到達後的自動退出機制，使用 os._exit() 強制退出；短時間執行時更頻繁顯示剩餘時間）
 - v1.16.0: 新增規則執行時間控制功能（'r' 命令支援可選的小時參數，時間到後自動關閉所有瀏覽器並退出）
 - v1.15.0: 新增錯誤訊息自動監控與重整功能（每 10 秒檢測，雙區域模板匹配，'e' 命令截取模板）
@@ -192,7 +193,7 @@ class Constants:
     
     # 操作等待時間（秒）
     LOGIN_WAIT_TIME = 5          # 登入後等待時間
-    BETSIZE_ADJUST_STEP_WAIT = 0.3  # 調整金額每步等待時間
+    BETSIZE_ADJUST_STEP_WAIT = 3.0  # 調整金額每步等待時間
     BETSIZE_ADJUST_VERIFY_WAIT = 1.0  # 調整金額驗證前等待時間
     BETSIZE_ADJUST_RETRY_WAIT = 0.5  # 調整金額重試等待時間
     BETSIZE_READ_RETRY_WAIT = 0.5    # 讀取金額重試等待時間
@@ -210,11 +211,11 @@ class Constants:
     STOP_EVENT_ERROR_WAIT = 1.0    # 停止事件錯誤等待時間
     SERVER_SOCKET_TIMEOUT = 1.0    # 伺服器 Socket 超時時間
     CLEANUP_PROCESS_TIMEOUT = 10   # 清除程序超時時間（秒）
-    AUTO_SKIP_CLICK_INTERVAL = 30  # 自動跳過點擊間隔時間（秒）
+    AUTO_SKIP_CLICK_INTERVAL = 999999999999999999999  # 自動跳過點擊間隔時間（秒）# 非常大的值表示不啟用
     RULE_EXECUTION_TIME_CHECK_INTERVAL = 10  # 規則執行時間檢查間隔（秒）
     
     # 重試與循環配置
-    BETSIZE_ADJUST_MAX_ATTEMPTS = 400  # 調整金額最大嘗試次數
+    BETSIZE_ADJUST_MAX_ATTEMPTS = 50  # 調整金額最大嘗試次數
     BETSIZE_READ_MAX_RETRIES = 2       # 讀取金額最大重試次數
     FREE_GAME_SETTLE_CLICK_COUNT = 5   # 免費遊戲結算點擊次數
     DETECTION_WAIT_MAX_ATTEMPTS = 20   # 檢測等待最大嘗試次數
@@ -1992,15 +1993,39 @@ class SyncBrowserOperator:
         Returns:
             操作結果列表
         """
-        def adjust_operation(context: BrowserContext, index: int, total: int) -> bool:
-            return self.adjust_betsize(context.driver, target_amount, silent=silent)
+        browsers_to_close = []  # 記錄需要關閉的瀏覽器
         
-        return self.execute_sync(
+        def adjust_operation(context: BrowserContext, index: int, total: int) -> bool:
+            try:
+                return self.adjust_betsize(context.driver, target_amount, silent=silent)
+            except Exception as e:
+                # 調整失敗，記錄需要關閉的瀏覽器
+                self.logger.error(f"瀏覽器 {index} ({context.credential.username}) 金額調整失敗: {e}")
+                browsers_to_close.append((index - 1, context))  # 記錄索引位置（從0開始）
+                return False
+        
+        results = self.execute_sync(
             browser_contexts,
             adjust_operation,
             f"調整下注金額到 {target_amount}",
             timeout=timeout
         )
+        
+        # 關閉並移除失敗的瀏覽器
+        if browsers_to_close:
+            self.logger.warning(f"將關閉 {len(browsers_to_close)} 個調整金額失敗的瀏覽器")
+            # 從後往前關閉，避免索引問題
+            for idx, context in sorted(browsers_to_close, key=lambda x: x[0], reverse=True):
+                try:
+                    username = context.credential.username
+                    self.logger.info(f"關閉瀏覽器 {idx + 1} ({username})...")
+                    context.driver.quit()
+                    browser_contexts.pop(idx)
+                    self.logger.info(f"[成功] 已關閉瀏覽器 {idx + 1} ({username})")
+                except Exception as e:
+                    self.logger.error(f"關閉瀏覽器 {idx + 1} 時發生錯誤: {e}")
+        
+        return results
     
     def get_current_betsize(self, driver: WebDriver, retry_count: int = None, silent: bool = False) -> Optional[float]:
         """取得當前下注金額（優化版）。
@@ -2215,14 +2240,16 @@ class SyncBrowserOperator:
                 
                 time.sleep(Constants.BETSIZE_ADJUST_RETRY_WAIT)
             
+            # 超過最大嘗試次數，拋出異常讓上層處理
+            error_msg = f"金額調整失敗，已達最大嘗試次數 {max_attempts}"
             if not silent:
-                self.logger.error("[錯誤] 金額調整失敗")
-            return False
+                self.logger.error(f"[錯誤] {error_msg}")
+            raise Exception(error_msg)
             
         except Exception as e:
             if not silent:
                 self.logger.error(f"[錯誤] 調整過程發生錯誤: {e}")
-            return False
+            raise
     
     def capture_betsize_template(self, driver: WebDriver, amount: float) -> bool:
         """截取下注金額模板。
