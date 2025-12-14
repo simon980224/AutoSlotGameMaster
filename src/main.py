@@ -13,10 +13,12 @@
 - 完善的錯誤處理與重試機制
 
 作者: 凡臻科技
-版本: 1.15.0
+版本: 1.16.1
 Python: 3.8+
 
 版本歷史:
+- v1.16.1: 修正規則執行時間控制功能（優化時間到達後的自動退出機制，使用 os._exit() 強制退出；短時間執行時更頻繁顯示剩餘時間）
+- v1.16.0: 新增規則執行時間控制功能（'r' 命令支援可選的小時參數，時間到後自動關閉所有瀏覽器並退出）
 - v1.15.0: 新增錯誤訊息自動監控與重整功能（每 10 秒檢測，雙區域模板匹配，'e' 命令截取模板）
 - v1.14.3: 修正按下 'p' 後規則仍繼續執行的問題（在規則執行的關鍵步驟之間加入停止檢查）
 - v1.14.2: 修正規則執行循環問題（'f' 規則執行後正確清除停止事件，確保循環繼續）
@@ -118,7 +120,7 @@ __all__ = [
 class Constants:
     """系統常量"""
     # 版本資訊
-    VERSION = "1.14.3"
+    VERSION = "1.16.1"
     SYSTEM_NAME = "金富翁遊戲自動化系統"
     
     DEFAULT_LIB_PATH = "lib"
@@ -209,6 +211,7 @@ class Constants:
     SERVER_SOCKET_TIMEOUT = 1.0    # 伺服器 Socket 超時時間
     CLEANUP_PROCESS_TIMEOUT = 10   # 清除程序超時時間（秒）
     AUTO_SKIP_CLICK_INTERVAL = 30  # 自動跳過點擊間隔時間（秒）
+    RULE_EXECUTION_TIME_CHECK_INTERVAL = 10  # 規則執行時間檢查間隔（秒）
     
     # 重試與循環配置
     BETSIZE_ADJUST_MAX_ATTEMPTS = 400  # 調整金額最大嘗試次數
@@ -2982,6 +2985,13 @@ class GameControlCenter:
         self.error_monitor_thread: Optional[threading.Thread] = None  # 錯誤監控執行緒
         self._error_monitor_stop_event = threading.Event()  # 錯誤監控停止事件
         
+        # 規則執行時間控制相關
+        self.rule_execution_start_time: Optional[float] = None  # 規則執行開始時間
+        self.rule_execution_max_hours: Optional[float] = None  # 規則執行最大小時數
+        self.time_monitor_running = False  # 時間監控運行狀態
+        self.time_monitor_thread: Optional[threading.Thread] = None  # 時間監控執行緒
+        self._time_monitor_stop_event = threading.Event()  # 時間監控停止事件
+        
         # 初始化恢復管理器
         self.image_detector = ImageDetector(logger=self.logger)
         self.recovery_manager = BrowserRecoveryManager(
@@ -3002,10 +3012,12 @@ class GameControlCenter:
                       範例: s 1,2  → 每次間隔 1~2 秒按空白鍵
                       提示: 先用 'b' 調整好金額後再啟動
                    
-  r                   執行規則模式（依照 lib/用戶規則.txt）
+  r <小時數>          執行規則模式（依照 lib/用戶規則.txt）
                       格式: 金額:分鐘:最小秒:最大秒
-                      範例: 4:10:1:2 → 金額4，持續10分鐘，間隔1~2秒
-                      提示: 會自動循環執行所有規則
+                      範例: r 0     → 無限執行所有規則
+                            r 2     → 執行 2 小時後自動停止
+                            r 0.5   → 執行 30 分鐘後自動停止
+                      提示: 時間到後會自動關閉所有瀏覽器並退出
                    
   p                   暫停目前運行的自動操作（按鍵或規則）
 
@@ -3248,6 +3260,134 @@ class GameControlCenter:
         self.auto_skip_thread = None
         self.auto_skip_running = False
     
+    def _time_monitor_loop(self) -> None:
+        """規則執行時間監控循環（每 10 秒檢查一次）。
+        
+        持續運行直到收到停止信號或達到設定的執行時間，
+        時間到後自動關閉所有瀏覽器並退出程式。
+        """
+        if self.rule_execution_start_time is None or self.rule_execution_max_hours is None:
+            self.logger.error("[錯誤] 時間監控啟動失敗：缺少必要參數")
+            return
+        
+        self.logger.info(f"[啟動] 規則執行時間監控已啟動（將在 {self.rule_execution_max_hours} 小時後自動停止）")
+        
+        # 計算結束時間
+        end_time = self.rule_execution_start_time + (self.rule_execution_max_hours * 3600)
+        
+        check_count = 0
+        while not self._time_monitor_stop_event.is_set():
+            try:
+                # 先檢查是否達到執行時間（在等待之前檢查）
+                current_time = time.time()
+                if current_time >= end_time:
+                    elapsed_hours = (current_time - self.rule_execution_start_time) / 3600
+                    self.logger.info("")
+                    self.logger.info("=" * 60)
+                    self.logger.info(f"【時間到】規則已執行 {elapsed_hours:.2f} 小時，準備自動停止")
+                    self.logger.info("=" * 60)
+                    self.logger.info("")
+                    
+                    # 設置停止事件，通知所有執行緒停止
+                    self._stop_event.set()
+                    self._auto_skip_stop_event.set()
+                    
+                    # 等待規則執行緒檢測到停止信號
+                    time.sleep(2)
+                    
+                    # 強制停止規則執行狀態
+                    self.rule_running = False
+                    self.auto_press_running = False
+                    
+                    # 關閉所有瀏覽器
+                    self.logger.info("正在關閉所有瀏覽器...")
+                    try:
+                        closed_count = 0
+                        for i, context in enumerate(list(self.browser_contexts)):
+                            try:
+                                context.driver.quit()
+                                closed_count += 1
+                                self.logger.info(f"[成功] 已關閉瀏覽器 {i} ({context.credential.username})")
+                            except Exception as e:
+                                self.logger.error(f"關閉瀏覽器 {i} 失敗: {e}")
+                        
+                        self.logger.info(f"[成功] 已關閉 {closed_count} 個瀏覽器")
+                        self.logger.info("")
+                        self.logger.info("程式將在 3 秒後自動退出...")
+                        time.sleep(3)
+                        
+                        # 使用 os._exit() 強制退出整個程序（包括所有執行緒）
+                        self.logger.info("再見！")
+                        import os
+                        os._exit(0)
+                        
+                    except Exception as e:
+                        self.logger.error(f"關閉瀏覽器時發生錯誤: {e}")
+                        import os
+                        os._exit(1)
+                
+                # 等待檢查間隔，如果收到停止信號則立即退出
+                if self._time_monitor_stop_event.wait(timeout=Constants.RULE_EXECUTION_TIME_CHECK_INTERVAL):
+                    break
+                
+                check_count += 1
+                
+                # 根據總執行時間決定顯示頻率
+                current_time = time.time()
+                remaining_seconds = end_time - current_time
+                remaining_hours = remaining_seconds / 3600
+                
+                # 如果總時間 <= 0.5 小時（30分鐘），每分鐘顯示一次（6次檢查）
+                # 如果總時間 > 0.5 小時，每 5 分鐘顯示一次（30次檢查）
+                display_interval = 6 if self.rule_execution_max_hours <= 0.5 else 30
+                
+                if check_count % display_interval == 0:
+                    if remaining_hours >= 0:
+                        remaining_minutes = remaining_seconds / 60
+                        if remaining_hours >= 1:
+                            self.logger.info(f"[時間監控] 剩餘執行時間: {remaining_hours:.2f} 小時")
+                        else:
+                            self.logger.info(f"[時間監控] 剩餘執行時間: {remaining_minutes:.1f} 分鐘")
+                    
+            except Exception as e:
+                self.logger.error(f"時間監控發生錯誤: {e}")
+                self._time_monitor_stop_event.wait(timeout=Constants.STOP_EVENT_ERROR_WAIT)
+        
+        self.logger.info("[停止] 規則執行時間監控已停止")
+    
+    def _start_time_monitor(self) -> None:
+        """啟動規則執行時間監控功能。"""
+        if self.time_monitor_running:
+            self.logger.debug("規則執行時間監控功能已在運行中")
+            return
+        
+        # 清除停止事件
+        self._time_monitor_stop_event.clear()
+        
+        # 啟動時間監控執行緒
+        self.time_monitor_thread = threading.Thread(
+            target=self._time_monitor_loop,
+            daemon=True,
+            name="TimeMonitorThread"
+        )
+        self.time_monitor_thread.start()
+        self.time_monitor_running = True
+    
+    def _stop_time_monitor(self) -> None:
+        """停止規則執行時間監控功能。"""
+        if not self.time_monitor_running:
+            return
+        
+        # 設置停止事件
+        self._time_monitor_stop_event.set()
+        
+        # 等待執行緒結束
+        if self.time_monitor_thread and self.time_monitor_thread.is_alive():
+            self.time_monitor_thread.join(timeout=Constants.AUTO_PRESS_THREAD_JOIN_TIMEOUT)
+        
+        self.time_monitor_thread = None
+        self.time_monitor_running = False
+    
     def _error_monitor_loop(self) -> None:
         """錯誤訊息監控循環（每 10 秒檢測一次）。
         
@@ -3438,6 +3578,10 @@ class GameControlCenter:
         self.logger.info("")
         self.logger.info("規則執行已停止")
         self.rule_running = False
+        
+        # 清理時間控制狀態
+        self.rule_execution_start_time = None
+        self.rule_execution_max_hours = None
     
     def _execute_auto_spin_rule(self, rule: BetRule, rule_num: int, total_rules: int) -> None:
         """執行自動旋轉規則 ('a' 類型)。
@@ -3749,8 +3893,12 @@ class GameControlCenter:
         except Exception as e:
             self.logger.error(f"購買免費遊戲時發生錯誤: {e}")
     
-    def _start_rule_execution(self) -> None:
-        """啟動規則執行。"""
+    def _start_rule_execution(self, max_hours: Optional[float] = None) -> None:
+        """啟動規則執行。
+        
+        Args:
+            max_hours: 最大執行時間（小時），None 表示無限制
+        """
         if self.rule_running:
             self.logger.warning("規則執行已在運行中")
             return
@@ -3763,6 +3911,10 @@ class GameControlCenter:
         if not self.bet_rules:
             self.logger.error("沒有可執行的規則，請檢查 用戶規則.txt")
             return
+        
+        # 設定時間控制
+        self.rule_execution_start_time = time.time()
+        self.rule_execution_max_hours = max_hours
         
         # 顯示規則列表
         self.logger.info("載入的規則:")
@@ -3787,8 +3939,14 @@ class GameControlCenter:
         # 啟動自動跳過點擊功能（每30秒點擊一次）
         self._start_auto_skip_click()
         
-        self.logger.info("")
-        self.logger.info("[成功] 規則執行已啟動 (按 'p' 可暫停)")
+        # 啟動時間監控執行緒（如果設定了時間限制）
+        if max_hours is not None:
+            self._start_time_monitor()
+            self.logger.info("")
+            self.logger.info(f"[成功] 規則執行已啟動 (將在 {max_hours} 小時後自動停止，按 'p' 可暫停)")
+        else:
+            self.logger.info("")
+            self.logger.info("[成功] 規則執行已啟動 (按 'p' 可暫停)")
         self.logger.info("")
         
         # 啟動規則執行執行緒（放在最後，確保提示訊息先輸出）
@@ -3808,6 +3966,10 @@ class GameControlCenter:
             return
         
         self.logger.info("正在停止規則執行...")
+        
+        # 停止時間監控（如果正在運行）
+        if self.time_monitor_running:
+            self._stop_time_monitor()
         
         # 設置停止事件
         self._stop_event.set()
@@ -4042,7 +4204,7 @@ class GameControlCenter:
                     self.logger.info("   提示: 使用 's 1,2' 啟動自動按鍵，或使用 'r' 啟動規則執行")
             
             elif cmd == 'r':
-                # 開始執行規則
+                # 開始執行規則（必須提供小時參數，0 代表無限執行）
                 if self.rule_running:
                     self.logger.warning("[警告] 規則執行已在運行中，請先使用 'p' 暫停")
                     return True
@@ -4051,7 +4213,34 @@ class GameControlCenter:
                     self.logger.warning("自動按鍵正在運行，請先使用 'p' 暫停")
                     return True
                 
-                self._start_rule_execution()
+                # 檢查是否提供參數
+                if not command_arguments:
+                    self.logger.error("指令格式錯誤，請使用: r <小時數>")
+                    self.logger.info("  r 0      - 無限執行所有規則")
+                    self.logger.info("  r 2      - 執行 2 小時後自動停止")
+                    self.logger.info("  r 0.5    - 執行 30 分鐘後自動停止")
+                    return True
+                
+                # 解析小時參數
+                try:
+                    hours = float(command_arguments)
+                    if hours < 0:
+                        self.logger.error(f"執行時間不能小於 0: {hours}")
+                        return True
+                    
+                    # hours == 0 代表無限執行
+                    max_hours = None if hours == 0 else hours
+                    
+                    if max_hours is None:
+                        self.logger.info("設定規則執行模式: 無限執行")
+                    else:
+                        self.logger.info(f"設定規則執行時間: {max_hours} 小時")
+                        
+                except ValueError:
+                    self.logger.error(f"無效的小時數: {command_arguments}，請輸入數字")
+                    return True
+                
+                self._start_rule_execution(max_hours=max_hours)
             
             elif cmd == 'b':
                 # 解析 b 指令參數

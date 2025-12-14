@@ -2,12 +2,23 @@
 
 > 金富翁遊戲自動化系統 - 多瀏覽器並行控制、圖片識別、Proxy 中繼
 
-[![Version](https://img.shields.io/badge/version-1.15.0-brightgreen.svg)](https://github.com/simon980224/AutoSlotGameMaster)
+[![Version](https://img.shields.io/badge/version-1.16.1-brightgreen.svg)](https://github.com/simon980224/AutoSlotGameMaster)
 [![Python Version](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](https://github.com/simon980224/AutoSlotGameMaster)
 
 一個使用 Selenium WebDriver、OpenCV 圖片識別和 Chrome DevTools Protocol 實現的遊戲自動化系統。支援多瀏覽器並行控制、本地 Proxy 中繼、自動下注、錯誤自動恢復和免費遊戲購買等功能。
+
+## 🎉 最新更新 (v1.16.1)
+
+- ✅ **修正時間控制功能** - 修正規則執行時間到達後無法正常退出的問題
+  - 使用 `os._exit()` 強制終止整個程序
+  - 優化時間檢查邏輯：先檢查時間再等待，確保立即觸發
+  - 短時間執行（≤30 分鐘）時每分鐘顯示剩餘時間
+- ⚠️ **命令變更** - `r` 命令現在必須提供參數：
+  - `r 0` - 無限執行（原有行為）
+  - `r 2` - 執行 2 小時後自動停止
+  - `r 0.5` - 執行 30 分鐘後自動停止
 
 ## ✨ 核心特性
 
@@ -196,7 +207,10 @@ s 1,2          # 間隔 1~2 秒
 s 0.5,1.5      # 間隔 0.5~1.5 秒
 
 # 開始執行規則（自動切換金額）
-r              # 依照 lib/用戶規則.txt 自動切換金額並按空白鍵
+r 0            # 無限執行所有規則（原有行為）
+r 2            # 執行 2 小時後自動停止
+r 0.5          # 執行 30 分鐘後自動停止
+               # 依照 lib/用戶規則.txt 自動切換金額並按空白鍵
                # 規則格式: 金額:時間(分鐘):最小(秒數):最大(秒數)
                # 規則循環執行，時間到達自動切換下一條
 
@@ -465,6 +479,45 @@ google-chrome --version  # Linux
 - 常量使用 `UPPER_CASE`
 
 ## 📝 版本歷史
+
+### v1.16.1 (2025-12-14)
+
+- 🐛 **修正規則執行時間控制功能**：修正時間到達後無法正常退出的問題
+  - 使用 `os._exit()` 強制終止整個程序（包括所有執行緒）
+  - 優化時間檢查邏輯：先檢查時間是否到達，再等待下次檢查
+  - 改善停止信號處理：同時設置所有相關停止事件
+- ⚡ **時間監控優化**：
+  - 短時間執行（≤ 0.5 小時）：每分鐘顯示剩餘時間
+  - 長時間執行（> 0.5 小時）：每 5 分鐘顯示剩餘時間
+  - 自動根據剩餘時間選擇顯示單位（小時 or 分鐘）
+- ⚠️ **命令變更**：`r` 命令現在必須提供參數
+  - `r 0` - 無限執行（原有行為）
+  - `r 2` - 執行 2 小時後自動停止
+  - `r 0.5` - 執行 30 分鐘後自動停止
+- 🔒 **可靠性提升**：時間到達後確保程序能夠完全退出，不會殘留執行緒
+
+**技術改進**：
+
+- `_time_monitor_loop()`：先檢查時間再等待，避免延遲觸發
+- 使用 `os._exit()` 替代 `sys.exit()`，確保 daemon 執行緒中能強制退出
+- 動態調整顯示頻率：根據總執行時間自動調整剩餘時間顯示間隔
+
+### v1.16.0 (2025-12-14)
+
+- ✨ **新增規則執行時間控制功能**：'r' 命令支援可選的小時參數
+  - 可設定規則執行的最大時長
+  - 時間到達後自動停止規則、關閉所有瀏覽器並退出程式
+  - 每 10 秒檢查一次執行時間
+  - 每 5 分鐘顯示一次剩餘時間
+- 🕐 **自動化定時任務**：適合夜間或定時運行場景
+- 🛡️ **優雅退出機制**：時間到達後依序關閉瀏覽器，3 秒後自動退出
+- 📊 **時間監控執行緒**：背景獨立運行，不影響規則執行
+
+**新增功能**：
+
+- 時間監控相關常數：`RULE_EXECUTION_TIME_CHECK_INTERVAL = 10`
+- 時間監控執行緒方法：`_time_monitor_loop()`, `_start_time_monitor()`, `_stop_time_monitor()`
+- 規則執行狀態追蹤：`rule_execution_start_time`, `rule_execution_max_hours`
 
 ### v1.14.3 (2025-12-11)
 
