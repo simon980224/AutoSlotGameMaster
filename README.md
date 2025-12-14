@@ -2,20 +2,20 @@
 
 > 金富翁遊戲自動化系統 - 多瀏覽器並行控制、圖片識別、Proxy 中繼
 
-[![Version](https://img.shields.io/badge/version-1.17.0-brightgreen.svg)](https://github.com/simon980224/AutoSlotGameMaster)
+[![Version](https://img.shields.io/badge/version-1.17.1-brightgreen.svg)](https://github.com/simon980224/AutoSlotGameMaster)
 [![Python Version](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](https://github.com/simon980224/AutoSlotGameMaster)
 
 一個使用 Selenium WebDriver、OpenCV 圖片識別和 Chrome DevTools Protocol 實現的遊戲自動化系統。支援多瀏覽器並行控制、本地 Proxy 中繼、自動下注、錯誤自動恢復和免費遊戲購買等功能。
 
-## 🎉 最新更新 (v1.17.0)
+## 🎉 最新更新 (v1.17.1)
 
-- ⚡ **優化調整金額功能** - 提升操作穩定性和可靠性
-  - 每次調整金額間隔從 0.3 秒改為 3 秒，避免操作過快導致失敗
-  - 超過最大嘗試次數（50 次）時自動關閉該瀏覽器
-  - 自動從列表中移除失敗的瀏覽器，其他瀏覽器繼續正常運行
-  - 詳細的失敗日誌和關閉通知
+- 🐛 **修正時間戳錯誤** - 修正規則執行時的自動跳過功能錯誤
+  - 修正 `AUTO_SKIP_CLICK_INTERVAL` 數值過大導致的時間戳溢位問題
+  - 從極大值（999999999999999999999）改為 86400 秒（24 小時）
+  - 解決執行 'r' 命令時出現 "timestamp too large to convert to C \_PyTime_t" 錯誤
+  - 確保規則執行功能穩定運行
 
 ## ✨ 核心特性
 

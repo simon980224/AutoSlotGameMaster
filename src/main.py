@@ -13,10 +13,11 @@
 - 完善的錯誤處理與重試機制
 
 作者: 凡臻科技
-版本: 1.17.0
+版本: 1.17.1
 Python: 3.8+
 
 版本歷史:
+- v1.17.1: 修正自動跳過點擊功能的時間戳錯誤（將 AUTO_SKIP_CLICK_INTERVAL 從極大值改為 86400 秒，避免 timestamp too large 錯誤）
 - v1.17.0: 優化調整金額功能（每次調整間隔改為3秒，超過最大嘗試次數自動關閉該瀏覽器）
 - v1.16.1: 修正規則執行時間控制功能（優化時間到達後的自動退出機制，使用 os._exit() 強制退出；短時間執行時更頻繁顯示剩餘時間）
 - v1.16.0: 新增規則執行時間控制功能（'r' 命令支援可選的小時參數，時間到後自動關閉所有瀏覽器並退出）
@@ -121,7 +122,7 @@ __all__ = [
 class Constants:
     """系統常量"""
     # 版本資訊
-    VERSION = "1.16.1"
+    VERSION = "1.17.1"
     SYSTEM_NAME = "金富翁遊戲自動化系統"
     
     DEFAULT_LIB_PATH = "lib"
@@ -211,7 +212,7 @@ class Constants:
     STOP_EVENT_ERROR_WAIT = 1.0    # 停止事件錯誤等待時間
     SERVER_SOCKET_TIMEOUT = 1.0    # 伺服器 Socket 超時時間
     CLEANUP_PROCESS_TIMEOUT = 10   # 清除程序超時時間（秒）
-    AUTO_SKIP_CLICK_INTERVAL = 999999999999999999999  # 自動跳過點擊間隔時間（秒）# 非常大的值表示不啟用
+    AUTO_SKIP_CLICK_INTERVAL = 86400  # 自動跳過點擊間隔時間（秒）# 設為 24 小時表示不啟用
     RULE_EXECUTION_TIME_CHECK_INTERVAL = 10  # 規則執行時間檢查間隔（秒）
     
     # 重試與循環配置
