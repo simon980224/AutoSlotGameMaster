@@ -159,6 +159,7 @@ class Constants:
     LOBBY_CONFIRM = "lobby_confirm.png"
     ERROR_MESSAGE_LEFT = "error_message_left.png"  # 左側錯誤訊息模板
     ERROR_MESSAGE_RIGHT = "error_message_right.png"  # 右側錯誤訊息模板
+    BLACK_SCREEN = "black_screen.png"  # 黑屏模板
     MATCH_THRESHOLD = 0.8  # 圖片匹配閾值
     BETSIZE_MATCH_THRESHOLD = 0.85  # 金額識別匹配閾值
     DETECTION_INTERVAL = 1.0  # 檢測間隔（秒）
@@ -2815,6 +2816,69 @@ class ImageDetector:
             self.logger.debug(f"錯誤訊息檢測失敗: {e}")
             return False
 
+    def detect_black_screen(
+        self, 
+        driver: WebDriver,
+        threshold: float = Constants.MATCH_THRESHOLD
+    ) -> bool:
+        """檢測指定區域是否出現黑屏。
+        
+        Args:
+            driver: WebDriver 實例
+            threshold: 匹配閾值
+            
+        Returns:
+            是否檢測到黑屏
+        """
+        try:
+            # 截取全螢幕
+            screenshot = self.capture_screenshot(driver)
+            if screenshot is None:
+                return False
+            
+            # 獲取截圖尺寸
+            height, width = screenshot.shape[:2]
+            
+            # 使用常數定義的座標和邊距
+            center_x = Constants.BLACKSCREEN_CENTER_X
+            center_y = Constants.BLACKSCREEN_CENTER_Y
+            margin_x = Constants.BLACKSCREEN_CROP_MARGIN_X
+            margin_y = Constants.BLACKSCREEN_CROP_MARGIN_Y
+            
+            # 計算裁切範圍
+            crop_left = max(0, center_x - margin_x)
+            crop_top = max(0, center_y - margin_y)
+            crop_right = min(width, center_x + margin_x)
+            crop_bottom = min(height, center_y + margin_y)
+            
+            # 裁切區域
+            cropped = screenshot[crop_top:crop_bottom, crop_left:crop_right]
+            
+            # 讀取黑屏模板
+            template_path = self.get_template_path(Constants.BLACK_SCREEN)
+            if not template_path.exists():
+                self.logger.debug(f"黑屏模板不存在: {template_path}")
+                return False
+            
+            template = cv2_imread_unicode(template_path)
+            if template is None:
+                self.logger.debug("無法讀取黑屏模板")
+                return False
+            
+            # 轉換為灰階
+            cropped_gray = cv2.cvtColor(cropped, cv2.COLOR_BGR2GRAY)
+            template_gray = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
+            
+            # 模板匹配
+            result = cv2.matchTemplate(cropped_gray, template_gray, cv2.TM_CCOEFF_NORMED)
+            _, max_val, _, _ = cv2.minMaxLoc(result)
+            
+            return max_val >= threshold
+            
+        except Exception as e:
+            self.logger.debug(f"黑屏檢測失敗: {e}")
+            return False
+
 
 # ============================================================================
 # 瀏覽器恢復管理器
@@ -2902,6 +2966,21 @@ class BrowserRecoveryManager:
             
         except Exception as e:
             self.logger.debug(f"錯誤訊息檢測失敗: {e}")
+            return False
+    
+    def detect_black_screen(self, driver: WebDriver) -> bool:
+        """檢測瀏覽器中是否出現黑屏。
+        
+        Args:
+            driver: WebDriver 實例
+            
+        Returns:
+            是否檢測到黑屏
+        """
+        try:
+            return self.image_detector.detect_black_screen(driver)
+        except Exception as e:
+            self.logger.debug(f"黑屏檢測失敗: {e}")
             return False
     
     def _check_region(
@@ -3564,6 +3643,22 @@ class GameControlCenter:
                             _ = context.driver.current_url
                         except Exception:
                             # 瀏覽器已關閉，跳過
+                            continue
+                        
+                        # 檢測是否有黑屏
+                        has_black_screen = self.recovery_manager.detect_black_screen(context.driver)
+                        
+                        if has_black_screen:
+                            self.logger.warning(f"[檢測] 瀏覽器 {i} 出現黑屏，正在重新整理...")
+                            
+                            # 重新整理瀏覽器
+                            if self.recovery_manager.refresh_browser(context):
+                                refresh_count += 1
+                                self.logger.info(f"[成功] 瀏覽器 {i} 已重新整理")
+                            else:
+                                self.logger.error(f"[失敗] 瀏覽器 {i} 重新整理失敗")
+                            
+                            # 檢測到黑屏後繼續下一個瀏覽器
                             continue
                         
                         # 檢測是否有錯誤訊息（會自動記錄匹配值）
