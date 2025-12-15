@@ -244,6 +244,18 @@ class Constants:
     ERROR_MESSAGE_RIGHT_Y = 188   # 右側錯誤訊息區域 Y 座標
     ERROR_MESSAGE_PERSIST_SECONDS = 1  # 錯誤訊息持續秒數閾值
 
+    # 黑屏截圖座標（基於預設視窗大小）
+    BLACKSCREEN_CENTER_X = 300  # 黑屏區域中心 X 座標
+    BLACKSCREEN_CENTER_Y = 195  # 黑屏區域中心 Y 座標
+    BLACKSCREEN_CROP_MARGIN_X = 125  # 黑屏截圖裁切邊距（左右）
+    BLACKSCREEN_CROP_MARGIN_Y = 75   # 黑屏截圖裁切邊距（上下）
+
+    # 返回遊戲提示截圖座標（基於預設視窗大小，使用與黑屏相同的座標）
+    GAME_RETURN_CENTER_X = 300  # 返回遊戲提示中心 X 座標
+    GAME_RETURN_CENTER_Y = 195  # 返回遊戲提示中心 Y 座標
+    GAME_RETURN_CROP_MARGIN_X = 50  # 返回遊戲提示裁切邊距（左右）
+    GAME_RETURN_CROP_MARGIN_Y = 20   # 返回遊戲提示裁切邊距（上下）
+
     # 截圖裁切範圍（像素）
     BETSIZE_CROP_MARGIN_X = 40  # 金額模板水平裁切邊距
     BETSIZE_CROP_MARGIN_Y = 10  # 金額模板垂直裁切邊距
@@ -2380,6 +2392,108 @@ class SyncBrowserOperator:
             self.logger.error(f"截取錯誤訊息模板失敗: {e}")
             return False
 
+    def capture_blackscreen_template(self, driver: WebDriver) -> bool:
+        """截取黑屏區域模板。
+        
+        使用 Constants 定義的座標和裁切範圍。
+        
+        Args:
+            driver: WebDriver 實例
+            
+        Returns:
+            bool: 截取成功返回True
+        """
+        try:
+            # 使用常數定義：黑屏中心位置和裁切邊距
+            center_x = Constants.BLACKSCREEN_CENTER_X
+            center_y = Constants.BLACKSCREEN_CENTER_Y
+            margin_x = Constants.BLACKSCREEN_CROP_MARGIN_X  # 左右邊距
+            margin_y = Constants.BLACKSCREEN_CROP_MARGIN_Y  # 上下邊距
+            
+            # 截取整個瀏覽器畫面
+            screenshot = driver.get_screenshot_as_png()
+            screenshot_img = Image.open(io.BytesIO(screenshot))
+            
+            # 獲取實際截圖尺寸
+            image_width, image_height = screenshot_img.size
+            
+            # 計算裁切範圍（左右使用 margin_x，上下使用 margin_y）
+            crop_left = max(0, center_x - margin_x)
+            crop_top = max(0, center_y - margin_y)
+            crop_right = min(image_width, center_x + margin_x)
+            crop_bottom = min(image_height, center_y + margin_y)
+            
+            # 裁切圖片
+            cropped_img = screenshot_img.crop((crop_left, crop_top, crop_right, crop_bottom))
+            
+            # 使用輔助函式取得專案根目錄
+            img_dir = get_resource_path("img")
+            img_dir.mkdir(parents=True, exist_ok=True)
+            
+            # 固定檔名
+            filename = "black_screen.png"
+            output_path = img_dir / filename
+            cropped_img.save(output_path)
+            
+            self.logger.info(f"[成功] 黑屏模板已儲存: {filename} (座標: {center_x},{center_y}, 範圍: 左右{margin_x}px 上下{margin_y}px)")
+            
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"截取黑屏模板失敗: {e}")
+            return False
+
+    def capture_game_return_template(self, driver: WebDriver) -> bool:
+        """截取返回遊戲提示區域模板。
+        
+        使用 Constants 定義的座標和裁切範圍。
+        
+        Args:
+            driver: WebDriver 實例
+            
+        Returns:
+            bool: 截取成功返回True
+        """
+        try:
+            # 使用常數定義：返回遊戲提示中心位置和裁切邊距
+            center_x = Constants.GAME_RETURN_CENTER_X
+            center_y = Constants.GAME_RETURN_CENTER_Y
+            margin_x = Constants.GAME_RETURN_CROP_MARGIN_X  # 左右邊距
+            margin_y = Constants.GAME_RETURN_CROP_MARGIN_Y  # 上下邊距
+            
+            # 截取整個瀏覽器畫面
+            screenshot = driver.get_screenshot_as_png()
+            screenshot_img = Image.open(io.BytesIO(screenshot))
+            
+            # 獲取實際截圖尺寸
+            image_width, image_height = screenshot_img.size
+            
+            # 計算裁切範圍（左右使用 margin_x，上下使用 margin_y）
+            crop_left = max(0, center_x - margin_x)
+            crop_top = max(0, center_y - margin_y)
+            crop_right = min(image_width, center_x + margin_x)
+            crop_bottom = min(image_height, center_y + margin_y)
+            
+            # 裁切圖片
+            cropped_img = screenshot_img.crop((crop_left, crop_top, crop_right, crop_bottom))
+            
+            # 使用輔助函式取得專案根目錄
+            img_dir = get_resource_path("img")
+            img_dir.mkdir(parents=True, exist_ok=True)
+            
+            # 固定檔名
+            filename = "game_return.png"
+            output_path = img_dir / filename
+            cropped_img.save(output_path)
+            
+            self.logger.info(f"[成功] 返回遊戲提示模板已儲存: {filename} (座標: {center_x},{center_y}, 範圍: 左右{margin_x}px 上下{margin_y}px)")
+            
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"截取返回遊戲提示模板失敗: {e}")
+            return False
+
 
 # ============================================================================
 # 瀏覽器操作輔助類
@@ -3072,8 +3186,14 @@ class GameControlCenter:
   c                   截取金額模板（用於優化金額識別）
                       提示: 在遊戲中調整到特定金額後使用
 
-  e                  截取錯誤訊息模板（用於錯誤檢測）
+  e                   截取錯誤訊息模板（用於錯誤檢測）
                       提示: 在出現錯誤訊息時使用
+
+  k                   截取黑屏模板（座標 300,195，範圍 50px）
+                      提示: 選擇單一瀏覽器截取，檔名固定為 black_screen.png
+
+  g                   截取返回遊戲提示模板（座標 300,195，範圍 50px）
+                      提示: 選擇單一瀏覽器截取，檔名固定為 game_return.png
 
   h                   顯示此幫助信息
 
@@ -4660,6 +4780,92 @@ class GameControlCenter:
                     self.logger.info("退出錯誤訊息模板工具")
                 except KeyboardInterrupt:
                     self.logger.info("\n退出錯誤訊息模板工具")
+                except Exception as e:
+                    self.logger.error(f"截取失敗: {e}")
+            
+            elif cmd == 'k':
+                self.logger.info("")
+                self.logger.info("=== 截取黑屏模板工具 ===")
+                self.logger.info("請選擇要截取的瀏覽器:")
+                for i, context in enumerate(self.browser_contexts, 1):
+                    if self._is_browser_alive(context.driver):
+                        username = context.credential.username
+                        self.logger.info(f"  {i}      - 瀏覽器 {i} ({username})")
+                self.logger.info("  q      - 退出")
+                self.logger.info("")
+                
+                try:
+                    print("請輸入編號: ", end="", flush=True)
+                    user_input = input().strip().lower()
+                    
+                    # 檢查是否要退出
+                    if user_input == 'q':
+                        self.logger.info("退出黑屏模板工具")
+                    else:
+                        # 截取指定瀏覽器
+                        try:
+                            browser_index = int(user_input)
+                            if 1 <= browser_index <= len(self.browser_contexts):
+                                context = self.browser_contexts[browser_index - 1]
+                                if self._is_browser_alive(context.driver):
+                                    if self.browser_operator.capture_blackscreen_template(context.driver):
+                                        self.logger.info("[成功] 黑屏模板截取成功")
+                                    else:
+                                        self.logger.error("模板截取失敗")
+                                else:
+                                    self.logger.error(f"瀏覽器 {browser_index} 已關閉")
+                            else:
+                                self.logger.error(f"無效的瀏覽器編號: {browser_index}")
+                        except ValueError:
+                            self.logger.error(f"無效的輸入: {user_input}")
+                            
+                except EOFError:
+                    self.logger.info("退出黑屏模板工具")
+                except KeyboardInterrupt:
+                    self.logger.info("\n退出黑屏模板工具")
+                except Exception as e:
+                    self.logger.error(f"截取失敗: {e}")
+            
+            elif cmd == 'g':
+                self.logger.info("")
+                self.logger.info("=== 截取返回遊戲提示模板工具 ===")
+                self.logger.info("請選擇要截取的瀏覽器:")
+                for i, context in enumerate(self.browser_contexts, 1):
+                    if self._is_browser_alive(context.driver):
+                        username = context.credential.username
+                        self.logger.info(f"  {i}      - 瀏覽器 {i} ({username})")
+                self.logger.info("  q      - 退出")
+                self.logger.info("")
+                
+                try:
+                    print("請輸入編號: ", end="", flush=True)
+                    user_input = input().strip().lower()
+                    
+                    # 檢查是否要退出
+                    if user_input == 'q':
+                        self.logger.info("退出返回遊戲提示模板工具")
+                    else:
+                        # 截取指定瀏覽器
+                        try:
+                            browser_index = int(user_input)
+                            if 1 <= browser_index <= len(self.browser_contexts):
+                                context = self.browser_contexts[browser_index - 1]
+                                if self._is_browser_alive(context.driver):
+                                    if self.browser_operator.capture_game_return_template(context.driver):
+                                        self.logger.info("[成功] 返回遊戲提示模板截取成功")
+                                    else:
+                                        self.logger.error("模板截取失敗")
+                                else:
+                                    self.logger.error(f"瀏覽器 {browser_index} 已關閉")
+                            else:
+                                self.logger.error(f"無效的瀏覽器編號: {browser_index}")
+                        except ValueError:
+                            self.logger.error(f"無效的輸入: {user_input}")
+                            
+                except EOFError:
+                    self.logger.info("退出返回遊戲提示模板工具")
+                except KeyboardInterrupt:
+                    self.logger.info("\n退出返回遊戲提示模板工具")
                 except Exception as e:
                     self.logger.error(f"截取失敗: {e}")
             
