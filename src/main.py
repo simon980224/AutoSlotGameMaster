@@ -250,6 +250,7 @@ class Constants:
     BLACKSCREEN_CENTER_Y = 195  # 黑屏區域中心 Y 座標
     BLACKSCREEN_CROP_MARGIN_X = 125  # 黑屏截圖裁切邊距（左右）
     BLACKSCREEN_CROP_MARGIN_Y = 75   # 黑屏截圖裁切邊距（上下）
+    BLACKSCREEN_PERSIST_SECONDS = 10  # 黑屏持續秒數閾值
 
     # 返回遊戲提示截圖座標（基於預設視窗大小，使用與黑屏相同的座標）
     GAME_RETURN_CENTER_X = 300  # 返回遊戲提示中心 X 座標
@@ -3207,6 +3208,7 @@ class GameControlCenter:
         self.error_monitor_running = False  # 錯誤監控運行狀態
         self.error_monitor_thread: Optional[threading.Thread] = None  # 錯誤監控執行緒
         self._error_monitor_stop_event = threading.Event()  # 錯誤監控停止事件
+        self._blackscreen_timestamps: Dict[int, Optional[float]] = {}  # 黑屏首次檢測時間戳（key: 瀏覽器索引）
         
         # 規則執行時間控制相關
         self.rule_execution_start_time: Optional[float] = None  # 規則執行開始時間
@@ -3507,6 +3509,14 @@ class GameControlCenter:
         check_count = 0
         while not self._time_monitor_stop_event.is_set():
             try:
+                # 檢查必要參數是否仍然存在（規則執行可能已停止）
+                if self.rule_execution_start_time is None or self.rule_execution_max_hours is None:
+                    self.logger.debug("[停止] 規則執行已結束，時間監控自動停止")
+                    break
+                
+                # 重新計算結束時間（以防參數被更新）
+                end_time = self.rule_execution_start_time + (self.rule_execution_max_hours * 3600)
+                
                 # 先檢查是否達到執行時間（在等待之前檢查）
                 current_time = time.time()
                 if current_time >= end_time:
@@ -3642,24 +3652,46 @@ class GameControlCenter:
                         try:
                             _ = context.driver.current_url
                         except Exception:
-                            # 瀏覽器已關閉，跳過
+                            # 瀏覽器已關閉，跳過並清除時間戳
+                            self._blackscreen_timestamps.pop(i, None)
                             continue
                         
                         # 檢測是否有黑屏
                         has_black_screen = self.recovery_manager.detect_black_screen(context.driver)
+                        current_time = time.time()
                         
                         if has_black_screen:
-                            self.logger.warning(f"[檢測] 瀏覽器 {i} 出現黑屏，正在重新整理...")
-                            
-                            # 重新整理瀏覽器
-                            if self.recovery_manager.refresh_browser(context):
-                                refresh_count += 1
-                                self.logger.info(f"[成功] 瀏覽器 {i} 已重新整理")
+                            # 如果是首次檢測到黑屏，記錄時間戳
+                            if i not in self._blackscreen_timestamps or self._blackscreen_timestamps[i] is None:
+                                self._blackscreen_timestamps[i] = current_time
+                                self.logger.debug(f"[檢測] 瀏覽器 {i} 首次檢測到黑屏")
                             else:
-                                self.logger.error(f"[失敗] 瀏覽器 {i} 重新整理失敗")
+                                # 計算黑屏持續時間
+                                elapsed = current_time - self._blackscreen_timestamps[i]
+                                
+                                # 如果黑屏持續超過閾值，才執行重新整理
+                                if elapsed >= Constants.BLACKSCREEN_PERSIST_SECONDS:
+                                    self.logger.warning(f"[檢測] 瀏覽器 {i} 黑屏已持續 {elapsed:.1f} 秒，正在重新整理...")
+                                    
+                                    # 重新整理瀏覽器
+                                    if self.recovery_manager.refresh_browser(context):
+                                        refresh_count += 1
+                                        self.logger.info(f"[成功] 瀏覽器 {i} 已重新整理")
+                                    else:
+                                        self.logger.error(f"[失敗] 瀏覽器 {i} 重新整理失敗")
+                                    
+                                    # 清除時間戳
+                                    self._blackscreen_timestamps[i] = None
+                                else:
+                                    self.logger.debug(f"[檢測] 瀏覽器 {i} 黑屏持續 {elapsed:.1f} 秒（閾值: {Constants.BLACKSCREEN_PERSIST_SECONDS} 秒）")
                             
                             # 檢測到黑屏後繼續下一個瀏覽器
                             continue
+                        else:
+                            # 如果黑屏消失，清除時間戳
+                            if i in self._blackscreen_timestamps and self._blackscreen_timestamps[i] is not None:
+                                self.logger.debug(f"[檢測] 瀏覽器 {i} 黑屏已消失")
+                                self._blackscreen_timestamps[i] = None
                         
                         # 檢測是否有錯誤訊息（會自動記錄匹配值）
                         has_error = self.recovery_manager.detect_error_message(context.driver)
