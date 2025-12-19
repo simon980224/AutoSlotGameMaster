@@ -3033,7 +3033,7 @@ class BrowserRecoveryManager:
             return (0.0, False)
     
     def refresh_browser(self, context: BrowserContext) -> bool:
-        """重新整理單個瀏覽器。
+        """重新整理單個瀏覽器（導航到遊戲頁面）。
         
         Args:
             context: 瀏覽器上下文
@@ -3042,11 +3042,11 @@ class BrowserRecoveryManager:
             是否成功
         """
         try:
-            context.driver.refresh()
+            context.driver.get(Constants.GAME_PAGE)
             time.sleep(Constants.DEFAULT_WAIT_SECONDS)
             return True
         except Exception as e:
-            self.logger.error(f"瀏覽器 {context.index} 重新整理失敗: {e}")
+            self.logger.error(f"瀏覽器 {context.index} 導航到遊戲頁面失敗: {e}")
             return False
     
     def wait_for_template(
@@ -3119,7 +3119,7 @@ class BrowserRecoveryManager:
         if not contexts:
             return True
         
-        # 1. 重新整理所有瀏覽器
+        # 1. 導航所有瀏覽器到遊戲頁面
         for context in contexts:
             self.refresh_browser(context)
         
@@ -3669,16 +3669,16 @@ class GameControlCenter:
                                 # 計算黑屏持續時間
                                 elapsed = current_time - self._blackscreen_timestamps[i]
                                 
-                                # 如果黑屏持續超過閾值，才執行重新整理
+                                # 如果黑屏持續超過閾值，才執行重新導航
                                 if elapsed >= Constants.BLACKSCREEN_PERSIST_SECONDS:
-                                    self.logger.warning(f"[檢測] 瀏覽器 {i} 黑屏已持續 {elapsed:.1f} 秒，正在重新整理...")
+                                    self.logger.warning(f"[檢測] 瀏覽器 {i} 黑屏已持續 {elapsed:.1f} 秒，正在導航到遊戲頁面...")
                                     
-                                    # 重新整理瀏覽器
+                                    # 導航到遊戲頁面
                                     if self.recovery_manager.refresh_browser(context):
                                         refresh_count += 1
-                                        self.logger.info(f"[成功] 瀏覽器 {i} 已重新整理")
+                                        self.logger.info(f"[成功] 瀏覽器 {i} 已導航到遊戲頁面")
                                     else:
-                                        self.logger.error(f"[失敗] 瀏覽器 {i} 重新整理失敗")
+                                        self.logger.error(f"[失敗] 瀏覽器 {i} 導航失敗")
                                     
                                     # 清除時間戳
                                     self._blackscreen_timestamps[i] = None
@@ -3697,14 +3697,14 @@ class GameControlCenter:
                         has_error = self.recovery_manager.detect_error_message(context.driver)
                         
                         if has_error:
-                            self.logger.warning(f"[檢測] 瀏覽器 {i} 出現錯誤訊息，正在重新整理...")
+                            self.logger.warning(f"[檢測] 瀏覽器 {i} 出現錯誤訊息，正在導航到遊戲頁面...")
                             
-                            # 重新整理瀏覽器
+                            # 導航到遊戲頁面
                             if self.recovery_manager.refresh_browser(context):
                                 refresh_count += 1
-                                self.logger.info(f"[成功] 瀏覽器 {i} 已重新整理")
+                                self.logger.info(f"[成功] 瀏覽器 {i} 已導航到遊戲頁面")
                             else:
-                                self.logger.error(f"[失敗] 瀏覽器 {i} 重新整理失敗")
+                                self.logger.error(f"[失敗] 瀏覽器 {i} 導航失敗")
                                 
                     except Exception as e:
                         # 靜默處理錯誤，避免日誌過多
