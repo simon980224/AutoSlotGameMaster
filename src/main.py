@@ -13,10 +13,11 @@
 - 完善的錯誤處理與重試機制
 
 作者: 凡臻科技
-版本: 1.17.1
+版本: 1.18.0
 Python: 3.8+
 
 版本歷史:
+- v1.18.0: 新增 game_return 圖片檢測功能（自動檢測並點擊返回遊戲提示，優化錯誤恢復流程為完整登入流程）
 - v1.17.1: 修正自動跳過點擊功能的時間戳錯誤（將 AUTO_SKIP_CLICK_INTERVAL 從極大值改為 86400 秒，避免 timestamp too large 錯誤）
 - v1.17.0: 優化調整金額功能（每次調整間隔改為3秒，超過最大嘗試次數自動關閉該瀏覽器）
 - v1.16.1: 修正規則執行時間控制功能（優化時間到達後的自動退出機制，使用 os._exit() 強制退出；短時間執行時更頻繁顯示剩餘時間）
@@ -122,7 +123,7 @@ __all__ = [
 class Constants:
     """系統常量"""
     # 版本資訊
-    VERSION = "1.17.1"
+    VERSION = "1.18.0"
     SYSTEM_NAME = "金富翁遊戲自動化系統"
     
     DEFAULT_LIB_PATH = "lib"
@@ -143,8 +144,8 @@ class Constants:
     # URL 配置
     # LOGIN_PAGE = "https://m.jfw-win.com/#/login?redirect=%2Fhome%2Fpage"
     LOGIN_PAGE = "https://www.sf-16888.com/#/login?redirect=%2Fhome%2Fpage"
-    # GAME_PAGE = "https://m.jfw-win.com/#/home/loding?game_code=egyptian-mythology&factory_code=ATG&state=true&name=%E6%88%B0%E7%A5%9E%E8%B3%BD%E7%89%B9"
-    GAME_PAGE = "https://www.sf-16888.com/#/home/loding?game_code=egyptian-mythology&factory_code=ATG&state=true&name=戰神賽特"
+    GAME_PAGE = "https://www.sf-16888.com/#/home/loding?game_code=egyptian-mythology&factory_code=ATG&state=true&name=%E6%88%B0%E7%A5%9E%E8%B3%BD%E7%89%B9"
+    # GAME_PAGE = "https://www.sf-16888.com/#/home/loding?game_code=golden-seth&factory_code=ATG&state=true&name=戰神賽特2%20覺醒之力"
     
     # 頁面元素選擇器
     USERNAME_INPUT = "//input[@placeholder='請輸入帳號']"
@@ -157,6 +158,7 @@ class Constants:
     IMAGE_DIR = "img"
     LOBBY_LOGIN = "lobby_login.png"
     LOBBY_CONFIRM = "lobby_confirm.png"
+    GAME_RETURN = "game_return.png"  # 遊戲返回模板
     ERROR_MESSAGE_LEFT = "error_message_left.png"  # 左側錯誤訊息模板
     ERROR_MESSAGE_RIGHT = "error_message_right.png"  # 右側錯誤訊息模板
     BLACK_SCREEN = "black_screen.png"  # 黑屏模板
@@ -180,6 +182,10 @@ class Constants:
     BUY_FREE_GAME_CONFIRM_X_RATIO = 0.65  # 免費遊戲確認按鈕 X 座標比例
     BUY_FREE_GAME_CONFIRM_Y_RATIO = 1.2   # 免費遊戲確認按鈕 Y 座標比例
     BUY_FREE_GAME_WAIT_SECONDS = 10  # 購買後等待秒數
+    
+    # game_return 返回確認按鈕座標比例
+    GAME_CONFIRM_BUTTON_X_RATIO = 0.54  # game_return 確認按鈕 X 座標比例
+    GAME_CONFIRM_BUTTON_Y_RATIO = 0.84  # game_return 確認按鈕 Y 座標比例
     
     # 自動旋轉按鈕座標比例
     AUTO_SPIN_BUTTON_X_RATIO = 0.8  # 自動轉按鈕 X 座標比例
@@ -3049,6 +3055,198 @@ class BrowserRecoveryManager:
             self.logger.error(f"瀏覽器 {context.index} 導航到遊戲頁面失敗: {e}")
             return False
     
+    def refresh_and_login(self, context: BrowserContext) -> bool:
+        """重新整理瀏覽器並完成登入流程。
+        
+        包含以下步驟：
+        1. 導航到遊戲頁面
+        2. 等待並點擊 lobby_login
+        3. 等待並點擊 lobby_confirm
+        
+        Args:
+            context: 瀏覽器上下文
+            
+        Returns:
+            是否成功
+        """
+        try:
+            # 步驟 1: 導航到遊戲頁面
+            if not self.refresh_browser(context):
+                return False
+            
+            # 步驟 2: 等待並點擊 lobby_login
+            if not self._wait_and_click_template(
+                context,
+                Constants.LOBBY_LOGIN,
+                Constants.LOBBY_LOGIN_BUTTON_X_RATIO,
+                Constants.LOBBY_LOGIN_BUTTON_Y_RATIO,
+                "lobby_login"
+            ):
+                return False
+            
+            # 步驟 3: 等待並點擊 lobby_confirm
+            if not self._wait_and_click_template(
+                context,
+                Constants.LOBBY_CONFIRM,
+                Constants.LOBBY_CONFIRM_BUTTON_X_RATIO,
+                Constants.LOBBY_CONFIRM_BUTTON_Y_RATIO,
+                "lobby_confirm"
+            ):
+                return False
+            
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"瀏覽器 {context.index} 重新整理並登入失敗: {e}")
+            return False
+    
+    def _wait_and_click_template(
+        self,
+        context: BrowserContext,
+        template_name: str,
+        x_ratio: float,
+        y_ratio: float,
+        display_name: str,
+        max_attempts: int = Constants.MAX_DETECTION_ATTEMPTS
+    ) -> bool:
+        """等待模板出現並點擊。
+        
+        Args:
+            context: 瀏覽器上下文
+            template_name: 模板名稱
+            x_ratio: X 座標比例
+            y_ratio: Y 座標比例
+            display_name: 顯示名稱
+            max_attempts: 最大嘗試次數
+            
+        Returns:
+            是否成功
+        """
+        try:
+            # 切換到 iframe（如果是 lobby_login，需要先切換）
+            if template_name == Constants.LOBBY_LOGIN:
+                try:
+                    iframe = WebDriverWait(context.driver, 10).until(
+                        EC.presence_of_element_located((By.ID, Constants.GAME_IFRAME))
+                    )
+                    context.driver.switch_to.frame(iframe)
+                    self.logger.debug(f"瀏覽器 {context.index} 已切換到遊戲 iframe")
+                except Exception as e:
+                    self.logger.error(f"瀏覽器 {context.index} 切換 iframe 失敗: {e}")
+                    return False
+            
+            # 等待模板出現
+            attempt = 0
+            found = False
+            
+            while attempt < max_attempts and not found:
+                attempt += 1
+                time.sleep(Constants.DETECTION_INTERVAL)
+                
+                result = self.image_detector.detect_in_browser(
+                    context.driver,
+                    template_name
+                )
+                
+                if result is not None:
+                    found = True
+                    self.logger.debug(f"瀏覽器 {context.index} 檢測到 {display_name}")
+                    break
+            
+            if not found:
+                self.logger.error(f"瀏覽器 {context.index} 等待 {display_name} 超時")
+                return False
+            
+            # 取得 Canvas 區域
+            try:
+                rect = context.driver.execute_script(f"""
+                    const canvas = document.getElementById('{Constants.GAME_CANVAS}');
+                    const r = canvas.getBoundingClientRect();
+                    return {{x: r.left, y: r.top, w: r.width, h: r.height}};
+                """)
+            except Exception as e:
+                self.logger.error(f"瀏覽器 {context.index} 取得 Canvas 座標失敗: {e}")
+                return False
+            
+            # 計算點擊座標
+            click_x, click_y = BrowserHelper.calculate_click_position(
+                rect,
+                x_ratio,
+                y_ratio
+            )
+            
+            # 執行點擊
+            time.sleep(Constants.TEMPLATE_CAPTURE_WAIT)
+            BrowserHelper.execute_cdp_click(context.driver, click_x, click_y)
+            self.logger.debug(f"瀏覽器 {context.index} 已點擊 {display_name}")
+            
+            # 等待動作完成
+            time.sleep(Constants.DEFAULT_WAIT_SECONDS)
+            
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"瀏覽器 {context.index} 處理 {display_name} 失敗: {e}")
+            return False
+    
+    def detect_game_return(self, driver: WebDriver) -> bool:
+        """檢測瀏覽器中是否出現 game_return 圖片。
+        
+        Args:
+            driver: WebDriver 實例
+            
+        Returns:
+            是否檢測到 game_return
+        """
+        try:
+            result = self.image_detector.detect_in_browser(driver, Constants.GAME_RETURN)
+            return result is not None
+        except Exception as e:
+            self.logger.debug(f"game_return 檢測失敗: {e}")
+            return False
+    
+    def click_game_return(self, context: BrowserContext) -> bool:
+        """點擊 game_return 的返回按鈕（使用專屬的 game_confirm 座標）。
+        
+        Args:
+            context: 瀏覽器上下文
+            
+        Returns:
+            是否成功
+        """
+        try:
+            # 取得 Canvas 區域
+            try:
+                rect = context.driver.execute_script(f"""
+                    const canvas = document.getElementById('{Constants.GAME_CANVAS}');
+                    const r = canvas.getBoundingClientRect();
+                    return {{x: r.left, y: r.top, w: r.width, h: r.height}};
+                """)
+            except Exception as e:
+                self.logger.error(f"瀏覽器 {context.index} 取得 Canvas 座標失敗: {e}")
+                return False
+            
+            # 計算點擊座標（使用專屬的 game_confirm 按鈕座標）
+            click_x, click_y = BrowserHelper.calculate_click_position(
+                rect,
+                Constants.GAME_CONFIRM_BUTTON_X_RATIO,
+                Constants.GAME_CONFIRM_BUTTON_Y_RATIO
+            )
+            
+            # 執行點擊
+            time.sleep(Constants.TEMPLATE_CAPTURE_WAIT)
+            BrowserHelper.execute_cdp_click(context.driver, click_x, click_y)
+            self.logger.debug(f"瀏覽器 {context.index} 已點擊 game_return 返回按鈕")
+            
+            # 等待動作完成
+            time.sleep(Constants.DEFAULT_WAIT_SECONDS)
+            
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"瀏覽器 {context.index} 點擊 game_return 失敗: {e}")
+            return False
+    
     def wait_for_template(
         self,
         contexts: List[BrowserContext],
@@ -3671,14 +3869,14 @@ class GameControlCenter:
                                 
                                 # 如果黑屏持續超過閾值，才執行重新導航
                                 if elapsed >= Constants.BLACKSCREEN_PERSIST_SECONDS:
-                                    self.logger.warning(f"[檢測] 瀏覽器 {i} 黑屏已持續 {elapsed:.1f} 秒，正在導航到遊戲頁面...")
+                                    self.logger.warning(f"[檢測] 瀏覽器 {i} 黑屏已持續 {elapsed:.1f} 秒，正在導航到遊戲頁面並重新登入...")
                                     
-                                    # 導航到遊戲頁面
-                                    if self.recovery_manager.refresh_browser(context):
+                                    # 導航到遊戲頁面並完成登入流程
+                                    if self.recovery_manager.refresh_and_login(context):
                                         refresh_count += 1
-                                        self.logger.info(f"[成功] 瀏覽器 {i} 已導航到遊戲頁面")
+                                        self.logger.info(f"[成功] 瀏覽器 {i} 已導航並重新登入完成")
                                     else:
-                                        self.logger.error(f"[失敗] 瀏覽器 {i} 導航失敗")
+                                        self.logger.error(f"[失敗] 瀏覽器 {i} 導航或登入失敗")
                                     
                                     # 清除時間戳
                                     self._blackscreen_timestamps[i] = None
@@ -3697,14 +3895,28 @@ class GameControlCenter:
                         has_error = self.recovery_manager.detect_error_message(context.driver)
                         
                         if has_error:
-                            self.logger.warning(f"[檢測] 瀏覽器 {i} 出現錯誤訊息，正在導航到遊戲頁面...")
+                            self.logger.warning(f"[檢測] 瀏覽器 {i} 出現錯誤訊息，正在導航到遊戲頁面並重新登入...")
                             
-                            # 導航到遊戲頁面
-                            if self.recovery_manager.refresh_browser(context):
+                            # 導航到遊戲頁面並完成登入流程
+                            if self.recovery_manager.refresh_and_login(context):
                                 refresh_count += 1
-                                self.logger.info(f"[成功] 瀏覽器 {i} 已導航到遊戲頁面")
+                                self.logger.info(f"[成功] 瀏覽器 {i} 已導航並重新登入完成")
                             else:
-                                self.logger.error(f"[失敗] 瀏覽器 {i} 導航失敗")
+                                self.logger.error(f"[失敗] 瀏覽器 {i} 導航或登入失敗")
+                            continue
+                        
+                        # 檢測是否有 game_return 圖片
+                        has_game_return = self.recovery_manager.detect_game_return(context.driver)
+                        
+                        if has_game_return:
+                            self.logger.warning(f"[檢測] 瀏覽器 {i} 出現 game_return，正在點擊返回...")
+                            
+                            # 點擊返回按鈕（使用 lobby_confirm 的座標位置）
+                            if self.recovery_manager.click_game_return(context):
+                                refresh_count += 1
+                                self.logger.info(f"[成功] 瀏覽器 {i} 已點擊返回按鈕")
+                            else:
+                                self.logger.error(f"[失敗] 瀏覽器 {i} 點擊返回失敗")
                                 
                     except Exception as e:
                         # 靜默處理錯誤，避免日誌過多

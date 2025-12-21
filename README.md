@@ -2,20 +2,25 @@
 
 > 金富翁遊戲自動化系統 - 多瀏覽器並行控制、圖片識別、Proxy 中繼
 
-[![Version](https://img.shields.io/badge/version-1.17.1-brightgreen.svg)](https://github.com/simon980224/AutoSlotGameMaster)
+[![Version](https://img.shields.io/badge/version-1.18.0-brightgreen.svg)](https://github.com/simon980224/AutoSlotGameMaster)
 [![Python Version](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](https://github.com/simon980224/AutoSlotGameMaster)
 
 一個使用 Selenium WebDriver、OpenCV 圖片識別和 Chrome DevTools Protocol 實現的遊戲自動化系統。支援多瀏覽器並行控制、本地 Proxy 中繼、自動下注、錯誤自動恢復和免費遊戲購買等功能。
 
-## 🎉 最新更新 (v1.17.1)
+## 🎉 最新更新 (v1.18.0)
 
-- 🐛 **修正時間戳錯誤** - 修正規則執行時的自動跳過功能錯誤
-  - 修正 `AUTO_SKIP_CLICK_INTERVAL` 數值過大導致的時間戳溢位問題
-  - 從極大值（999999999999999999999）改為 86400 秒（24 小時）
-  - 解決執行 'r' 命令時出現 "timestamp too large to convert to C \_PyTime_t" 錯誤
-  - 確保規則執行功能穩定運行
+- ✨ **新增 game_return 圖片檢測功能** - 自動檢測並處理返回遊戲提示
+  - 新增 `game_return.png` 模板檢測功能
+  - 錯誤監控自動檢測 game_return 提示並點擊返回按鈕
+  - 使用專屬的 `GAME_CONFIRM_BUTTON` 座標（0.54, 0.84）進行點擊
+  - 'g' 命令支援截取 game_return 模板
+- 🔧 **優化錯誤恢復流程** - 從單純導航改為完整的重新登入流程
+  - 黑屏檢測後執行完整登入流程（導航 →lobby_login→lobby_confirm）
+  - 錯誤訊息檢測後執行完整登入流程
+  - 新增 `refresh_and_login()` 方法統一處理恢復邏輯
+- 🐛 **修正 URL 編碼問題** - 確保遊戲頁面 URL 的中文字元正確編碼
 
 ## ✨ 核心特性
 
