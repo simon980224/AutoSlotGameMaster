@@ -3061,7 +3061,9 @@ class BrowserRecoveryManager:
         包含以下步驟：
         1. 導航到遊戲頁面
         2. 等待並點擊 lobby_login
-        3. 等待並點擊 lobby_confirm
+        3. 檢測是否出現 game_return（情境 1）
+           - 如果有，點擊返回按鈕
+        4. 等待並點擊 lobby_confirm（情境 2，或處理完情境 1 後）
         
         Args:
             context: 瀏覽器上下文
@@ -3084,17 +3086,66 @@ class BrowserRecoveryManager:
             ):
                 return False
             
-            # 步驟 3: 等待並點擊 lobby_confirm
-            if not self._wait_and_click_template(
-                context,
-                Constants.LOBBY_CONFIRM,
-                Constants.LOBBY_CONFIRM_BUTTON_X_RATIO,
-                Constants.LOBBY_CONFIRM_BUTTON_Y_RATIO,
-                "lobby_confirm"
-            ):
-                return False
+            # 步驟 3: 等待畫面穩定後，檢測出現的是 game_return 還是 lobby_confirm
+            time.sleep(2)
             
-            return True
+            # 檢測循環（最多 60 次，每次間隔 1 秒）
+            # 使用 OpenCV 模板匹配檢測瀏覽器截圖中是否包含目標圖片區域
+            max_attempts = Constants.MAX_DETECTION_ATTEMPTS
+            for attempt in range(max_attempts):
+                # 同時檢測兩種目標圖片是否存在於瀏覽器畫面的某個區域
+                # has_game_return: 檢測是否在畫面中找到 game_return 圖片區域
+                has_game_return = self.detect_game_return(context.driver)
+                # has_lobby_confirm: 檢測是否在畫面中找到 lobby_confirm 圖片區域
+                has_lobby_confirm = self.image_detector.detect_in_browser(
+                    context.driver,
+                    Constants.LOBBY_CONFIRM
+                ) is not None
+                
+                # 情境 1: 檢測到 game_return
+                if has_game_return:
+                    self.logger.info(f"瀏覽器 {context.index} 檢測到 game_return，正在點擊返回...")
+                    if self.click_game_return(context):
+                        self.logger.info(f"瀏覽器 {context.index} 已點擊 game_return，已回到遊戲")
+                        return True
+                    else:
+                        self.logger.error(f"瀏覽器 {context.index} 點擊 game_return 失敗")
+                        return False
+                
+                # 情境 2: 檢測到 lobby_confirm
+                if has_lobby_confirm:
+                    self.logger.info(f"瀏覽器 {context.index} 檢測到 lobby_confirm，正在點擊確認...")
+                    
+                    # 取得 Canvas 區域並點擊
+                    try:
+                        rect = context.driver.execute_script(f"""
+                            const canvas = document.getElementById('{Constants.GAME_CANVAS}');
+                            const r = canvas.getBoundingClientRect();
+                            return {{x: r.left, y: r.top, w: r.width, h: r.height}};
+                        """)
+                        
+                        click_x, click_y = BrowserHelper.calculate_click_position(
+                            rect,
+                            Constants.LOBBY_CONFIRM_BUTTON_X_RATIO,
+                            Constants.LOBBY_CONFIRM_BUTTON_Y_RATIO
+                        )
+                        
+                        time.sleep(Constants.TEMPLATE_CAPTURE_WAIT)
+                        BrowserHelper.execute_cdp_click(context.driver, click_x, click_y)
+                        self.logger.info(f"瀏覽器 {context.index} 已點擊 lobby_confirm，已回到遊戲")
+                        time.sleep(Constants.DEFAULT_WAIT_SECONDS)
+                        return True
+                        
+                    except Exception as e:
+                        self.logger.error(f"瀏覽器 {context.index} 點擊 lobby_confirm 失敗: {e}")
+                        return False
+                
+                # 都沒檢測到，繼續等待
+                time.sleep(Constants.DETECTION_INTERVAL)
+            
+            # 超時未檢測到任何圖片
+            self.logger.error(f"瀏覽器 {context.index} 等待 game_return 或 lobby_confirm 超時")
+            return False
             
         except Exception as e:
             self.logger.error(f"瀏覽器 {context.index} 重新整理並登入失敗: {e}")
