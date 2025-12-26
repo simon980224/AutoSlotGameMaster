@@ -143,15 +143,20 @@ class Constants:
     
     # URL 配置
     # LOGIN_PAGE = "https://m.jfw-win.com/#/login?redirect=%2Fhome%2Fpage"
-    LOGIN_PAGE = "https://www.sf-16888.com/#/login?redirect=%2Fhome%2Fpage"
-    GAME_PAGE = "https://www.sf-16888.com/#/home/loding?game_code=egyptian-mythology&factory_code=ATG&state=true&name=%E6%88%B0%E7%A5%9E%E8%B3%BD%E7%89%B9"
+    LOGIN_PAGE = "https://www.fin88.app/"
+    GAME_PAGE = "https://www.fin88.app/"
     # GAME_PAGE = "https://www.sf-16888.com/#/home/loding?game_code=golden-seth&factory_code=ATG&state=true&name=戰神賽特2%20覺醒之力"
     
     # 頁面元素選擇器
-    USERNAME_INPUT = "//input[@placeholder='請輸入帳號']"
-    PASSWORD_INPUT = "//input[@placeholder='請輸入密碼']"
-    LOGIN_BUTTON = "//div[contains(@class, 'login-btn')]//span[text()='立即登入']/.."
-    GAME_IFRAME = "gameFrame-0"
+    INITIAL_LOGIN_BUTTON = "//button[contains(@class, 'btn') and contains(@class, 'login') and contains(@class, 'pc') and text()='登入']"
+    USERNAME_INPUT = "//input[@placeholder='請輸入帳號/手機號']"
+    PASSWORD_INPUT = "//input[@placeholder='請輸入您的登入密碼']"
+    LOGIN_BUTTON = "//button[contains(@class, 'custom-button') and @type='submit' and text()='登入遊戲']"
+    POPUP_CLOSE_BUTTON = "//button[contains(@class, 'btn-close')]"
+    SEARCH_BUTTON = "//button[contains(@class, 'search-btn')]"
+    SEARCH_INPUT = "//input[@placeholder='按換行鍵搜索']"
+    GAME_XPATH = "/html/body/div[1]/div/div[1]/div/div[3]/div[1]/div/div/div[2]"
+    GAME_IFRAME = "//iframe[contains(@class, 'iframe-item')]"
     GAME_CANVAS = "GameCanvas"
     
     # 圖片檢測配置
@@ -169,18 +174,18 @@ class Constants:
     
     # Canvas 動態計算比例（用於點擊座標）
     # lobby_login 按鈕座標比例
-    LOBBY_LOGIN_BUTTON_X_RATIO = 0.55  # lobby_login 開始遊戲按鈕 X 座標比例
-    LOBBY_LOGIN_BUTTON_Y_RATIO = 1.2   # lobby_login 開始遊戲按鈕 Y 座標比例
+    LOBBY_LOGIN_BUTTON_X_RATIO = 0.5  # lobby_login 開始遊戲按鈕 X 座標比例
+    LOBBY_LOGIN_BUTTON_Y_RATIO = 0.9   # lobby_login 開始遊戲按鈕 Y 座標比例
     
     # lobby_confirm 按鈕座標比例
-    LOBBY_CONFIRM_BUTTON_X_RATIO = 0.78  # lobby_confirm 確認按鈕 X 座標比例
-    LOBBY_CONFIRM_BUTTON_Y_RATIO = 1.15  # lobby_confirm 確認按鈕 Y 座標比例
+    LOBBY_CONFIRM_BUTTON_X_RATIO = 0.74  # lobby_confirm 確認按鈕 X 座標比例
+    LOBBY_CONFIRM_BUTTON_Y_RATIO = 0.85  # lobby_confirm 確認按鈕 Y 座標比例
     
     # 購買免費遊戲按鈕座標比例
-    BUY_FREE_GAME_BUTTON_X_RATIO = 0.23  # 免費遊戲區域按鈕 X 座標比例
-    BUY_FREE_GAME_BUTTON_Y_RATIO = 1.05  # 免費遊戲區域按鈕 Y 座標比例
+    BUY_FREE_GAME_BUTTON_X_RATIO = 0.15  # 免費遊戲區域按鈕 X 座標比例
+    BUY_FREE_GAME_BUTTON_Y_RATIO = 0.75  # 免費遊戲區域按鈕 Y 座標比例
     BUY_FREE_GAME_CONFIRM_X_RATIO = 0.65  # 免費遊戲確認按鈕 X 座標比例
-    BUY_FREE_GAME_CONFIRM_Y_RATIO = 1.2   # 免費遊戲確認按鈕 Y 座標比例
+    BUY_FREE_GAME_CONFIRM_Y_RATIO = 0.9   # 免費遊戲確認按鈕 Y 座標比例
     BUY_FREE_GAME_WAIT_SECONDS = 10  # 購買後等待秒數
     
     # game_return 返回確認按鈕座標比例
@@ -189,13 +194,13 @@ class Constants:
     
     # 自動旋轉按鈕座標比例
     AUTO_SPIN_BUTTON_X_RATIO = 0.8  # 自動轉按鈕 X 座標比例
-    AUTO_SPIN_BUTTON_Y_RATIO = 1.05   # 自動轉按鈕 Y 座標比例
-    AUTO_SPIN_10_X_RATIO = 0.5        # 10次按鈕 X 座標比例
-    AUTO_SPIN_10_Y_RATIO = 0.83       # 10次按鈕 Y 座標比例
-    AUTO_SPIN_50_X_RATIO = 0.56       # 50次按鈕 X 座標比例
-    AUTO_SPIN_50_Y_RATIO = 0.83       # 50次按鈕 Y 座標比例
-    AUTO_SPIN_100_X_RATIO = 0.62      # 100次按鈕 X 座標比例
-    AUTO_SPIN_100_Y_RATIO = 0.83      # 100次按鈕 Y 座標比例
+    AUTO_SPIN_BUTTON_Y_RATIO = 0.77   # 自動轉按鈕 Y 座標比例
+    AUTO_SPIN_10_X_RATIO = 0.4        # 10次按鈕 X 座標比例
+    AUTO_SPIN_10_Y_RATIO = 0.5       # 10次按鈕 Y 座標比例
+    AUTO_SPIN_50_X_RATIO = 0.5       # 50次按鈕 X 座標比例
+    AUTO_SPIN_50_Y_RATIO = 0.5       # 50次按鈕 Y 座標比例
+    AUTO_SPIN_100_X_RATIO = 0.57      # 100次按鈕 X 座標比例
+    AUTO_SPIN_100_Y_RATIO = 0.5      # 100次按鈕 Y 座標比例
     
     # 操作相關常量
     DEFAULT_WAIT_SECONDS = 3  # 預設等待時間（秒）
@@ -236,13 +241,13 @@ class Constants:
     DEFAULT_WINDOW_HEIGHT = 400
     DEFAULT_WINDOW_COLUMNS = 4
     
-    # 下注金額調整按鈕座標（基於預設視窗大小）
-    BETSIZE_INCREASE_BUTTON_X = 440  # 增加金額按鈕 X 座標
-    BETSIZE_INCREASE_BUTTON_Y = 370  # 增加金額按鈕 Y 座標
-    BETSIZE_DECREASE_BUTTON_X = 360  # 減少金額按鈕 X 座標
-    BETSIZE_DECREASE_BUTTON_Y = 370  # 減少金額按鈕 Y 座標
-    BETSIZE_DISPLAY_X = 400          # 金額顯示位置 X 座標
-    BETSIZE_DISPLAY_Y = 370          # 金額顯示位置 Y 座標
+    # 下注金額調整按鈕座標
+    BETSIZE_INCREASE_BUTTON_X = 0.8     # 增加金額按鈕 X 座標
+    BETSIZE_INCREASE_BUTTON_Y = 0.89    # 增加金額按鈕 Y 座標
+    BETSIZE_DECREASE_BUTTON_X =  0.63   # 減少金額按鈕 X 座標
+    BETSIZE_DECREASE_BUTTON_Y =  0.89   # 減少金額按鈕 Y 座標
+    BETSIZE_DISPLAY_X = 0.72            # 金額顯示位置 X 座標
+    BETSIZE_DISPLAY_Y = 0.89            # 金額顯示位置 Y 座標
 
     # 錯誤訊息圖片識別座標（基於預設視窗大小）
     ERROR_MESSAGE_LEFT_X = 240  # 左側錯誤訊息區域 X 座標
@@ -1744,7 +1749,7 @@ class SyncBrowserOperator:
         browser_contexts: List[BrowserContext],
         timeout: Optional[float] = None
     ) -> List[OperationResult]:
-        """同步導航所有瀏覽器到遊戲頁面。
+        """同步導航所有瀏覽器到遊戲頁面，並點擊遊戲圖層。
         
         Args:
             browser_contexts: 瀏覽器上下文列表
@@ -1753,7 +1758,50 @@ class SyncBrowserOperator:
         Returns:
             操作結果列表
         """
-        return self.navigate_all(browser_contexts, Constants.GAME_PAGE, timeout)
+        def game_page_operation(context: BrowserContext, index: int, total: int) -> bool:
+            driver = context.driver
+            
+            try:
+                # 1. 點擊搜尋按鈕
+                search_btn = driver.find_element(By.XPATH, Constants.SEARCH_BUTTON)
+                search_btn.click()
+                time.sleep(1)  # 等待搜尋框出現
+                
+                # 2. 在搜尋框輸入「賽特」
+                search_input = driver.find_element(By.XPATH, Constants.SEARCH_INPUT)
+                search_input.clear()
+                search_input.send_keys('賽特')
+                
+                # 3. 按下 Enter
+                search_input.send_keys('\n')  # 發送換行鍵
+                
+                # 4. 等待 3 秒
+                time.sleep(3)
+                
+                # 5. 點擊第一個遊戲圖層
+                game_xpath = driver.find_element(By.XPATH, Constants.GAME_XPATH)
+                game_xpath.click()
+                time.sleep(2)  # 等待遊戲載入
+                
+                # 6. 等待 iframe 出現並切換進入
+                time.sleep(2)  # 等待 iframe 載入
+                iframe = WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((By.XPATH, Constants.GAME_IFRAME))
+                )
+                driver.switch_to.frame(iframe)
+                self.logger.debug(f"瀏覽器 {index + 1} 已切換到遊戲 iframe")
+                
+                return True
+            except Exception as e:
+                self.logger.debug(f"進入遊戲流程失敗: {e}")
+                return False
+        
+        return self.execute_sync(
+            browser_contexts,
+            game_page_operation,
+            "進入遊戲頁面",
+            timeout=timeout
+        )
     
     def perform_login_all(
         self,
@@ -1773,6 +1821,14 @@ class SyncBrowserOperator:
             driver = context.driver
             credential = context.credential
             
+            # 先點擊初始登入按鈕
+            try:
+                initial_login_btn = driver.find_element(By.XPATH, Constants.INITIAL_LOGIN_BUTTON)
+                initial_login_btn.click()
+                time.sleep(1)  # 等待登入表單出現
+            except Exception as e:
+                self.logger.debug(f"未找到初始登入按鈕或已在登入頁面: {e}")
+            
             # 輸入帳號
             username_input = driver.find_element(By.XPATH, Constants.USERNAME_INPUT)
             username_input.clear()
@@ -1788,6 +1844,25 @@ class SyncBrowserOperator:
             login_button.click()
             
             time.sleep(Constants.LOGIN_WAIT_TIME)  # 等待登入完成
+            
+            # 使用 JavaScript 直接隱藏所有廣告彈窗
+            try:
+                driver.execute_script("""
+                    // 隱藏所有彈窗容器
+                    const popups = document.querySelectorAll('.popup-container, .popup-wrap');
+                    popups.forEach(popup => {
+                        popup.style.display = 'none';
+                        popup.style.visibility = 'hidden';
+                    });
+                    
+                    // 移除遮罩層（如果有）
+                    const overlays = document.querySelectorAll('[class*="overlay"], [class*="mask"]');
+                    overlays.forEach(overlay => overlay.remove());
+                """)
+                self.logger.debug("已隱藏所有廣告彈窗")
+            except Exception as e:
+                self.logger.debug(f"隱藏廣告彈窗時發生錯誤: {e}")
+            
             return True
         
         return self.execute_sync(
@@ -2158,24 +2233,22 @@ class SyncBrowserOperator:
             self.logger.error(f"比對圖片時發生錯誤: {e}")
             return None, 0.0
     
-    def _click_betsize_button(self, driver: WebDriver, x: float, y: float) -> None:
+    def _click_betsize_button(self, driver: WebDriver, x_ratio: float, y_ratio: float) -> None:
         """點擊下注金額調整按鈕。
         
         Args:
             driver: WebDriver 實例
-            x: X 座標 (基於預設視窗大小)
-            y: Y 座標 (基於預設視窗大小)
+            x_ratio: X 座標比例 (0-1)
+            y_ratio: Y 座標比例 (0-1)
         """
         # 截取畫面獲取實際尺寸
         screenshot = driver.get_screenshot_as_png()
         screenshot_img = Image.open(io.BytesIO(screenshot))
         image_width, image_height = screenshot_img.size
         
-        # 計算縮放後的實際座標
-        actual_x, actual_y = BrowserHelper.calculate_scaled_position(
-            x, y,
-            image_width, image_height
-        )
+        # 使用比例計算實際座標
+        actual_x = int(image_width * x_ratio)
+        actual_y = int(image_height * y_ratio)
         
         # 執行點擊
         BrowserHelper.execute_cdp_click(driver, actual_x, actual_y)
@@ -2220,21 +2293,21 @@ class SyncBrowserOperator:
             target_index = Constants.GAME_BETSIZE_TUPLE.index(target_amount)
             diff = target_index - current_index
             
-            # 設定點擊座標（基於預設視窗大小）
+            # 設定點擊座標比例
             if diff > 0:
                 # 增加金額
-                click_x = Constants.BETSIZE_INCREASE_BUTTON_X
-                click_y = Constants.BETSIZE_INCREASE_BUTTON_Y
+                click_x_ratio = Constants.BETSIZE_INCREASE_BUTTON_X
+                click_y_ratio = Constants.BETSIZE_INCREASE_BUTTON_Y
                 estimated_steps = diff
             else:
                 # 減少金額
-                click_x = Constants.BETSIZE_DECREASE_BUTTON_X
-                click_y = Constants.BETSIZE_DECREASE_BUTTON_Y
+                click_x_ratio = Constants.BETSIZE_DECREASE_BUTTON_X
+                click_y_ratio = Constants.BETSIZE_DECREASE_BUTTON_Y
                 estimated_steps = abs(diff)
             
             # 開始調整
             for i in range(estimated_steps):
-                self._click_betsize_button(driver, click_x, click_y)
+                self._click_betsize_button(driver, click_x_ratio, click_y_ratio)
                 time.sleep(Constants.BETSIZE_ADJUST_STEP_WAIT)
             
             time.sleep(Constants.BETSIZE_ADJUST_VERIFY_WAIT)
@@ -2285,9 +2358,9 @@ class SyncBrowserOperator:
             bool: 截取成功返回True
         """
         try:
-            # 固定座標：金額顯示位置（基於預設視窗大小）
-            target_x = Constants.BETSIZE_DISPLAY_X
-            target_y = Constants.BETSIZE_DISPLAY_Y
+            # 固定座標比例：金額顯示位置
+            target_x_ratio = Constants.BETSIZE_DISPLAY_X
+            target_y_ratio = Constants.BETSIZE_DISPLAY_Y
             
             # 截取整個瀏覽器畫面
             screenshot = driver.get_screenshot_as_png()
@@ -2296,13 +2369,9 @@ class SyncBrowserOperator:
             # 獲取實際截圖尺寸
             image_width, image_height = screenshot_img.size
             
-            # 計算相對座標比例（基於預設視窗大小）
-            x_ratio = target_x / Constants.DEFAULT_WINDOW_WIDTH
-            y_ratio = target_y / Constants.DEFAULT_WINDOW_HEIGHT
-            
-            # 應用到實際截圖尺寸
-            actual_x = int(image_width * x_ratio)
-            actual_y = int(image_height * y_ratio)
+            # 使用比例計算實際座標
+            actual_x = int(image_width * target_x_ratio)
+            actual_y = int(image_height * target_y_ratio)
             
             # 裁切範圍（使用常數定義）
             crop_left = max(0, actual_x - Constants.BETSIZE_CROP_MARGIN_X)
@@ -5760,70 +5829,46 @@ class AutoSlotGameApp:
         # 2. 持續檢測直到所有瀏覽器都找到圖片
         detection_results = self._continuous_detect_until_found(template_name, display_name)
         
-        # 3. 切換到 iframe（同步化操作）
-        def switch_to_iframe_operation(context: BrowserContext, index: int, total: int) -> bool:
-            """切換到遊戲 iframe"""
-            try:
-                iframe = WebDriverWait(context.driver, 10).until(
-                    EC.presence_of_element_located((By.ID, Constants.GAME_IFRAME))
-                )
-                context.driver.switch_to.frame(iframe)
-                return True
-            except Exception as e:
-                self.logger.error(f"切換 iframe 失敗: {e}")
-                return False
-        
-        iframe_results = self.browser_operator.execute_sync(
-            self.browser_contexts,
-            switch_to_iframe_operation,
-            "切換到遊戲 iframe"
-        )
-        
-        # 取得 Canvas 區域（使用第一個瀏覽器作為參考）
-        try:
-            rect = reference_browser.driver.execute_script(f"""
-                const canvas = document.getElementById('{Constants.GAME_CANVAS}');
-                const r = canvas.getBoundingClientRect();
-                return {{x: r.left, y: r.top, w: r.width, h: r.height}};
-            """)
-            
-            # 儲存到實例變數供後續使用
-            self.last_canvas_rect = rect
-            # 同時儲存到 browser_operator 供 GameControlCenter 使用
-            self.browser_operator.last_canvas_rect = rect
-        except Exception as e:
-            self.logger.error(f"取得 Canvas 座標失敗: {e}")
-            raise
-        
-        # 4. 計算點擊座標（開始遊戲按鈕）
-        start_x, start_y = BrowserHelper.calculate_click_position(
-            rect,
-            Constants.LOBBY_LOGIN_BUTTON_X_RATIO,
-            Constants.LOBBY_LOGIN_BUTTON_Y_RATIO
-        )
-        
-        # 5. 在所有瀏覽器中同步執行點擊
+        # 3. 使用 Canvas 比例計算座標並點擊
         time.sleep(Constants.TEMPLATE_CAPTURE_WAIT)
-        def click_start_button_operation(context: BrowserContext, index: int, total: int) -> bool:
-            """點擊開始遊戲按鈕"""
+        
+        def click_with_canvas_ratio_operation(context: BrowserContext, index: int, total: int) -> bool:
+            """使用 Canvas 比例計算座標並點擊"""
             try:
-                self._click_coordinate(context.driver, start_x, start_y)
+                # 取得 Canvas 區域
+                try:
+                    rect = context.driver.execute_script(f"""
+                        const canvas = document.getElementById('{Constants.GAME_CANVAS}');
+                        const r = canvas.getBoundingClientRect();
+                        return {{x: r.left, y: r.top, w: r.width, h: r.height}};
+                    """)
+                except Exception as e:
+                    self.logger.error(f"瀏覽器 {index + 1} 取得 Canvas 座標失敗: {e}")
+                    return False
+                
+                # 使用比例計算點擊座標
+                click_x = rect["x"] + rect["w"] * Constants.LOBBY_LOGIN_BUTTON_X_RATIO
+                click_y = rect["y"] + rect["h"] * Constants.LOBBY_LOGIN_BUTTON_Y_RATIO
+                
+                # 執行點擊
+                self._click_coordinate(context.driver, click_x, click_y)
+                self.logger.info(f"瀏覽器 {index + 1} 已點擊 {display_name} (座標: {click_x:.0f}, {click_y:.0f})")
                 return True
             except Exception as e:
-                self.logger.error(f"點擊失敗: {e}")
+                self.logger.error(f"瀏覽器 {index + 1} 點擊失敗: {e}")
                 return False
         
         click_results = self.browser_operator.execute_sync(
             self.browser_contexts,
-            click_start_button_operation,
-            "點擊開始遊戲按鈕"
+            click_with_canvas_ratio_operation,
+            f"點擊 {display_name}"
         )
         
-        # 6. 等待所有瀏覽器中的圖片消失
+        # 4. 等待所有瀏覽器中的圖片消失
         self._wait_for_image_disappear(template_name)
     
     def _handle_lobby_confirm(self, reference_browser: BrowserContext) -> None:
-        """處理 lobby_confirm 的檢測與點擊，包含錯誤訊息檢測和自動重啟。
+        """處理 lobby_confirm 的檢測與點擊。
         
         Args:
             reference_browser: 參考瀏覽器
@@ -5833,47 +5878,63 @@ class AutoSlotGameApp:
         display_name = "lobby_confirm"
         
         if not self.image_detector.template_exists(template_name):
-            # 如果沒有模板，嘗試使用確認按鈕座標自動建立
-            if hasattr(self, 'last_canvas_rect') and self.last_canvas_rect:
-                self._auto_capture_lobby_confirm(reference_browser)
-            else:
-                self._prompt_capture_template(reference_browser, template_name, display_name)
+            self.logger.warning(f"模板圖片 {template_name} 不存在")
+            self._prompt_capture_template(reference_browser, template_name, display_name)
         
-        # 2. 持續檢測直到所有瀏覽器都找到圖片（包含錯誤處理）
-        self._wait_for_lobby_confirm_with_error_handling()
+        # 2. 持續檢測直到所有瀏覽器都找到圖片
+        detection_results = self._continuous_detect_until_found(template_name, display_name)
         
-        # 3. 計算點擊座標（確認按鈕）
-        if hasattr(self, 'last_canvas_rect') and self.last_canvas_rect:
-            rect = self.last_canvas_rect
-            confirm_x, confirm_y = BrowserHelper.calculate_click_position(
-                rect,
-                Constants.LOBBY_CONFIRM_BUTTON_X_RATIO,
-                Constants.LOBBY_CONFIRM_BUTTON_Y_RATIO
-            )
-            
-            # 4. 在所有瀏覽器中同步執行點擊
-            time.sleep(Constants.TEMPLATE_CAPTURE_WAIT)
-            def click_confirm_button_operation(context: BrowserContext, index: int, total: int) -> bool:
-                """點擊確認按鈕"""
+        # 3. 使用 Canvas 比例計算座標並點擊
+        time.sleep(Constants.TEMPLATE_CAPTURE_WAIT)
+        
+        # 保存 Canvas rect 供後續使用（只需取得一次，所有瀏覽器的 Canvas rect 應該相同）
+        canvas_rect_saved = False
+        
+        def click_with_canvas_ratio_operation(context: BrowserContext, index: int, total: int) -> bool:
+            """使用 Canvas 比例計算座標並點擊"""
+            nonlocal canvas_rect_saved
+            try:
+                # 取得 Canvas 區域
                 try:
-                    self._click_coordinate(context.driver, confirm_x, confirm_y)
-                    return True
+                    rect = context.driver.execute_script(f"""
+                        const canvas = document.getElementById('{Constants.GAME_CANVAS}');
+                        const r = canvas.getBoundingClientRect();
+                        return {{x: r.left, y: r.top, w: r.width, h: r.height}};
+                    """)
+                    
+                    # 保存 Canvas rect 到 GameAutomat 和 SyncBrowserOperator（只保存一次）
+                    if not canvas_rect_saved:
+                        self.last_canvas_rect = rect
+                        self.browser_operator.last_canvas_rect = rect
+                        canvas_rect_saved = True
+                        self.logger.debug(f"已保存 Canvas 區域資訊: {rect}")
+                        
                 except Exception as e:
-                    self.logger.error(f"點擊失敗: {e}")
+                    self.logger.error(f"瀏覽器 {index + 1} 取得 Canvas 座標失敗: {e}")
                     return False
-            
-            click_results = self.browser_operator.execute_sync(
-                self.browser_contexts,
-                click_confirm_button_operation,
-                "點擊確認按鈕"
-            )
-        else:
-            self.logger.warning("未找到 Canvas 座標，跳過自動點擊")
+                
+                # 使用比例計算點擊座標
+                click_x = rect["x"] + rect["w"] * Constants.LOBBY_CONFIRM_BUTTON_X_RATIO
+                click_y = rect["y"] + rect["h"] * Constants.LOBBY_CONFIRM_BUTTON_Y_RATIO
+                
+                # 執行點擊
+                self._click_coordinate(context.driver, click_x, click_y)
+                self.logger.info(f"瀏覽器 {index + 1} 已點擊 {display_name} (座標: {click_x:.0f}, {click_y:.0f})")
+                return True
+            except Exception as e:
+                self.logger.error(f"瀏覽器 {index + 1} 點擊失敗: {e}")
+                return False
         
-        # 5. 等待所有瀏覽器中的圖片消失
+        click_results = self.browser_operator.execute_sync(
+            self.browser_contexts,
+            click_with_canvas_ratio_operation,
+            f"點擊 {display_name}"
+        )
+        
+        # 4. 等待所有瀏覽器中的圖片消失
         self._wait_for_image_disappear(template_name)
         
-        # 6. 所有瀏覽器都成功進入遊戲
+        # 5. 所有瀏覽器都成功進入遊戲
         self.logger.info("[成功] 所有瀏覽器已準備就緒")
         time.sleep(Constants.DETECTION_COMPLETE_WAIT)
     
