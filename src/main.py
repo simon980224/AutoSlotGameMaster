@@ -1823,24 +1823,32 @@ class SyncBrowserOperator:
             
             # 先點擊初始登入按鈕
             try:
-                initial_login_btn = driver.find_element(By.XPATH, Constants.INITIAL_LOGIN_BUTTON)
+                initial_login_btn = WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((By.XPATH, Constants.INITIAL_LOGIN_BUTTON))
+                )
                 initial_login_btn.click()
                 time.sleep(1)  # 等待登入表單出現
             except Exception as e:
                 self.logger.debug(f"未找到初始登入按鈕或已在登入頁面: {e}")
             
             # 輸入帳號
-            username_input = driver.find_element(By.XPATH, Constants.USERNAME_INPUT)
+            username_input = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.XPATH, Constants.USERNAME_INPUT))
+            )
             username_input.clear()
             username_input.send_keys(credential.username)
             
             # 輸入密碼
-            password_input = driver.find_element(By.XPATH, Constants.PASSWORD_INPUT)
+            password_input = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.XPATH, Constants.PASSWORD_INPUT))
+            )
             password_input.clear()
             password_input.send_keys(credential.password)
             
             # 點擊登入按鈕
-            login_button = driver.find_element(By.XPATH, Constants.LOGIN_BUTTON)
+            login_button = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.XPATH, Constants.LOGIN_BUTTON))
+            )
             login_button.click()
             
             time.sleep(Constants.LOGIN_WAIT_TIME)  # 等待登入完成
