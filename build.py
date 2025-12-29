@@ -10,7 +10,8 @@ AutoSlotGameMaster 打包腳本
     pip install pyinstaller
 
 作者: simon980224
-版本: 1.6.0
+版本: 1.7.0
+更新: 2025-12-29 - 新增所有第三方套件的 hidden-import 設定，確保完整打包
 """
 
 import os
@@ -143,6 +144,23 @@ def build_executable() -> bool:
         '--icon=sett.ico',                    # 設定圖示（.ico 格式，包含多種尺寸）
         '--clean',                            # 清理臨時檔案
         '--noconfirm',                        # 覆蓋輸出目錄不提示
+        # 確保所有第三方套件被正確打包
+        '--hidden-import=selenium',
+        '--hidden-import=selenium.webdriver',
+        '--hidden-import=selenium.webdriver.chrome.service',
+        '--hidden-import=selenium.webdriver.chrome.options',
+        '--hidden-import=selenium.webdriver.common.by',
+        '--hidden-import=selenium.webdriver.support.ui',
+        '--hidden-import=selenium.webdriver.support.expected_conditions',
+        '--hidden-import=webdriver_manager',
+        '--hidden-import=webdriver_manager.chrome',
+        '--hidden-import=cv2',
+        '--hidden-import=numpy',
+        '--hidden-import=PIL',
+        '--hidden-import=PIL.Image',
+        # 收集 Selenium 和 webdriver_manager 的資料檔案
+        '--collect-data=selenium',
+        '--collect-data=webdriver_manager',
         # 注意：移除 --add-data 選項，讓 img 和 lib 目錄放在 exe 旁邊
         # 這樣使用者可以方便地編輯配置檔案和圖片模板
         'src/main.py'                         # 主程式入口
@@ -273,7 +291,7 @@ def show_result() -> None:
 def main():
     """主函式"""
     print("\n" + "="*70)
-    print(" AutoSlotGameMaster v1.1.0 打包工具")
+    print(" AutoSlotGameMaster v1.7.0 打包工具")
     print("="*70)
     
     # 1. 清理舊的構建檔案
