@@ -155,7 +155,8 @@ class Constants:
     POPUP_CLOSE_BUTTON = "//button[contains(@class, 'btn-close')]"
     SEARCH_BUTTON = "//button[contains(@class, 'search-btn')]"
     SEARCH_INPUT = "//input[@placeholder='按換行鍵搜索']"
-    GAME_XPATH = "/html/body/div[1]/div/div[1]/div/div[3]/div[1]/div/div/div[2]"
+    GAME_XPATH = "/html/body/div[1]/div/div[1]/div/div[3]/div[1]/div[2]/div/div[2]" # 賽特1
+    # GAME_XPATH = "/html/body/div[1]/div/div[1]/div/div[3]/div[1]/div[1]/div/div[2]" # 賽特2
     GAME_IFRAME = "//iframe[contains(@class, 'iframe-item')]"
     GAME_CANVAS = "GameCanvas"
     
@@ -209,8 +210,8 @@ class Constants:
     # 操作等待時間（秒）
     LOGIN_WAIT_TIME = 5          # 登入後等待時間
     BETSIZE_ADJUST_STEP_WAIT = 3.0  # 調整金額每步等待時間
-    BETSIZE_ADJUST_VERIFY_WAIT = 1.0  # 調整金額驗證前等待時間
-    BETSIZE_ADJUST_RETRY_WAIT = 0.5  # 調整金額重試等待時間
+    BETSIZE_ADJUST_VERIFY_WAIT = 2.0  # 調整金額驗證前等待時間
+    BETSIZE_ADJUST_RETRY_WAIT = 1.0  # 調整金額重試等待時間
     BETSIZE_READ_RETRY_WAIT = 0.5    # 讀取金額重試等待時間
     FREE_GAME_CLICK_WAIT = 2     # 免費遊戲點擊間隔
     FREE_GAME_SETTLE_INITIAL_WAIT = 3  # 免費遊戲結算初始等待
@@ -276,24 +277,12 @@ class Constants:
     
     # 遊戲金額配置（使用 frozenset 提升查詢效率）
     GAME_BETSIZE = frozenset((
-        2, 4, 6, 8, 10, 12, 14, 16, 18, 20,
-        24, 30, 32, 36, 40, 42, 48, 54, 56, 60,
-        64, 72, 80, 96, 100, 112, 120, 128, 140, 144,
-        160, 180, 200, 240, 280, 300, 320, 360, 400, 420,
-        480, 500, 540, 560, 600, 640, 700, 720, 800, 840,
-        900, 960, 980, 1000, 1080, 1120, 1200, 1260, 1280, 1400,
-        1440, 1600, 1800, 2000
+        2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 48, 56, 60, 64, 72, 80, 96, 100, 120, 140, 160, 180, 200, 240, 280, 300, 320, 360, 400, 420, 480, 500, 540, 560, 600, 640, 700, 720, 800, 840, 900, 960, 980, 1000, 1080, 1120, 1200, 1260, 1280, 1400, 1440, 1500, 1600, 1800, 2000, 2100, 2400, 2700, 3000
     ))
     
     # 遊戲金額列表（用於索引計算）
     GAME_BETSIZE_TUPLE = (
-        2, 4, 6, 8, 10, 12, 14, 16, 18, 20,
-        24, 30, 32, 36, 40, 42, 48, 54, 56, 60,
-        64, 72, 80, 96, 100, 112, 120, 128, 140, 144,
-        160, 180, 200, 240, 280, 300, 320, 360, 400, 420,
-        480, 500, 540, 560, 600, 640, 700, 720, 800, 840,
-        900, 960, 980, 1000, 1080, 1120, 1200, 1260, 1280, 1400,
-        1440, 1600, 1800, 2000
+        2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 48, 56, 60, 64, 72, 80, 96, 100, 120, 140, 160, 180, 200, 240, 280, 300, 320, 360, 400, 420, 480, 500, 540, 560, 600, 640, 700, 720, 800, 840, 900, 960, 980, 1000, 1080, 1120, 1200, 1260, 1280, 1400, 1440, 1500, 1600, 1800, 2000, 2100, 2400, 2700, 3000
     )
 
 
@@ -1767,10 +1756,10 @@ class SyncBrowserOperator:
                 search_btn.click()
                 time.sleep(1)  # 等待搜尋框出現
                 
-                # 2. 在搜尋框輸入「賽特」
+                # 2. 在搜尋框輸入「戰神」
                 search_input = driver.find_element(By.XPATH, Constants.SEARCH_INPUT)
                 search_input.clear()
-                search_input.send_keys('賽特')
+                search_input.send_keys('戰神')
                 
                 # 3. 按下 Enter
                 search_input.send_keys('\n')  # 發送換行鍵
@@ -2296,53 +2285,46 @@ class SyncBrowserOperator:
                     self.logger.info("[成功] 金額已符合目標")
                 return True
             
-            # 計算需要調整的次數和方向
+            # 計算需要調整的方向
             current_index = Constants.GAME_BETSIZE_TUPLE.index(current_amount)
             target_index = Constants.GAME_BETSIZE_TUPLE.index(target_amount)
             diff = target_index - current_index
             
             # 設定點擊座標比例
             if diff > 0:
-                # 增加金額
+                # 需要增加金額
                 click_x_ratio = Constants.BETSIZE_INCREASE_BUTTON_X
                 click_y_ratio = Constants.BETSIZE_INCREASE_BUTTON_Y
-                estimated_steps = diff
+                direction = "增加"
             else:
-                # 減少金額
+                # 需要減少金額
                 click_x_ratio = Constants.BETSIZE_DECREASE_BUTTON_X
                 click_y_ratio = Constants.BETSIZE_DECREASE_BUTTON_Y
-                estimated_steps = abs(diff)
+                direction = "減少"
             
-            # 開始調整
-            for i in range(estimated_steps):
-                self._click_betsize_button(driver, click_x_ratio, click_y_ratio)
-                time.sleep(Constants.BETSIZE_ADJUST_STEP_WAIT)
-            
-            time.sleep(Constants.BETSIZE_ADJUST_VERIFY_WAIT)
-            
-            # 驗證並微調
+            # 逐步調整，每次點擊後都檢查是否達到目標
             for attempt in range(max_attempts):
+                # 先檢查當前金額
                 current_amount = self.get_current_betsize(driver, silent=silent)
                 
                 if current_amount is None:
-                    # 記錄金額識別失敗（但不要過於頻繁）
+                    # 記錄金額識別失敗
                     if attempt == 0 or attempt % 20 == 0:
                         self.logger.warning(f"[警告] 金額識別失敗 (嘗試 {attempt + 1}/{max_attempts})")
                     time.sleep(Constants.BETSIZE_ADJUST_RETRY_WAIT)
                     continue
                 
+                # 檢查是否已達目標
                 if current_amount == target_amount:
                     if not silent:
                         self.logger.info(f"[成功] 金額調整完成: {current_amount}")
                     return True
                 
-                # 根據當前金額決定點擊哪個按鈕
-                if current_amount < target_amount:
-                    self._click_betsize_button(driver, Constants.BETSIZE_INCREASE_BUTTON_X, Constants.BETSIZE_INCREASE_BUTTON_Y)  # 增加
-                else:
-                    self._click_betsize_button(driver, Constants.BETSIZE_DECREASE_BUTTON_X, Constants.BETSIZE_DECREASE_BUTTON_Y)  # 減少
+                # 未達目標，點擊一次調整按鈕
+                self._click_betsize_button(driver, click_x_ratio, click_y_ratio)
                 
-                time.sleep(Constants.BETSIZE_ADJUST_RETRY_WAIT)
+                # 等待畫面更新
+                time.sleep(Constants.BETSIZE_ADJUST_STEP_WAIT)
             
             # 超過最大嘗試次數，拋出異常讓上層處理
             error_msg = f"金額調整失敗，已達最大嘗試次數 {max_attempts}"
@@ -3181,12 +3163,12 @@ class BrowserRecoveryManager:
                 
                 # 情境 1: 檢測到 game_return
                 if has_game_return:
-                    self.logger.info(f"瀏覽器 {context.index} 檢測到 game_return，正在點擊返回...")
+                    self.logger.debug(f"瀏覽器 {context.index} 檢測到 game_return，正在點擊返回...")
                     if self.click_game_return(context):
-                        self.logger.info(f"瀏覽器 {context.index} 已點擊 game_return，已回到遊戲")
+                        self.logger.debug(f"瀏覽器 {context.index} 已點擊 game_return，已回到遊戲")
                         return True
                     else:
-                        self.logger.error(f"瀏覽器 {context.index} 點擊 game_return 失敗")
+                        self.logger.debug(f"瀏覽器 {context.index} 點擊 game_return 失敗")
                         return False
                 
                 # 情境 2: 檢測到 lobby_confirm
@@ -4037,14 +4019,14 @@ class GameControlCenter:
                         has_game_return = self.recovery_manager.detect_game_return(context.driver)
                         
                         if has_game_return:
-                            self.logger.warning(f"[檢測] 瀏覽器 {i} 出現 game_return，正在點擊返回...")
+                            self.logger.debug(f"[檢測] 瀏覽器 {i} 出現 game_return，正在點擊返回...")
                             
                             # 點擊返回按鈕（使用 lobby_confirm 的座標位置）
                             if self.recovery_manager.click_game_return(context):
                                 refresh_count += 1
-                                self.logger.info(f"[成功] 瀏覽器 {i} 已點擊返回按鈕")
+                                self.logger.debug(f"[成功] 瀏覽器 {i} 已點擊返回按鈕")
                             else:
-                                self.logger.error(f"[失敗] 瀏覽器 {i} 點擊返回失敗")
+                                self.logger.debug(f"[失敗] 瀏覽器 {i} 點擊返回失敗")
                                 
                     except Exception as e:
                         # 靜默處理錯誤，避免日誌過多
@@ -4620,6 +4602,10 @@ class GameControlCenter:
         self.game_running = False
         self.rule_thread = None
         
+        # 清理時間控制狀態
+        self.rule_execution_start_time = None
+        self.rule_execution_max_hours = None
+        
         # 停止自動跳過點擊功能
         if self.auto_skip_running:
             self._stop_auto_skip_click()
@@ -4697,6 +4683,16 @@ class GameControlCenter:
                         self.logger.info(f"開始關閉瀏覽器 (瀏覽器 {target_indices[0]}: {username})")
                     else:
                         self.logger.info(f"開始關閉瀏覽器 ({len(target_indices)} 個)")
+                    
+                    # 在關閉前，先導航到登入頁面並等待 10 秒
+                    try:
+                        target_contexts = [self.browser_contexts[i - 1] for i in target_indices]
+                        self.logger.info("正在導航到登入頁面...")
+                        self.browser_operator.navigate_to_login_page(target_contexts)
+                        self.logger.info("等待 10 秒後關閉...")
+                        time.sleep(10)
+                    except Exception as e:
+                        self.logger.warning(f"導航到登入頁面失敗: {e}，將直接關閉瀏覽器")
                     
                     # 關閉指定的瀏覽器
                     closed_count = 0
