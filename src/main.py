@@ -231,7 +231,7 @@ class Constants:
     RULE_EXECUTION_TIME_CHECK_INTERVAL = 10  # 規則執行時間檢查間隔（秒）
     
     # 重試與循環配置
-    BETSIZE_ADJUST_MAX_ATTEMPTS = 200  # 調整金額最大嘗試次數
+    BETSIZE_ADJUST_MAX_ATTEMPTS = 400  # 調整金額最大嘗試次數
     BETSIZE_READ_MAX_RETRIES = 2       # 讀取金額最大重試次數
     FREE_GAME_SETTLE_CLICK_COUNT = 5   # 免費遊戲結算點擊次數
     DETECTION_WAIT_MAX_ATTEMPTS = 20   # 檢測等待最大嘗試次數
@@ -1816,31 +1816,36 @@ class SyncBrowserOperator:
                     EC.presence_of_element_located((By.XPATH, Constants.INITIAL_LOGIN_BUTTON))
                 )
                 initial_login_btn.click()
-                time.sleep(1)  # 等待登入表單出現
+                time.sleep(10)  # 等待登入表單出現
             except Exception as e:
                 self.logger.debug(f"未找到初始登入按鈕或已在登入頁面: {e}")
             
-            # 輸入帳號
-            username_input = WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.XPATH, Constants.USERNAME_INPUT))
-            )
-            username_input.clear()
-            username_input.send_keys(credential.username)
-            
-            # 輸入密碼
-            password_input = WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.XPATH, Constants.PASSWORD_INPUT))
-            )
-            password_input.clear()
-            password_input.send_keys(credential.password)
-            
-            # 點擊登入按鈕
-            login_button = WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.XPATH, Constants.LOGIN_BUTTON))
-            )
-            login_button.click()
-            
-            time.sleep(Constants.LOGIN_WAIT_TIME)  # 等待登入完成
+
+            try:
+                # 輸入帳號
+                username_input = WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((By.XPATH, Constants.USERNAME_INPUT))
+                )
+                username_input.clear()
+                username_input.send_keys(credential.username)
+                
+                # 輸入密碼
+                password_input = WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((By.XPATH, Constants.PASSWORD_INPUT))
+                )
+                password_input.clear()
+                password_input.send_keys(credential.password)
+                
+                # 點擊登入按鈕
+                login_button = WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((By.XPATH, Constants.LOGIN_BUTTON))
+                )
+                login_button.click()
+                
+                time.sleep(Constants.LOGIN_WAIT_TIME)  # 等待登入完成
+            except Exception as e:
+                self.logger.error(f"[{credential.username}] 登入過程中發生錯誤: {e}")
+                return False
             
             # 使用 JavaScript 直接隱藏所有廣告彈窗
             try:
