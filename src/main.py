@@ -3891,7 +3891,7 @@ class GameControlCenter:
                 
                 # 如果總時間 <= 0.5 小時（30分鐘），每分鐘顯示一次（6次檢查）
                 # 如果總時間 > 0.5 小時，每 5 分鐘顯示一次（30次檢查）
-                display_interval = 6 if self.rule_execution_max_hours <= 0.5 else 30
+                display_interval = 6 if (self.rule_execution_max_hours is not None and self.rule_execution_max_hours <= 0.5) else 30
                 
                 if check_count % display_interval == 0:
                     if remaining_hours >= 0:
