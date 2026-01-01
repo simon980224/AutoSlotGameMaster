@@ -143,10 +143,16 @@ class Constants:
     
     # URL 配置
     # LOGIN_PAGE = "https://m.jfw-win.com/#/login?redirect=%2Fhome%2Fpage"
-    LOGIN_PAGE = "https://www.fin88.app/"
-    GAME_PAGE = "https://www.fin88.app/"
     # GAME_PAGE = "https://www.sf-16888.com/#/home/loding?game_code=golden-seth&factory_code=ATG&state=true&name=戰神賽特2%20覺醒之力"
     
+    # FIN
+    LOGIN_PAGE = "https://www.fin88.app/"
+    GAME_PAGE = "https://www.fin88.app/"
+
+    # TG
+    # LOGIN_PAGE = "https://www.tg5688.com"
+    # GAME_PAGE = "https://www.tg5688.com"
+
     # 頁面元素選擇器
     INITIAL_LOGIN_BUTTON = "//button[contains(@class, 'btn') and contains(@class, 'login') and contains(@class, 'pc') and text()='登入']"
     USERNAME_INPUT = "//input[@placeholder='請輸入帳號/手機號']"
