@@ -2,14 +2,23 @@
 
 > 金富翁遊戲自動化系統 - 多瀏覽器並行控制、圖片識別、Proxy 中繼
 
-[![Version](https://img.shields.io/badge/version-1.18.0-brightgreen.svg)](https://github.com/simon980224/AutoSlotGameMaster)
+[![Version](https://img.shields.io/badge/version-1.19.0-brightgreen.svg)](https://github.com/simon980224/AutoSlotGameMaster)
 [![Python Version](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](https://github.com/simon980224/AutoSlotGameMaster)
 
 一個使用 Selenium WebDriver、OpenCV 圖片識別和 Chrome DevTools Protocol 實現的遊戲自動化系統。支援多瀏覽器並行控制、本地 Proxy 中繼、自動下注、錯誤自動恢復和免費遊戲購買等功能。
 
-## 🎉 最新更新 (v1.18.0)
+## 🎉 最新更新 (v1.19.0)
+
+- 🔧 **優化 game_return 點擊功能** - 提升首次點擊成功率
+  - 調整 iframe 檢測順序為先檢查外層頁面（game_return 通常出現在外層）
+  - 增加重試機制：第一次失敗後等待 1 秒自動重試
+  - 增加詳細日誌：記錄 Canvas 查找位置、點擊座標等除錯資訊
+  - 錯誤處理改進：明確記錄失敗原因，避免靜默失敗
+- ✨ **持續穩定性提升** - 基於 v1.18.0 的 game_return 檢測功能進行優化
+
+### v1.18.0 更新內容
 
 - ✨ **新增 game_return 圖片檢測功能** - 自動檢測並處理返回遊戲提示
   - 新增 `game_return.png` 模板檢測功能

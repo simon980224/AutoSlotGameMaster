@@ -13,10 +13,11 @@
 - 完善的錯誤處理與重試機制
 
 作者: 凡臻科技
-版本: 1.18.0
+版本: 1.19.0
 Python: 3.8+
 
 版本歷史:
+- v1.19.0: 優化 game_return 點擊功能（調整 iframe 檢測順序為先檢查外層頁面，增加重試機制與詳細日誌，提升首次點擊成功率）
 - v1.18.0: 新增 game_return 圖片檢測功能（自動檢測並點擊返回遊戲提示，優化錯誤恢復流程為完整登入流程）
 - v1.17.1: 修正自動跳過點擊功能的時間戳錯誤（將 AUTO_SKIP_CLICK_INTERVAL 從極大值改為 86400 秒，避免 timestamp too large 錯誤）
 - v1.17.0: 優化調整金額功能（每次調整間隔改為3秒，超過最大嘗試次數自動關閉該瀏覽器）
@@ -50,6 +51,7 @@ Python: 3.8+
 - v1.0.0: 初始版本發布
 """
 
+import datetime
 import logging
 import sys
 import platform
@@ -123,7 +125,7 @@ __all__ = [
 class Constants:
     """系統常量"""
     # 版本資訊
-    VERSION = "1.18.0"
+    VERSION = "1.19.0"
     SYSTEM_NAME = "金富翁遊戲自動化系統"
     
     DEFAULT_LIB_PATH = "lib"
@@ -196,8 +198,8 @@ class Constants:
     BUY_FREE_GAME_WAIT_SECONDS = 10  # 購買後等待秒數
     
     # game_return 返回確認按鈕座標比例
-    GAME_CONFIRM_BUTTON_X_RATIO = 0.54  # game_return 確認按鈕 X 座標比例
-    GAME_CONFIRM_BUTTON_Y_RATIO = 0.84  # game_return 確認按鈕 Y 座標比例
+    GAME_CONFIRM_BUTTON_X_RATIO = 0.5  # game_return 確認按鈕 X 座標比例
+    GAME_CONFIRM_BUTTON_Y_RATIO = 0.55  # game_return 確認按鈕 Y 座標比例
     
     # 自動旋轉按鈕座標比例
     AUTO_SPIN_BUTTON_X_RATIO = 0.8  # 自動轉按鈕 X 座標比例
@@ -271,10 +273,10 @@ class Constants:
     BLACKSCREEN_PERSIST_SECONDS = 10  # 黑屏持續秒數閾值
 
     # 返回遊戲提示截圖座標（基於預設視窗大小，使用與黑屏相同的座標）
-    GAME_RETURN_CENTER_X = 300  # 返回遊戲提示中心 X 座標
-    GAME_RETURN_CENTER_Y = 195  # 返回遊戲提示中心 Y 座標
+    GAME_RETURN_CENTER_X = 290  # 返回遊戲提示中心 X 座標
+    GAME_RETURN_CENTER_Y = 160  # 返回遊戲提示中心 Y 座標
     GAME_RETURN_CROP_MARGIN_X = 50  # 返回遊戲提示裁切邊距（左右）
-    GAME_RETURN_CROP_MARGIN_Y = 20   # 返回遊戲提示裁切邊距（上下）
+    GAME_RETURN_CROP_MARGIN_Y = 10   # 返回遊戲提示裁切邊距（上下）
 
     # 截圖裁切範圍（像素）
     BETSIZE_CROP_MARGIN_X = 40  # 金額模板水平裁切邊距
@@ -3129,11 +3131,13 @@ class BrowserRecoveryManager:
         """重新整理瀏覽器並完成登入流程。
         
         包含以下步驟：
-        1. 導航到遊戲頁面
-        2. 等待並點擊 lobby_login
-        3. 檢測是否出現 game_return（情境 1）
-           - 如果有，點擊返回按鈕
-        4. 等待並點擊 lobby_confirm（情境 2，或處理完情境 1 後）
+        1. 導航到登入頁面
+        2. 放大視窗 → 導航到遊戲頁面（搜尋並點擊遊戲）→ 縮回原始大小
+        3. 切換到遊戲 iframe
+        4. 等待並點擊 lobby_login
+        5. 檢測並處理後續畫面：
+           - 情境 A: 出現 game_return → 點擊返回按鈕
+           - 情境 B: 出現 lobby_confirm → 點擊確認按鈕
         
         Args:
             context: 瀏覽器上下文
@@ -3142,11 +3146,69 @@ class BrowserRecoveryManager:
             是否成功
         """
         try:
-            # 步驟 1: 導航到遊戲頁面
+            # 步驟 1: 導航到登入頁面
             if not self.refresh_browser(context):
                 return False
             
-            # 步驟 2: 等待並點擊 lobby_login
+            # 步驟 2: 導航到遊戲頁面（搜尋並點擊遊戲）
+            # 為了確保 DOM 元素正確渲染，需要暫時放大瀏覽器
+            driver = context.driver
+            
+            # 2.1 記錄原始視窗大小和位置
+            original_size = driver.get_window_size()
+            original_position = driver.get_window_position()
+            original_width = original_size['width']
+            original_height = original_size['height']
+            original_x = original_position['x']
+            original_y = original_position['y']
+            
+            self.logger.debug(f"瀏覽器 {context.index} 原始大小: {original_width}x{original_height}, 位置: ({original_x}, {original_y})")
+            
+            # 2.2 放大視窗到 2 倍
+            enlarged_width = original_width * 2
+            enlarged_height = original_height * 2
+            driver.set_window_size(enlarged_width, enlarged_height)
+            time.sleep(1)  # 等待視窗調整完成
+            self.logger.debug(f"瀏覽器 {context.index} 已放大至: {enlarged_width}x{enlarged_height}")
+            
+            # 2.3 執行導航到遊戲頁面（不切換 iframe）
+            try:
+                # 點擊搜尋按鈕
+                search_btn = driver.find_element(By.XPATH, Constants.SEARCH_BUTTON)
+                search_btn.click()
+                time.sleep(1)
+                
+                # 在搜尋框輸入「戰神」
+                search_input = driver.find_element(By.XPATH, Constants.SEARCH_INPUT)
+                search_input.clear()
+                search_input.send_keys('戰神')
+                search_input.send_keys('\n')
+                time.sleep(3)
+                
+                # 點擊第一個遊戲圖層 - 使用 JavaScript 點擊避免被其他元素擋住
+                game_element = driver.find_element(By.XPATH, Constants.GAME_XPATH)
+                # 先滾動到元素可見位置
+                driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", game_element)
+                time.sleep(1)
+                # 使用 JavaScript 點擊
+                driver.execute_script("arguments[0].click();", game_element)
+                self.logger.debug(f"瀏覽器 {context.index} 已點擊遊戲（使用 JS 點擊）")
+                time.sleep(3)  # 等待遊戲載入
+                
+            except Exception as e:
+                # 恢復原始大小後返回
+                driver.set_window_size(original_width, original_height)
+                driver.set_window_position(original_x, original_y)
+                self.logger.error(f"瀏覽器 {context.index} 導航到遊戲頁面失敗: {e}")
+                return False
+            
+            # 2.4 縮回原始大小和位置
+            driver.set_window_size(original_width, original_height)
+            driver.set_window_position(original_x, original_y)
+            time.sleep(2)  # 等待視窗調整和頁面穩定
+            self.logger.debug(f"瀏覽器 {context.index} 已恢復原始大小和位置")
+            
+            # 步驟 3: 等待並點擊 lobby_login（_wait_and_click_template 會自動處理 iframe 切換）
             if not self._wait_and_click_template(
                 context,
                 Constants.LOBBY_LOGIN,
@@ -3156,7 +3218,7 @@ class BrowserRecoveryManager:
             ):
                 return False
             
-            # 步驟 3: 等待畫面穩定後，檢測出現的是 game_return 還是 lobby_confirm
+            # 步驟 4: 等待畫面穩定後，檢測出現的是 game_return 還是 lobby_confirm
             time.sleep(2)
             
             # 檢測循環（最多 60 次，每次間隔 1 秒）
@@ -3247,8 +3309,8 @@ class BrowserRecoveryManager:
             # 切換到 iframe（如果是 lobby_login，需要先切換）
             if template_name == Constants.LOBBY_LOGIN:
                 try:
-                    iframe = WebDriverWait(context.driver, 10).until(
-                        EC.presence_of_element_located((By.ID, Constants.GAME_IFRAME))
+                    iframe = WebDriverWait(context.driver, 15).until(
+                        EC.presence_of_element_located((By.XPATH, Constants.GAME_IFRAME))
                     )
                     context.driver.switch_to.frame(iframe)
                     self.logger.debug(f"瀏覽器 {context.index} 已切換到遊戲 iframe")
@@ -3336,15 +3398,61 @@ class BrowserRecoveryManager:
             是否成功
         """
         try:
-            # 取得 Canvas 區域
+            rect = None
+            found_method = None
+            
+            # 嘗試方案 1: 先嘗試外層頁面（通常 game_return 出現在外層）
             try:
+                context.driver.switch_to.default_content()
+                time.sleep(0.5)  # 等待切換完成
+                
                 rect = context.driver.execute_script(f"""
                     const canvas = document.getElementById('{Constants.GAME_CANVAS}');
-                    const r = canvas.getBoundingClientRect();
-                    return {{x: r.left, y: r.top, w: r.width, h: r.height}};
+                    if (canvas) {{
+                        const r = canvas.getBoundingClientRect();
+                        return {{x: r.left, y: r.top, w: r.width, h: r.height}};
+                    }}
+                    return null;
                 """)
+                
+                if rect:
+                    found_method = "外層頁面"
+                    self.logger.debug(f"瀏覽器 {context.index} 在外層頁面找到 Canvas")
             except Exception as e:
-                self.logger.error(f"瀏覽器 {context.index} 取得 Canvas 座標失敗: {e}")
+                self.logger.debug(f"瀏覽器 {context.index} 在外層頁面查找 Canvas 失敗: {e}")
+            
+            # 嘗試方案 2: 如果外層找不到，再嘗試 iframe
+            if not rect:
+                try:
+                    iframe = WebDriverWait(context.driver, 3).until(
+                        EC.presence_of_element_located((By.XPATH, Constants.GAME_IFRAME))
+                    )
+                    context.driver.switch_to.frame(iframe)
+                    time.sleep(0.5)  # 等待切換完成
+                    
+                    rect = context.driver.execute_script(f"""
+                        const canvas = document.getElementById('{Constants.GAME_CANVAS}');
+                        if (canvas) {{
+                            const r = canvas.getBoundingClientRect();
+                            return {{x: r.left, y: r.top, w: r.width, h: r.height}};
+                        }}
+                        return null;
+                    """)
+                    
+                    if rect:
+                        found_method = "iframe"
+                        self.logger.debug(f"瀏覽器 {context.index} 在 iframe 中找到 Canvas")
+                except Exception as e:
+                    self.logger.debug(f"瀏覽器 {context.index} 在 iframe 查找 Canvas 失敗: {e}")
+            
+            # 如果都找不到 Canvas，記錄錯誤並返回失敗
+            if not rect:
+                self.logger.warning(f"瀏覽器 {context.index} 兩種方案都無法找到 Canvas 元素，點擊失敗")
+                return False
+            
+            # 如果都找不到 Canvas，記錄錯誤並返回失敗
+            if not rect:
+                self.logger.warning(f"瀏覽器 {context.index} 兩種方案都無法找到 Canvas 元素，點擊失敗")
                 return False
             
             # 計算點擊座標（使用專屬的 game_confirm 按鈕座標）
@@ -3357,7 +3465,7 @@ class BrowserRecoveryManager:
             # 執行點擊
             time.sleep(Constants.TEMPLATE_CAPTURE_WAIT)
             BrowserHelper.execute_cdp_click(context.driver, click_x, click_y)
-            self.logger.debug(f"瀏覽器 {context.index} 已點擊 game_return 返回按鈕")
+            self.logger.debug(f"瀏覽器 {context.index} 已在{found_method}點擊 game_return 返回按鈕 (座標: {click_x:.0f}, {click_y:.0f})")
             
             # 等待動作完成
             time.sleep(Constants.DEFAULT_WAIT_SECONDS)
@@ -3365,7 +3473,7 @@ class BrowserRecoveryManager:
             return True
             
         except Exception as e:
-            self.logger.error(f"瀏覽器 {context.index} 點擊 game_return 失敗: {e}")
+            self.logger.error(f"瀏覽器 {context.index} 點擊 game_return 失敗（異常）: {e}")
             return False
     
     def wait_for_template(
@@ -4030,14 +4138,23 @@ class GameControlCenter:
                         has_game_return = self.recovery_manager.detect_game_return(context.driver)
                         
                         if has_game_return:
-                            self.logger.debug(f"[檢測] 瀏覽器 {i} 出現 game_return，正在點擊返回...")
+                            self.logger.warning(f"[檢測] 瀏覽器 {i} 出現 game_return，正在點擊返回...")
                             
-                            # 點擊返回按鈕（使用 lobby_confirm 的座標位置）
-                            if self.recovery_manager.click_game_return(context):
-                                refresh_count += 1
-                                self.logger.debug(f"[成功] 瀏覽器 {i} 已點擊返回按鈕")
-                            else:
-                                self.logger.debug(f"[失敗] 瀏覽器 {i} 點擊返回失敗")
+                            # 嘗試點擊返回按鈕（最多 2 次）
+                            success = False
+                            for attempt in range(2):
+                                if self.recovery_manager.click_game_return(context):
+                                    refresh_count += 1
+                                    self.logger.info(f"[成功] 瀏覽器 {i} 已點擊返回按鈕")
+                                    success = True
+                                    break
+                                else:
+                                    if attempt == 0:
+                                        self.logger.warning(f"[重試] 瀏覽器 {i} 第 {attempt + 1} 次點擊失敗，正在重試...")
+                                        time.sleep(1)  # 等待 1 秒後重試
+                            
+                            if not success:
+                                self.logger.error(f"[失敗] 瀏覽器 {i} 點擊返回失敗（已重試 2 次）")
                                 
                     except Exception as e:
                         # 靜默處理錯誤，避免日誌過多
