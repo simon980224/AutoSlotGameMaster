@@ -8,10 +8,11 @@
 
 ## 版本資訊
 
-**目前版本**: v1.19.0
+**目前版本**: v1.20.0
 
 **更新內容**:
 
+- v1.20.0: 新增 lobby_return 檢測與自動恢復功能（點擊 game_return 後自動檢測 lobby_return，若出現則執行完整登入流程：回到 LOGIN_PAGE → 放大視窗 → 搜尋戰神 → 點擊遊戲 → 完成登入）
 - v1.19.0: 優化 game_return 點擊功能（調整 iframe 檢測順序為先檢查外層頁面，增加重試機制與詳細日誌，提升首次點擊成功率）
 - v1.18.0: 新增 game_return 圖片檢測功能（自動檢測並點擊返回遊戲提示，使用專屬座標 0.54,0.84；優化錯誤恢復流程為完整登入流程，包含導航、lobby_login、lobby_confirm；'g' 命令支援截取 game_return 模板）
 - v1.17.1: 修正自動跳過點擊功能的時間戳錯誤（將 AUTO_SKIP_CLICK_INTERVAL 從極大值改為 86400 秒，避免 'r' 命令執行時出現 timestamp too large to convert to C \_PyTime_t 錯誤）
