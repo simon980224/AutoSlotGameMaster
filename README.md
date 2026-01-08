@@ -2,14 +2,22 @@
 
 > 金富翁遊戲自動化系統 - 多瀏覽器並行控制、圖片識別、Proxy 中繼
 
-[![Version](https://img.shields.io/badge/version-1.20.0-brightgreen.svg)](https://github.com/simon980224/AutoSlotGameMaster)
+[![Version](https://img.shields.io/badge/version-1.21.0-brightgreen.svg)](https://github.com/simon980224/AutoSlotGameMaster)
 [![Python Version](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](https://github.com/simon980224/AutoSlotGameMaster)
 
 一個使用 Selenium WebDriver、OpenCV 圖片識別和 Chrome DevTools Protocol 實現的遊戲自動化系統。支援多瀏覽器並行控制、本地 Proxy 中繼、自動下注、錯誤自動恢復和免費遊戲購買等功能。
 
-## 🎉 最新更新 (v1.20.0)
+## 🎉 最新更新 (v1.21.0)
+
+- 🔄 **優化規則執行結束流程** - 更安全的資源清理機制
+  - 規則執行時間到達後，在關閉瀏覽器前先導航回登入頁面
+  - 導航後等待 10 秒再關閉，確保伺服器端正確處理登出
+  - 增加錯誤處理：如果導航失敗則直接關閉瀏覽器，不影響程式退出
+  - 避免因直接關閉瀏覽器導致的伺服器端連線異常
+
+### v1.20.0 更新內容
 
 - 🎯 **新增 lobby_return 檢測與自動恢復功能** - 全自動處理大廳返回場景
   - 點擊 game_return 後自動檢測是否出現 lobby_return 提示

@@ -13,10 +13,11 @@
 - 完善的錯誤處理與重試機制
 
 作者: 凡臻科技
-版本: 1.20.0
+版本: 1.21.0
 Python: 3.8+
 
 版本歷史:
+- v1.21.0: 優化規則執行結束流程（關閉前回到登入頁面並等待 10 秒，確保伺服器端正確處理登出）
 - v1.20.0: 新增 lobby_return 檢測與自動恢復功能（點擊 game_return 後自動檢測 lobby_return，若出現則執行完整登入流程：回到 LOGIN_PAGE → 放大視窗 → 搜尋戰神 → 點擊遊戲 → 完成登入）
 - v1.19.0: 優化 game_return 點擊功能（調整 iframe 檢測順序為先檢查外層頁面，增加重試機制與詳細日誌，提升首次點擊成功率）
 - v1.18.0: 新增 game_return 圖片檢測功能（自動檢測並點擊返回遊戲提示，優化錯誤恢復流程為完整登入流程）
@@ -126,7 +127,7 @@ __all__ = [
 class Constants:
     """系統常量"""
     # 版本資訊
-    VERSION = "1.19.0"
+    VERSION = "1.21.0"
     SYSTEM_NAME = "金富翁遊戲自動化系統"
     
     DEFAULT_LIB_PATH = "lib"
@@ -237,7 +238,7 @@ class Constants:
     STOP_EVENT_ERROR_WAIT = 1.0    # 停止事件錯誤等待時間
     SERVER_SOCKET_TIMEOUT = 1.0    # 伺服器 Socket 超時時間
     CLEANUP_PROCESS_TIMEOUT = 10   # 清除程序超時時間（秒）
-    AUTO_SKIP_CLICK_INTERVAL = 86400  # 自動跳過點擊間隔時間（秒）# 設為 24 小時表示不啟用
+    AUTO_SKIP_CLICK_INTERVAL = 10  # 自動跳過點擊間隔時間（秒）# 設為 86400表示不啟用
     RULE_EXECUTION_TIME_CHECK_INTERVAL = 10  # 規則執行時間檢查間隔（秒）
     
     # 重試與循環配置
@@ -4265,6 +4266,15 @@ class GameControlCenter:
                     # 強制停止規則執行狀態
                     self.rule_running = False
                     self.auto_press_running = False
+                    
+                    # 在關閉前，先導航到登入頁面並等待 10 秒
+                    try:
+                        self.logger.info("正在導航到登入頁面...")
+                        self.browser_operator.navigate_to_login_page(self.browser_contexts)
+                        self.logger.info("等待 10 秒後關閉...")
+                        time.sleep(10)
+                    except Exception as e:
+                        self.logger.warning(f"導航到登入頁面失敗: {e}，將直接關閉瀏覽器")
                     
                     # 關閉所有瀏覽器
                     self.logger.info("正在關閉所有瀏覽器...")
