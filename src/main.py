@@ -3208,12 +3208,10 @@ class BrowserRecoveryManager:
             
             self.logger.debug(f"瀏覽器 {context.index} 原始大小: {original_width}x{original_height}, 位置: ({original_x}, {original_y})")
             
-            # 2.2 放大視窗到 2 倍
-            enlarged_width = original_width * 2
-            enlarged_height = original_height * 2
-            driver.set_window_size(enlarged_width, enlarged_height)
+            # 2.2 放大視窗到全螢幕
+            driver.maximize_window()
             time.sleep(1)  # 等待視窗調整完成
-            self.logger.debug(f"瀏覽器 {context.index} 已放大至: {enlarged_width}x{enlarged_height}")
+            self.logger.debug(f"瀏覽器 {context.index} 已放大至全螢幕")
             
             # 2.3 執行導航到遊戲頁面（不切換 iframe）
             try:
@@ -3484,12 +3482,10 @@ class BrowserRecoveryManager:
             
             self.logger.debug(f"瀏覽器 {context.index} 原始大小: {original_width}x{original_height}, 位置: ({original_x}, {original_y})")
             
-            # 步驟 3: 放大視窗到 2 倍
-            enlarged_width = original_width * 2
-            enlarged_height = original_height * 2
-            driver.set_window_size(enlarged_width, enlarged_height)
+            # 步驟 3: 放大視窗到全螢幕
+            driver.maximize_window()
             time.sleep(1)  # 等待視窗調整完成
-            self.logger.debug(f"瀏覽器 {context.index} 已放大至: {enlarged_width}x{enlarged_height}")
+            self.logger.debug(f"瀏覽器 {context.index} 已放大至全螢幕")
             
             # 步驟 4: 執行導航到遊戲頁面（不切換 iframe）
             try:
