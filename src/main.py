@@ -128,7 +128,7 @@ __all__ = [
 class Constants:
     """系統常量"""
     # 版本資訊
-    VERSION = "1.21.1"
+    VERSION = "1.22.0"
     SYSTEM_NAME = "金富翁遊戲自動化系統"
     
     DEFAULT_LIB_PATH = "lib"
@@ -1782,8 +1782,8 @@ class SyncBrowserOperator:
                 # 3. 按下 Enter
                 search_input.send_keys('\n')  # 發送換行鍵
                 
-                # 4. 等待 3 秒
-                time.sleep(3)
+                # 4. 等待 10 秒讓搜尋結果完全載入
+                time.sleep(10)
                 
                 # 5. 點擊第一個遊戲圖層
                 game_xpath = driver.find_element(By.XPATH, Constants.GAME_XPATH)
@@ -3226,7 +3226,7 @@ class BrowserRecoveryManager:
                 search_input.clear()
                 search_input.send_keys('戰神')
                 search_input.send_keys('\n')
-                time.sleep(3)
+                time.sleep(10)  # 等待搜尋結果載入
                 
                 # 點擊第一個遊戲圖層 - 使用 JavaScript 點擊避免被其他元素擋住
                 game_element = driver.find_element(By.XPATH, Constants.GAME_XPATH)
@@ -3378,6 +3378,15 @@ class BrowserRecoveryManager:
                     found = True
                     self.logger.debug(f"瀏覽器 {context.index} 檢測到 {display_name}")
                     break
+                
+                # 特別處理：如果正在等待 lobby_login，同時檢測是否直接出現 game_return
+                # 這種情況代表頁面跳過了 lobby_login，直接進入遊戲
+                if template_name == Constants.LOBBY_LOGIN:
+                    has_game_return = self.detect_game_return(context.driver)
+                    if has_game_return:
+                        self.logger.info(f"瀏覽器 {context.index} 等待 {display_name} 時檢測到 game_return，頁面已直接進入遊戲")
+                        # 視為成功，因為目標是完成登入流程
+                        return True
             
             if not found:
                 self.logger.error(f"瀏覽器 {context.index} 等待 {display_name} 超時")
@@ -3500,7 +3509,7 @@ class BrowserRecoveryManager:
                 search_input.clear()
                 search_input.send_keys('戰神')
                 search_input.send_keys('\n')
-                time.sleep(3)
+                time.sleep(10)  # 等待搜尋結果載入
                 
                 # 點擊第一個遊戲圖層 - 使用 JavaScript 點擊避免被其他元素擋住
                 game_element = driver.find_element(By.XPATH, Constants.GAME_XPATH)
