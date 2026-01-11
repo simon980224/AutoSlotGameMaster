@@ -166,8 +166,8 @@ class Constants:
     POPUP_CLOSE_BUTTON = "//button[contains(@class, 'btn-close')]"
     SEARCH_BUTTON = "//button[contains(@class, 'search-btn')]"
     SEARCH_INPUT = "//input[@placeholder='按換行鍵搜索']"
-    GAME_XPATH = "/html/body/div[1]/div/div[1]/div/div[3]/div[1]/div[2]/div/div[2]" # 賽特1
-    # GAME_XPATH = "/html/body/div[1]/div/div[1]/div/div[3]/div[1]/div[1]/div/div[2]" # 賽特2
+    GAME_XPATH = "//div[contains(@class, 'game-card-container') and .//div[contains(@style, 'ATG-egyptian-mythology.png')]]" # 賽特1（第二個大卡片-戰神埃及神話）
+    # GAME_XPATH = "//div[contains(@class, 'game-card-container') and contains(@class, 'big')]" # 賽特2（第一個大卡片）
     GAME_IFRAME = "//iframe[contains(@class, 'iframe-item')]"
     GAME_CANVAS = "GameCanvas"
     
