@@ -2,14 +2,22 @@
 
 > 金富翁遊戲自動化系統 - 多瀏覽器並行控制、圖片識別、Proxy 中繼
 
-[![Version](https://img.shields.io/badge/version-1.22.0-brightgreen.svg)](https://github.com/simon980224/AutoSlotGameMaster)
+[![Version](https://img.shields.io/badge/version-1.22.1-brightgreen.svg)](https://github.com/simon980224/AutoSlotGameMaster)
 [![Python Version](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](https://github.com/simon980224/AutoSlotGameMaster)
 
 一個使用 Selenium WebDriver、OpenCV 圖片識別和 Chrome DevTools Protocol 實現的遊戲自動化系統。支援多瀏覽器並行控制、本地 Proxy 中繼、自動下注、錯誤自動恢復和免費遊戲購買等功能。
 
-## 🎉 最新更新 (v1.22.0)
+## 🎉 最新更新 (v1.22.1)
+
+- ⚡ **優化等待時間與自動跳過間隔** - 提升系統效率與穩定性
+  - 將搜尋「戰神」後的等待時間從 10 秒優化為 5 秒
+  - 統一遊戲載入等待時間為 5 秒，確保頁面載入完成
+  - 調整自動跳過點擊間隔從 10 秒改為 60 秒
+  - 減少不必要的操作頻率，降低系統資源消耗
+
+### v1.22.0 更新內容
 
 - 🔧 **優化登入與恢復流程** - 修正超時問題與提升穩定性
   - 修正等待 lobby_login 超時問題：在等待過程中同時檢測 game_return

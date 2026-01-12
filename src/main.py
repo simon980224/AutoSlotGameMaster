@@ -13,10 +13,12 @@
 - 完善的錯誤處理與重試機制
 
 作者: 凡臻科技
-版本: 1.21.1
+版本: 1.22.1
 Python: 3.8+
 
 版本歷史:
+- v1.22.1: 優化等待時間與自動跳過間隔（將搜尋「戰神」後的等待時間從 10 秒優化為 5 秒，統一遊戲載入等待時間為 5 秒；調整自動跳過點擊間隔從 10 秒改為 60 秒，減少不必要的操作頻率）
+- v1.22.0: 優化登入與恢復流程（修正等待 lobby_login 超時問題：在等待過程中同時檢測 game_return，若直接出現則視為登入成功；延長搜尋「戰神」後的等待時間從 3 秒改為 10 秒，確保搜尋結果完全載入）
 - v1.21.1: 優化黑屏恢復流程（將視窗放大方式從 2 倍改為全螢幕，確保 DOM 元素完全展開，提升自動導航成功率）
 - v1.21.0: 優化規則執行結束流程（關閉前回到登入頁面並等待 10 秒，確保伺服器端正確處理登出）
 - v1.20.0: 新增 lobby_return 檢測與自動恢復功能（點擊 game_return 後自動檢測 lobby_return，若出現則執行完整登入流程：回到 LOGIN_PAGE → 放大視窗 → 搜尋戰神 → 點擊遊戲 → 完成登入）
@@ -128,7 +130,7 @@ __all__ = [
 class Constants:
     """系統常量"""
     # 版本資訊
-    VERSION = "1.22.0"
+    VERSION = "1.22.1"
     SYSTEM_NAME = "金富翁遊戲自動化系統"
     
     DEFAULT_LIB_PATH = "lib"
@@ -239,7 +241,7 @@ class Constants:
     STOP_EVENT_ERROR_WAIT = 1.0    # 停止事件錯誤等待時間
     SERVER_SOCKET_TIMEOUT = 1.0    # 伺服器 Socket 超時時間
     CLEANUP_PROCESS_TIMEOUT = 10   # 清除程序超時時間（秒）
-    AUTO_SKIP_CLICK_INTERVAL = 10  # 自動跳過點擊間隔時間（秒）# 設為 86400表示不啟用
+    AUTO_SKIP_CLICK_INTERVAL = 60  # 自動跳過點擊間隔時間（秒）# 設為 86400表示不啟用
     RULE_EXECUTION_TIME_CHECK_INTERVAL = 10  # 規則執行時間檢查間隔（秒）
     
     # 重試與循環配置
@@ -1783,12 +1785,12 @@ class SyncBrowserOperator:
                 search_input.send_keys('\n')  # 發送換行鍵
                 
                 # 4. 等待 10 秒讓搜尋結果完全載入
-                time.sleep(10)
+                time.sleep(5)
                 
                 # 5. 點擊第一個遊戲圖層
                 game_xpath = driver.find_element(By.XPATH, Constants.GAME_XPATH)
                 game_xpath.click()
-                time.sleep(2)  # 等待遊戲載入
+                time.sleep(5)  # 等待遊戲載入
                 
                 # 6. 等待 iframe 出現並切換進入
                 time.sleep(2)  # 等待 iframe 載入
@@ -3226,7 +3228,7 @@ class BrowserRecoveryManager:
                 search_input.clear()
                 search_input.send_keys('戰神')
                 search_input.send_keys('\n')
-                time.sleep(10)  # 等待搜尋結果載入
+                time.sleep(5)  # 等待搜尋結果載入
                 
                 # 點擊第一個遊戲圖層 - 使用 JavaScript 點擊避免被其他元素擋住
                 game_element = driver.find_element(By.XPATH, Constants.GAME_XPATH)
@@ -3236,7 +3238,7 @@ class BrowserRecoveryManager:
                 # 使用 JavaScript 點擊
                 driver.execute_script("arguments[0].click();", game_element)
                 self.logger.debug(f"瀏覽器 {context.index} 已點擊遊戲（使用 JS 點擊）")
-                time.sleep(3)  # 等待遊戲載入
+                time.sleep(5)  # 等待遊戲載入
                 
             except Exception as e:
                 # 恢復原始大小後返回
@@ -3509,7 +3511,7 @@ class BrowserRecoveryManager:
                 search_input.clear()
                 search_input.send_keys('戰神')
                 search_input.send_keys('\n')
-                time.sleep(10)  # 等待搜尋結果載入
+                time.sleep(5)  # 等待搜尋結果載入
                 
                 # 點擊第一個遊戲圖層 - 使用 JavaScript 點擊避免被其他元素擋住
                 game_element = driver.find_element(By.XPATH, Constants.GAME_XPATH)
@@ -3519,7 +3521,7 @@ class BrowserRecoveryManager:
                 # 使用 JavaScript 點擊
                 driver.execute_script("arguments[0].click();", game_element)
                 self.logger.debug(f"瀏覽器 {context.index} 已點擊遊戲（使用 JS 點擊）")
-                time.sleep(3)  # 等待遊戲載入
+                time.sleep(5)  # 等待遊戲載入
                 
             except Exception as e:
                 # 恢復原始大小後返回
