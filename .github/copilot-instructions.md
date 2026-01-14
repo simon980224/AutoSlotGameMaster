@@ -8,10 +8,11 @@
 
 ## 版本資訊
 
-**目前版本**: v1.22.1
+**目前版本**: v1.23.0
 
 **更新內容**:
 
+- v1.23.0: 優化登入流程與修復緩衝阻塞問題（登入表單等待改用 element_to_be_clickable 確保元素可互動；創建 FlushingStreamHandler 實現全域自動刷新機制，解決多執行緒環境下日誌輸出阻塞問題；黑屏恢復時自動關閉公告彈窗）
 - v1.22.1: 優化等待時間與自動跳過間隔（將搜尋「戰神」後的等待時間從 10 秒優化為 5 秒，統一遊戲載入等待時間為 5 秒；調整自動跳過點擊間隔從 10 秒改為 60 秒，減少不必要的操作頻率）
 - v1.22.0: 優化登入與恢復流程（修正等待 lobby_login 超時問題：在等待過程中同時檢測 game_return，若直接出現則視為登入成功；延長搜尋「戰神」後的等待時間從 3 秒改為 10 秒，確保搜尋結果完全載入）
 - v1.21.1: 優化黑屏恢復流程（將視窗放大方式從 2 倍改為全螢幕，確保 DOM 元素完全展開，提升自動導航成功率）
@@ -72,6 +73,7 @@ from autoslot import (
 
 - 所有主要類別支援依賴注入（透過建構函式參數）
 - `LoggerFactory.get_logger()` - 單例模式的 Logger 工廠
+- `FlushingStreamHandler` (v1.23.0 新增) - 自動刷新的 StreamHandler，解決多執行緒環境下緩衝阻塞問題
 - `BrowserManager.create_webdriver()` - 優先使用專案根目錄的 `chromedriver`，失敗時自動降級到 WebDriver Manager
 - 使用 `Protocol` 定義介面（如 `ConfigReaderProtocol`）
 
@@ -167,6 +169,85 @@ Chrome (使用本地 Proxy)
 - `TEMPLATE_CROP_MARGIN = 20` - 通用模板裁切邊距
 
 **重要原則**: 任何需要調整的數值都應定義為常數，避免在程式碼中出現魔法數字
+
+## v1.23.0 新增功能詳解
+
+### 1. 優化登入流程（更穩定的等待機制）
+
+**問題**: 登入時可能卡在開啟登入表單後沒有填寫帳號密碼
+
+**解決方案**:
+
+- 使用 `EC.element_to_be_clickable` 取代 `EC.presence_of_element_located`
+- 確保元素不僅存在，而且可見且可互動
+- 明確等待登入表單使用 `EC.visibility_of_element_located`
+- 輸入操作間增加 0.5 秒等待，避免輸入過快
+- 所有等待超時時間從 10 秒延長到 15 秒
+- 每個關鍵步驟增加詳細日誌追蹤
+
+**相關程式碼**: `SyncBrowserOperator.perform_login_all()` - [main.py#L1829-L1920]
+
+### 2. 修復緩衝阻塞問題（FlushingStreamHandler）
+
+**問題**: 黑屏監測到後不會有動作，需要終端隨便輸入內容才會運行
+
+**根本原因**: Python 的 `logging.StreamHandler(sys.stdout)` 在多執行緒環境下會將輸出寫入緩衝區，當終端沒有任何輸入活動時，輸出緩衝區不會自動刷新，導致背景監控執行緒的 logger 輸出被阻塞
+
+**解決方案**:
+
+```python
+class FlushingStreamHandler(logging.StreamHandler):
+    """自動刷新的 StreamHandler，解決多執行緒環境下的緩衝阻塞問題。"""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        """輸出日誌記錄並強制刷新緩衝區。"""
+        try:
+            super().emit(record)
+            self.flush()  # 每次輸出後立即刷新
+        except Exception:
+            self.handleError(record)
+```
+
+**優勢**:
+
+- 全域覆蓋：所有使用 `LoggerFactory.get_logger()` 創建的 logger 都自動獲得刷新功能
+- 無需手動維護：不需要在每個日誌輸出後手動加 `sys.stdout.flush()`
+- 執行緒安全：在 `emit()` 方法中處理，確保多執行緒環境下的正確性
+- 錯誤處理：使用 try-except 捕獲異常，避免刷新失敗影響程式運行
+
+**相關程式碼**: `FlushingStreamHandler` - [main.py#L724-L738]
+
+### 3. 黑屏恢復時自動關閉公告彈窗
+
+**問題**: 黑屏恢復回到大廳可能會出現公告彈窗，阻礙後續自動操作
+
+**解決方案**:
+在 `refresh_and_login()` 函數中，於視窗放大後、搜尋「戰神」前增加關閉公告邏輯：
+
+```python
+# 2.2.1 關閉可能出現的公告彈窗
+try:
+    driver.execute_script("""
+        // 隱藏所有彈窗容器
+        const popups = document.querySelectorAll('.popup-container, .popup-wrap');
+        popups.forEach(popup => {
+            popup.style.display = 'none';
+            popup.style.visibility = 'hidden';
+        });
+
+        // 移除遮罩層（如果有）
+        const overlays = document.querySelectorAll('[class*="overlay"], [class*="mask"]');
+        overlays.forEach(overlay => overlay.remove());
+    """)
+    self.logger.debug(f"瀏覽器 {context.index} 已隱藏公告彈窗")
+    time.sleep(1)  # 等待彈窗關閉
+except Exception as e:
+    self.logger.debug(f"瀏覽器 {context.index} 關閉公告彈窗時發生錯誤: {e}")
+```
+
+**執行時機**: 黑屏恢復流程 → 導航到登入頁面 → 放大視窗 → **關閉公告** → 搜尋「戰神」 → 點擊遊戲 → 完成登入
+
+**相關程式碼**: `BrowserRecoveryManager.refresh_and_login()` - [main.py#L3249-L3270]
 
 ## 關鍵檔案與目錄
 

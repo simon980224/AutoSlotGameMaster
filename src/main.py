@@ -13,10 +13,11 @@
 - 完善的錯誤處理與重試機制
 
 作者: 凡臻科技
-版本: 1.22.1
+版本: 1.23.0
 Python: 3.8+
 
 版本歷史:
+- v1.23.0: 優化登入流程與修復緩衝阻塞問題（登入表單等待改用 element_to_be_clickable 確保元素可互動；創建 FlushingStreamHandler 實現全域自動刷新機制，解決多執行緒環境下日誌輸出阻塞問題；黑屏恢復時自動關閉公告彈窗）
 - v1.22.1: 優化等待時間與自動跳過間隔（將搜尋「戰神」後的等待時間從 10 秒優化為 5 秒，統一遊戲載入等待時間為 5 秒；調整自動跳過點擊間隔從 10 秒改為 60 秒，減少不必要的操作頻率）
 - v1.22.0: 優化登入與恢復流程（修正等待 lobby_login 超時問題：在等待過程中同時檢測 game_return，若直接出現則視為登入成功；延長搜尋「戰神」後的等待時間從 3 秒改為 10 秒，確保搜尋結果完全載入）
 - v1.21.1: 優化黑屏恢復流程（將視窗放大方式從 2 倍改為全螢幕，確保 DOM 元素完全展開，提升自動導航成功率）
@@ -721,6 +722,22 @@ class ColoredFormatter(logging.Formatter):
         return super().format(record)
 
 
+class FlushingStreamHandler(logging.StreamHandler):
+    """自動刷新的 StreamHandler，解決多執行緒環境下的緩衝阻塞問題。"""
+    
+    def emit(self, record: logging.LogRecord) -> None:
+        """輸出日誌記錄並強制刷新緩衝區。
+        
+        Args:
+            record: 日誌記錄物件
+        """
+        try:
+            super().emit(record)
+            self.flush()  # 每次輸出後立即刷新
+        except Exception:
+            self.handleError(record)
+
+
 class LoggerFactory:
     """Logger 工廠類別 - 使用單例模式優化效能"""
     
@@ -762,7 +779,8 @@ class LoggerFactory:
                 if cls._formatter is None:
                     cls._formatter = ColoredFormatter()
                 
-                console_handler = logging.StreamHandler(sys.stdout)
+                # 使用自動刷新的 Handler 避免緩衝阻塞
+                console_handler = FlushingStreamHandler(sys.stdout)
                 console_handler.setLevel(level.value)
                 console_handler.setFormatter(cls._formatter)
                 logger.addHandler(console_handler)
@@ -1836,31 +1854,43 @@ class SyncBrowserOperator:
                     EC.presence_of_element_located((By.XPATH, Constants.INITIAL_LOGIN_BUTTON))
                 )
                 initial_login_btn.click()
-                time.sleep(10)  # 等待登入表單出現
+                self.logger.debug(f"[{credential.username}] 已點擊初始登入按鈕")
+                
+                # 明確等待登入表單出現且可互動
+                WebDriverWait(driver, 15).until(
+                    EC.visibility_of_element_located((By.XPATH, Constants.USERNAME_INPUT))
+                )
+                self.logger.debug(f"[{credential.username}] 登入表單已載入")
+                time.sleep(2)  # 額外等待確保表單完全穩定
             except Exception as e:
-                self.logger.debug(f"未找到初始登入按鈕或已在登入頁面: {e}")
+                self.logger.debug(f"[{credential.username}] 未找到初始登入按鈕或已在登入頁面: {e}")
             
 
             try:
-                # 輸入帳號
-                username_input = WebDriverWait(driver, 10).until(
-                    EC.presence_of_element_located((By.XPATH, Constants.USERNAME_INPUT))
+                # 輸入帳號 - 等待元素可點擊
+                username_input = WebDriverWait(driver, 15).until(
+                    EC.element_to_be_clickable((By.XPATH, Constants.USERNAME_INPUT))
                 )
                 username_input.clear()
+                time.sleep(0.5)  # 清空後短暫等待
                 username_input.send_keys(credential.username)
+                self.logger.debug(f"[{credential.username}] 已輸入帳號")
                 
-                # 輸入密碼
-                password_input = WebDriverWait(driver, 10).until(
-                    EC.presence_of_element_located((By.XPATH, Constants.PASSWORD_INPUT))
+                # 輸入密碼 - 等待元素可點擊
+                password_input = WebDriverWait(driver, 15).until(
+                    EC.element_to_be_clickable((By.XPATH, Constants.PASSWORD_INPUT))
                 )
                 password_input.clear()
+                time.sleep(0.5)  # 清空後短暫等待
                 password_input.send_keys(credential.password)
+                self.logger.debug(f"[{credential.username}] 已輸入密碼")
                 
-                # 點擊登入按鈕
-                login_button = WebDriverWait(driver, 10).until(
-                    EC.presence_of_element_located((By.XPATH, Constants.LOGIN_BUTTON))
+                # 點擊登入按鈕 - 等待元素可點擊
+                login_button = WebDriverWait(driver, 15).until(
+                    EC.element_to_be_clickable((By.XPATH, Constants.LOGIN_BUTTON))
                 )
                 login_button.click()
+                self.logger.info(f"[{credential.username}] 已點擊登入按鈕，等待登入完成...")
                 
                 time.sleep(Constants.LOGIN_WAIT_TIME)  # 等待登入完成
             except Exception as e:
@@ -3215,6 +3245,25 @@ class BrowserRecoveryManager:
             driver.maximize_window()
             time.sleep(1)  # 等待視窗調整完成
             self.logger.debug(f"瀏覽器 {context.index} 已放大至全螢幕")
+            
+            # 2.2.1 關閉可能出現的公告彈窗
+            try:
+                driver.execute_script("""
+                    // 隱藏所有彈窗容器
+                    const popups = document.querySelectorAll('.popup-container, .popup-wrap');
+                    popups.forEach(popup => {
+                        popup.style.display = 'none';
+                        popup.style.visibility = 'hidden';
+                    });
+                    
+                    // 移除遮罩層（如果有）
+                    const overlays = document.querySelectorAll('[class*="overlay"], [class*="mask"]');
+                    overlays.forEach(overlay => overlay.remove());
+                """)
+                self.logger.debug(f"瀏覽器 {context.index} 已隱藏公告彈窗")
+                time.sleep(1)  # 等待彈窗關閉
+            except Exception as e:
+                self.logger.debug(f"瀏覽器 {context.index} 關閉公告彈窗時發生錯誤: {e}")
             
             # 2.3 執行導航到遊戲頁面（不切換 iframe）
             try:
