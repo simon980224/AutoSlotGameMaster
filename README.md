@@ -2,14 +2,33 @@
 
 > 金富翁遊戲自動化系統 - 多瀏覽器並行控制、圖片識別、Proxy 中繼
 
-[![Version](https://img.shields.io/badge/version-1.22.1-brightgreen.svg)](https://github.com/simon980224/AutoSlotGameMaster)
+[![Version](https://img.shields.io/badge/version-1.24.0-brightgreen.svg)](https://github.com/simon980224/AutoSlotGameMaster)
 [![Python Version](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](https://github.com/simon980224/AutoSlotGameMaster)
 
 一個使用 Selenium WebDriver、OpenCV 圖片識別和 Chrome DevTools Protocol 實現的遊戲自動化系統。支援多瀏覽器並行控制、本地 Proxy 中繼、自動下注、錯誤自動恢復和免費遊戲購買等功能。
 
-## 🎉 最新更新 (v1.22.1)
+## 🎉 最新更新 (v1.24.0)
+
+- 🔐 **新增登入失敗自動重試機制** - 大幅提升登入成功率
+  - 點擊登入按鈕後等待 10 秒檢查登入彈窗是否還存在
+  - 若彈窗仍存在則判定為登入失敗，自動重新輸入帳號密碼
+  - 最多自動重試 3 次，避免網路延遲或伺服器響應慢導致的失敗
+  - 詳細的日誌追蹤，記錄每次重試過程
+  - 有效處理帳號密碼輸入異常、網路延遲等問題
+
+### v1.23.0 更新內容
+
+- 🔧 **優化登入流程與修復緩衝阻塞問題** - 提升穩定性與響應速度
+  - 登入表單等待改用 `element_to_be_clickable` 確保元素可互動
+  - 創建 `FlushingStreamHandler` 實現全域自動刷新機制
+  - 解決多執行緒環境下日誌輸出阻塞問題
+  - 黑屏恢復時自動關閉公告彈窗
+  - 輸入操作間增加 0.5 秒等待，避免輸入過快
+  - 所有等待超時時間延長到 15 秒
+
+### v1.22.1 更新內容
 
 - ⚡ **優化等待時間與自動跳過間隔** - 提升系統效率與穩定性
   - 將搜尋「戰神」後的等待時間從 10 秒優化為 5 秒

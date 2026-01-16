@@ -13,10 +13,11 @@
 - 完善的錯誤處理與重試機制
 
 作者: 凡臻科技
-版本: 1.23.0
+版本: 1.24.0
 Python: 3.8+
 
 版本歷史:
+- v1.24.0: 新增登入失敗自動重試機制（點擊登入按鈕後等待 10 秒檢查登入彈窗是否還存在，若存在則自動重新輸入帳號密碼並重試，最多重試 3 次，有效提升登入成功率）
 - v1.23.0: 優化登入流程與修復緩衝阻塞問題（登入表單等待改用 element_to_be_clickable 確保元素可互動；創建 FlushingStreamHandler 實現全域自動刷新機制，解決多執行緒環境下日誌輸出阻塞問題；黑屏恢復時自動關閉公告彈窗）
 - v1.22.1: 優化等待時間與自動跳過間隔（將搜尋「戰神」後的等待時間從 10 秒優化為 5 秒，統一遊戲載入等待時間為 5 秒；調整自動跳過點擊間隔從 10 秒改為 60 秒，減少不必要的操作頻率）
 - v1.22.0: 優化登入與恢復流程（修正等待 lobby_login 超時問題：在等待過程中同時檢測 game_return，若直接出現則視為登入成功；延長搜尋「戰神」後的等待時間從 3 秒改為 10 秒，確保搜尋結果完全載入）
@@ -1893,6 +1894,59 @@ class SyncBrowserOperator:
                 self.logger.info(f"[{credential.username}] 已點擊登入按鈕，等待登入完成...")
                 
                 time.sleep(Constants.LOGIN_WAIT_TIME)  # 等待登入完成
+                
+                # 檢查登入是否成功（登入彈窗是否還存在）
+                max_login_attempts = 3  # 最多重試 3 次
+                login_attempt = 1
+                
+                while login_attempt <= max_login_attempts:
+                    time.sleep(10)  # 等待 10 秒後檢查
+                    
+                    try:
+                        # 檢查登入彈窗是否還存在
+                        popup = driver.find_element(By.CSS_SELECTOR, ".popup-wrap, .popup-account-container")
+                        
+                        if popup.is_displayed():
+                            self.logger.warning(f"[{credential.username}] 登入彈窗仍存在，可能登入失敗，重新輸入帳號密碼（第 {login_attempt}/{max_login_attempts} 次重試）")
+                            
+                            # 重新輸入帳號
+                            username_input = WebDriverWait(driver, 10).until(
+                                EC.element_to_be_clickable((By.XPATH, Constants.USERNAME_INPUT))
+                            )
+                            username_input.clear()
+                            time.sleep(0.5)
+                            username_input.send_keys(credential.username)
+                            self.logger.debug(f"[{credential.username}] 已重新輸入帳號")
+                            
+                            # 重新輸入密碼
+                            password_input = WebDriverWait(driver, 10).until(
+                                EC.element_to_be_clickable((By.XPATH, Constants.PASSWORD_INPUT))
+                            )
+                            password_input.clear()
+                            time.sleep(0.5)
+                            password_input.send_keys(credential.password)
+                            self.logger.debug(f"[{credential.username}] 已重新輸入密碼")
+                            
+                            # 重新點擊登入按鈕
+                            login_button = WebDriverWait(driver, 10).until(
+                                EC.element_to_be_clickable((By.XPATH, Constants.LOGIN_BUTTON))
+                            )
+                            login_button.click()
+                            self.logger.info(f"[{credential.username}] 已重新點擊登入按鈕")
+                            
+                            time.sleep(Constants.LOGIN_WAIT_TIME)
+                            login_attempt += 1
+                        else:
+                            # 彈窗不可見，登入成功
+                            break
+                    except Exception:
+                        # 找不到彈窗元素，表示登入成功
+                        self.logger.info(f"[{credential.username}] 登入彈窗已消失，登入成功")
+                        break
+                
+                if login_attempt > max_login_attempts:
+                    self.logger.error(f"[{credential.username}] 達到最大重試次數 {max_login_attempts}，登入可能失敗")
+                    
             except Exception as e:
                 self.logger.error(f"[{credential.username}] 登入過程中發生錯誤: {e}")
                 return False
