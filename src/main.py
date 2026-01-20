@@ -1850,27 +1850,27 @@ class SyncBrowserOperator:
             for attempt in range(1, max_form_attempts + 1):
                 try:
                     # 1. 先檢查登入表單是否已經存在
-                    try:
-                        popup = driver.find_element(By.CSS_SELECTOR, ".popup-wrap, .popup-account-container")
-                        if popup.is_displayed():
-                            self.logger.debug(f"[{credential.username}] 登入表單已存在，跳過點擊登入按鈕")
-                            form_opened = True
-                            break
-                        else:
-                            raise Exception("登入表單不可見")
-                    except Exception:
-                        # 2. 登入表單不存在，點擊初始登入按鈕
-                        if attempt > 1:
-                            self.logger.warning(f"[{credential.username}] 第 {attempt} 次嘗試打開登入表單")
-                        else:
-                            self.logger.debug(f"[{credential.username}] 登入表單不存在，點擊初始登入按鈕")
+                    # try:
+                    #     popup = driver.find_element(By.CSS_SELECTOR, ".popup-wrap, .popup-account-container")
+                    #     if popup.is_displayed():
+                    #         self.logger.debug(f"[{credential.username}] 登入表單已存在，跳過點擊登入按鈕")
+                    #         form_opened = True
+                    #         break
+                    #     else:
+                    #         raise Exception("登入表單不可見")
+                    # except Exception:
+                    #     # 2. 登入表單不存在，點擊初始登入按鈕
+                    #     if attempt > 1:
+                    #         self.logger.warning(f"[{credential.username}] 第 {attempt} 次嘗試打開登入表單")
+                    #     else:
+                    #         self.logger.debug(f"[{credential.username}] 登入表單不存在，點擊初始登入按鈕")
                         
-                        initial_login_btn = WebDriverWait(driver, 10).until(
-                            EC.element_to_be_clickable((By.XPATH, Constants.INITIAL_LOGIN_BUTTON))
-                        )
-                        initial_login_btn.click()
-                        self.logger.debug(f"[{credential.username}] 已點擊初始登入按鈕")
-                        time.sleep(2)  # 等待彈窗動畫
+                    initial_login_btn = WebDriverWait(driver, 10).until(
+                        EC.element_to_be_clickable((By.XPATH, Constants.INITIAL_LOGIN_BUTTON))
+                    )
+                    initial_login_btn.click()
+                    self.logger.debug(f"[{credential.username}] 已點擊初始登入按鈕")
+                    time.sleep(2)  # 等待彈窗動畫
                     
                     # 3. 確認登入表單已完全載入且可見
                     popup = WebDriverWait(driver, 8).until(
@@ -1932,108 +1932,27 @@ class SyncBrowserOperator:
                 
                 time.sleep(Constants.LOGIN_WAIT_TIME)  # 等待登入完成
                 
-                # 檢查登入是否成功（登入彈窗是否還存在）
-                max_login_attempts = 3  # 最多重試 3 次
-                login_attempt = 1
+                # 登入後直接強制關閉所有彈窗（公告、廣告等）
+                self.logger.debug(f"[{credential.username}] 開始關閉登入後的公告彈窗...")
+                time.sleep(2)  # 等待公告彈窗可能出現
                 
-                while login_attempt <= max_login_attempts:
-                    time.sleep(5)  # 等待 5 秒後檢查
-                    
-                    try:
-                        # 檢查彈窗是否還存在
-                        popup = driver.find_element(By.CSS_SELECTOR, ".popup-wrap, .popup-account-container")
+                try:
+                    # 使用 JavaScript 強制隱藏所有彈窗
+                    driver.execute_script("""
+                        const popups = document.querySelectorAll('.popup-container, .popup-wrap, .popup-account-container');
+                        popups.forEach(popup => {
+                            popup.style.display = 'none';
+                            popup.style.visibility = 'hidden';
+                            popup.remove();
+                        });
                         
-                        if popup.is_displayed():
-                            # 檢查彈窗內的 span 內容，判斷是公告還是登入表單
-                            is_announcement = False
-                            is_login_form = False
-                            
-                            try:
-                                # 檢查是否為公告（尋找公告特徵文字）
-                                spans = popup.find_elements(By.TAG_NAME, "span")
-                                for span in spans:
-                                    span_text = span.text.strip()
-                                    # 根據實際公告內容調整判斷條件
-                                    if any(keyword in span_text for keyword in ["公告", "通知", "活動", "最新消息"]):
-                                        is_announcement = True
-                                        self.logger.debug(f"[{credential.username}] 檢測到公告彈窗: {span_text[:20]}...")
-                                        break
-                                
-                                # 檢查是否為登入表單（尋找帳號/密碼輸入框）
-                                try:
-                                    popup.find_element(By.XPATH, Constants.USERNAME_INPUT)
-                                    popup.find_element(By.XPATH, Constants.PASSWORD_INPUT)
-                                    is_login_form = True
-                                except Exception:
-                                    pass
-                                    
-                            except Exception as e:
-                                self.logger.debug(f"[{credential.username}] 檢查彈窗內容時發生錯誤: {e}")
-                            
-                            # 如果是公告，關閉它並繼續檢查
-                            if is_announcement and not is_login_form:
-                                self.logger.info(f"[{credential.username}] 檢測到公告彈窗，嘗試關閉...")
-                                try:
-                                    close_button = popup.find_element(By.CSS_SELECTOR, ".icon-close, .close-btn")
-                                    close_button.click()
-                                    self.logger.info(f"[{credential.username}] 已關閉公告彈窗")
-                                    time.sleep(1)  # 等待彈窗關閉
-                                    continue  # 繼續下一次循環檢查
-                                except Exception as e:
-                                    self.logger.warning(f"[{credential.username}] 無法關閉公告彈窗: {e}")
-                            
-                            # 如果是登入表單，說明登入失敗，需要重試
-                            if is_login_form:
-                                self.logger.warning(f"[{credential.username}] 登入表單仍存在，登入失敗，重新輸入帳號密碼（第 {login_attempt}/{max_login_attempts} 次重試）")
-                                
-                                # 重新輸入帳號
-                                username_input = WebDriverWait(driver, 10).until(
-                                    EC.element_to_be_clickable((By.XPATH, Constants.USERNAME_INPUT))
-                                )
-                                username_input.clear()
-                                time.sleep(0.5)
-                                username_input.send_keys(credential.username)
-                                self.logger.debug(f"[{credential.username}] 已重新輸入帳號")
-                                
-                                # 重新輸入密碼
-                                password_input = WebDriverWait(driver, 10).until(
-                                    EC.element_to_be_clickable((By.XPATH, Constants.PASSWORD_INPUT))
-                                )
-                                password_input.clear()
-                                time.sleep(0.5)
-                                password_input.send_keys(credential.password)
-                                self.logger.debug(f"[{credential.username}] 已重新輸入密碼")
-                                
-                                # 重新點擊登入按鈕
-                                login_button = WebDriverWait(driver, 10).until(
-                                    EC.element_to_be_clickable((By.XPATH, Constants.LOGIN_BUTTON))
-                                )
-                                login_button.click()
-                                self.logger.info(f"[{credential.username}] 已重新點擊登入按鈕")
-                                
-                                time.sleep(Constants.LOGIN_WAIT_TIME)
-                                login_attempt += 1
-                            elif not is_announcement:
-                                # 既不是公告也不是登入表單，可能是其他彈窗，嘗試關閉
-                                self.logger.debug(f"[{credential.username}] 檢測到未知彈窗，嘗試關閉...")
-                                try:
-                                    close_button = popup.find_element(By.CSS_SELECTOR, ".icon-close, .close-btn")
-                                    close_button.click()
-                                    time.sleep(1)
-                                    continue
-                                except Exception:
-                                    # 無法關閉，跳出循環
-                                    break
-                        else:
-                            # 彈窗不可見，登入成功
-                            break
-                    except Exception:
-                        # 找不到彈窗元素，表示登入成功
-                        self.logger.info(f"[{credential.username}] 登入彈窗已消失，登入成功")
-                        break
-                
-                if login_attempt > max_login_attempts:
-                    self.logger.error(f"[{credential.username}] 達到最大重試次數 {max_login_attempts}，登入可能失敗")
+                        // 移除遮罩層
+                        const overlays = document.querySelectorAll('[class*="overlay"], [class*="mask"]');
+                        overlays.forEach(overlay => overlay.remove());
+                    """)
+                    self.logger.info(f"[{credential.username}] ✓ 已關閉所有公告彈窗")
+                except Exception as e:
+                    self.logger.debug(f"[{credential.username}] 關閉公告彈窗時發生錯誤（可忽略）: {e}")
                     
             except Exception as e:
                 self.logger.error(f"[{credential.username}] 登入過程中發生錯誤: {e}")
