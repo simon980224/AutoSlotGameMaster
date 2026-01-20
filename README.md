@@ -2,17 +2,26 @@
 
 > 金富翁遊戲自動化系統 - 多瀏覽器並行控制、圖片識別、Proxy 中繼
 
-[![Version](https://img.shields.io/badge/version-1.24.0-brightgreen.svg)](https://github.com/simon980224/AutoSlotGameMaster)
+[![Version](https://img.shields.io/badge/version-1.24.1-brightgreen.svg)](https://github.com/simon980224/AutoSlotGameMaster)
 [![Python Version](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](https://github.com/simon980224/AutoSlotGameMaster)
 
 一個使用 Selenium WebDriver、OpenCV 圖片識別和 Chrome DevTools Protocol 實現的遊戲自動化系統。支援多瀏覽器並行控制、本地 Proxy 中繼、自動下注、錯誤自動恢復和免費遊戲購買等功能。
 
-## 🎉 最新更新 (v1.24.0)
+## 🎉 最新更新 (v1.24.1)
+
+- 🛡️ **優化登入流程穩定性** - 更智能的表單處理與錯誤恢復
+  - **登入表單確認機制**：確保表單完全載入後才輸入帳號密碼，避免輸入失敗
+  - **自動重試機制**：登入表單打開失敗時自動重試最多 3 次，每次重試都有明確日誌
+  - **公告彈窗處理**：登入後自動檢測並關閉公告彈窗（.icon-close），避免誤判登入狀態
+  - **快速響應優化**：調整登入重試檢查時間從 10 秒改為 5 秒，加快失敗檢測速度
+  - **狀態追蹤優化**：每個關鍵步驟都有詳細日誌，便於問題排查
+
+### v1.24.0 更新內容
 
 - 🔐 **新增登入失敗自動重試機制** - 大幅提升登入成功率
-  - 點擊登入按鈕後等待 10 秒檢查登入彈窗是否還存在
+  - 點擊登入按鈕後等待檢查登入彈窗是否還存在
   - 若彈窗仍存在則判定為登入失敗，自動重新輸入帳號密碼
   - 最多自動重試 3 次，避免網路延遲或伺服器響應慢導致的失敗
   - 詳細的日誌追蹤，記錄每次重試過程
@@ -47,7 +56,6 @@
 ### v1.21.1 更新內容
 
 - 🔧 **優化黑屏恢復流程** - 提升自動導航成功率
-
   - 將視窗放大方式從「2 倍」改為「全螢幕」（`maximize_window()`）
   - 確保 DOM 元素完全展開，避免因視窗過小導致元素不可見或不可點擊
   - 提升搜尋和點擊遊戲的成功率，更穩定的自動恢復機制

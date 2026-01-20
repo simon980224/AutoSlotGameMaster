@@ -13,10 +13,11 @@
 - 完善的錯誤處理與重試機制
 
 作者: 凡臻科技
-版本: 1.24.0
+版本: 1.24.1
 Python: 3.8+
 
 版本歷史:
+- v1.24.1: 優化登入流程穩定性（新增登入表單確認機制，確保表單完全載入後才輸入帳號密碼；登入表單打開失敗時自動重試最多 3 次；登入後自動檢測並關閉公告彈窗，避免誤判登入狀態；調整登入重試檢查時間從 10 秒改為 5 秒，加快重試響應速度）
 - v1.24.0: 新增登入失敗自動重試機制（點擊登入按鈕後等待 10 秒檢查登入彈窗是否還存在，若存在則自動重新輸入帳號密碼並重試，最多重試 3 次，有效提升登入成功率）
 - v1.23.0: 優化登入流程與修復緩衝阻塞問題（登入表單等待改用 element_to_be_clickable 確保元素可互動；創建 FlushingStreamHandler 實現全域自動刷新機制，解決多執行緒環境下日誌輸出阻塞問題；黑屏恢復時自動關閉公告彈窗）
 - v1.22.1: 優化等待時間與自動跳過間隔（將搜尋「戰神」後的等待時間從 10 秒優化為 5 秒，統一遊戲載入等待時間為 5 秒；調整自動跳過點擊間隔從 10 秒改為 60 秒，減少不必要的操作頻率）
@@ -1849,23 +1850,66 @@ class SyncBrowserOperator:
             driver = context.driver
             credential = context.credential
             
-            # 先點擊初始登入按鈕
+            # 確保登入表單已打開（最多重試3次）
+            max_form_attempts = 3
+            form_opened = False
+            
+            for attempt in range(1, max_form_attempts + 1):
+                try:
+                    # 1. 先檢查登入表單是否已經存在
+                    try:
+                        popup = driver.find_element(By.CSS_SELECTOR, ".popup-wrap, .popup-account-container")
+                        if popup.is_displayed():
+                            self.logger.debug(f"[{credential.username}] 登入表單已存在，跳過點擊登入按鈕")
+                            form_opened = True
+                            break
+                        else:
+                            raise Exception("登入表單不可見")
+                    except Exception:
+                        # 2. 登入表單不存在，點擊初始登入按鈕
+                        if attempt > 1:
+                            self.logger.warning(f"[{credential.username}] 第 {attempt} 次嘗試打開登入表單")
+                        else:
+                            self.logger.debug(f"[{credential.username}] 登入表單不存在，點擊初始登入按鈕")
+                        
+                        initial_login_btn = WebDriverWait(driver, 10).until(
+                            EC.element_to_be_clickable((By.XPATH, Constants.INITIAL_LOGIN_BUTTON))
+                        )
+                        initial_login_btn.click()
+                        self.logger.debug(f"[{credential.username}] 已點擊初始登入按鈕")
+                        time.sleep(2)  # 等待彈窗動畫
+                    
+                    # 3. 確認登入表單已完全載入且可見
+                    popup = WebDriverWait(driver, 8).until(
+                        EC.visibility_of_element_located((By.CSS_SELECTOR, ".popup-wrap, .popup-account-container"))
+                    )
+                    self.logger.info(f"[{credential.username}] ✓ 登入表單已確認顯示")
+                    form_opened = True
+                    break
+                    
+                except Exception as e:
+                    if attempt < max_form_attempts:
+                        self.logger.warning(f"[{credential.username}] 第 {attempt} 次打開登入表單失敗: {e}，重試中...")
+                        time.sleep(1)
+                    else:
+                        self.logger.error(f"[{credential.username}] 嘗試 {max_form_attempts} 次後仍無法打開登入表單")
+                        return False
+            
+            if not form_opened:
+                self.logger.error(f"[{credential.username}] 無法打開登入表單")
+                return False
+            
             try:
-                initial_login_btn = WebDriverWait(driver, 10).until(
-                    EC.presence_of_element_located((By.XPATH, Constants.INITIAL_LOGIN_BUTTON))
-                )
-                initial_login_btn.click()
-                self.logger.debug(f"[{credential.username}] 已點擊初始登入按鈕")
-                
-                # 明確等待登入表單出現且可互動
-                WebDriverWait(driver, 15).until(
+                # 4. 確認帳號輸入框可見且可互動
+                username_input = WebDriverWait(driver, 15).until(
                     EC.visibility_of_element_located((By.XPATH, Constants.USERNAME_INPUT))
                 )
-                self.logger.debug(f"[{credential.username}] 登入表單已載入")
-                time.sleep(2)  # 額外等待確保表單完全穩定
+                self.logger.debug(f"[{credential.username}] 帳號輸入框已就緒")
+                time.sleep(1)  # 額外等待確保表單完全穩定
+                
             except Exception as e:
-                self.logger.debug(f"[{credential.username}] 未找到初始登入按鈕或已在登入頁面: {e}")
-            
+                self.logger.error(f"[{credential.username}] 帳號輸入框未就緒: {e}")
+                return False
 
             try:
                 # 輸入帳號 - 等待元素可點擊
@@ -1900,7 +1944,18 @@ class SyncBrowserOperator:
                 login_attempt = 1
                 
                 while login_attempt <= max_login_attempts:
-                    time.sleep(10)  # 等待 10 秒後檢查
+                    time.sleep(5)  # 等待 5 秒後檢查
+                    
+                    # 先檢查並關閉公告彈窗（如果存在）
+                    try:
+                        close_button = driver.find_element(By.CSS_SELECTOR, ".icon-close")
+                        if close_button.is_displayed():
+                            close_button.click()
+                            self.logger.info(f"[{credential.username}] 已關閉公告彈窗")
+                            time.sleep(1)  # 等待彈窗關閉
+                    except Exception:
+                        # 沒有公告彈窗，繼續
+                        pass
                     
                     try:
                         # 檢查登入彈窗是否還存在
