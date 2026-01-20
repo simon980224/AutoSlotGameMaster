@@ -2,14 +2,24 @@
 
 > 金富翁遊戲自動化系統 - 多瀏覽器並行控制、圖片識別、Proxy 中繼
 
-[![Version](https://img.shields.io/badge/version-1.26.1-brightgreen.svg)](https://github.com/simon980224/AutoSlotGameMaster)
+[![Version](https://img.shields.io/badge/version-1.27.0-brightgreen.svg)](https://github.com/simon980224/AutoSlotGameMaster)
 [![Python Version](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](https://github.com/simon980224/AutoSlotGameMaster)
 
 一個使用 Selenium WebDriver、OpenCV 圖片識別和 Chrome DevTools Protocol 實現的遊戲自動化系統。支援多瀏覽器並行控制、本地 Proxy 中繼、自動下注、錯誤自動恢復和免費遊戲購買等功能。
 
-## 🎉 最新更新 (v1.26.1)
+## 🎉 最新更新 (v1.27.0)
+
+- 🔒 **優化 Proxy 配置管理** - 提升安全性和可維護性
+  - **集中管理常數**：將 Brightdata proxy 共同配置提取到 Constants（PROXY_HOST、PROXY_PORT、PROXY_USERNAME_BASE、PROXY_PASSWORD）
+  - **簡化配置檔案**：用戶資料檔案從 `host:port:username:password` 簡化為僅存儲出口 IP（如 `80.89.0.211`）
+  - **自動組合機制**：程式自動將出口 IP 與 Constants 中的配置組合成完整 proxy 連接字串
+  - **隱藏供應商資訊**：用戶資料檔案完全不顯示供應商資訊，提升配置安全性
+  - **易於維護**：更換 proxy 供應商或密碼只需修改 Constants，無需逐行修改配置檔案
+  - **格式精簡**：配置檔案每行從 100+ 字元縮短到 15 字元左右
+
+### v1.26.1 更新內容
 
 - ⚡ **簡化登入後公告處理邏輯** - 大幅提升登入速度和穩定性
   - **移除複雜判斷**：不再檢測彈窗類型（公告 vs 登入表單），直接強制關閉

@@ -1,5 +1,5 @@
 """
-金富翁遊戲自動化系統
+賽特遊戲自動化系統
 
 核心特性:
 - 完整型別提示與協議 (Protocol)
@@ -136,12 +136,18 @@ __all__ = [
 class Constants:
     """系統常量"""
     # 版本資訊
-    VERSION = "1.25.0"
-    SYSTEM_NAME = "金富翁遊戲自動化系統"
+    VERSION = "1.27.0"
+    SYSTEM_NAME = "賽特遊戲自動化系統"
     
     DEFAULT_LIB_PATH = "lib"
     DEFAULT_CREDENTIALS_FILE = "用戶資料.txt"
     DEFAULT_RULES_FILE = "用戶規則.txt"
+    
+    # Proxy 配置（Brightdata）
+    PROXY_HOST = "brd.superproxy.io"
+    PROXY_PORT = 33335
+    PROXY_USERNAME_BASE = "brd-customer-hl_aa7b7b79-zone-isp_proxy2"
+    PROXY_PASSWORD = "a2d0f4cabz6r"
     
     DEFAULT_PROXY_START_PORT = 9000
     DEFAULT_TIMEOUT_SECONDS = 30
@@ -159,12 +165,12 @@ class Constants:
     # GAME_PAGE = "https://www.sf-16888.com/#/home/loding?game_code=golden-seth&factory_code=ATG&state=true&name=戰神賽特2%20覺醒之力"
     
     # FIN
-    # LOGIN_PAGE = "https://www.fin88.app/"
-    # GAME_PAGE = "https://www.fin88.app/"
+    LOGIN_PAGE = "https://www.fin88.app/"
+    GAME_PAGE = "https://www.fin88.app/"
 
     # TG
-    LOGIN_PAGE = "https://www.tg5688.com"
-    GAME_PAGE = "https://www.tg5688.com"
+    # LOGIN_PAGE = "https://www.tg5688.com"
+    # GAME_PAGE = "https://www.tg5688.com"
 
     # 頁面元素選擇器
     INITIAL_LOGIN_BUTTON = "//button[contains(@class, 'btn') and contains(@class, 'login') and contains(@class, 'pc') and text()='登入']"
@@ -174,8 +180,8 @@ class Constants:
     POPUP_CLOSE_BUTTON = "//button[contains(@class, 'btn-close')]"
     SEARCH_BUTTON = "//button[contains(@class, 'search-btn')]"
     SEARCH_INPUT = "//input[@placeholder='按換行鍵搜索']"
-    # GAME_XPATH = "//div[contains(@class, 'game-card-container') and .//div[contains(@style, 'ATG-egyptian-mythology.png')]]" # 賽特1（第二個大卡片-戰神埃及神話）
-    GAME_XPATH = "//div[contains(@class, 'game-card-container') and contains(@class, 'big')]" # 賽特2（第一個大卡片）
+    GAME_XPATH = "//div[contains(@class, 'game-card-container') and .//div[contains(@style, 'ATG-egyptian-mythology.png')]]" # 賽特1（第二個大卡片-戰神埃及神話）
+    # GAME_XPATH = "//div[contains(@class, 'game-card-container') and contains(@class, 'big')]" # 賽特2（第一個大卡片）
     GAME_IFRAME = "//iframe[contains(@class, 'iframe-item')]"
     GAME_CANVAS = "GameCanvas"
     
@@ -879,8 +885,8 @@ class ConfigReader:
     ) -> List[UserCredential]:
         """讀取使用者憑證檔案。
         
-        檔案格式: 帳號,密碼,IP:port:user:password (首行為標題)
-        第三欄為 proxy 資訊，格式為 host:port:username:password
+        檔案格式: 帳號,密碼,出口IP (首行為標題)
+        第三欄為出口 IP（可選），程式會自動組合完整的 proxy 連接字串
         
         Args:
             filename: 檔案名稱
@@ -904,9 +910,17 @@ class ConfigReader:
                 
                 username = parts[0]
                 password = parts[1]
-                # 第三欄是 proxy 資訊，格式為 host:port:username:password
-                # 如果第三欄不存在或為空字串，則 proxy 為 None（不使用 proxy）
-                proxy = parts[2] if len(parts) >= 3 and parts[2].strip() else None
+                
+                # 第三欄是出口 IP（可選）
+                proxy = None
+                if len(parts) >= 3 and parts[2].strip():
+                    exit_ip = parts[2].strip()
+                    # 組合完整的 proxy 連接字串
+                    proxy = (
+                        f"{Constants.PROXY_HOST}:{Constants.PROXY_PORT}:"
+                        f"{Constants.PROXY_USERNAME_BASE}-ip-{exit_ip}:"
+                        f"{Constants.PROXY_PASSWORD}"
+                    )
                 
                 credentials.append(UserCredential(
                     username=username,
@@ -5769,7 +5783,7 @@ class GameControlCenter:
 # ============================================================================
 
 class AutoSlotGameApp:
-    """金富翁遊戲自動化應用程式主類別。
+    """賽特遊戲自動化應用程式主類別。
     
     整合所有元件,提供統一的介面。
     """
