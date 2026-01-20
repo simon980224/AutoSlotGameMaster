@@ -2,14 +2,25 @@
 
 > 金富翁遊戲自動化系統 - 多瀏覽器並行控制、圖片識別、Proxy 中繼
 
-[![Version](https://img.shields.io/badge/version-1.25.0-brightgreen.svg)](https://github.com/simon980224/AutoSlotGameMaster)
+[![Version](https://img.shields.io/badge/version-1.26.0-brightgreen.svg)](https://github.com/simon980224/AutoSlotGameMaster)
 [![Python Version](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](https://github.com/simon980224/AutoSlotGameMaster)
 
 一個使用 Selenium WebDriver、OpenCV 圖片識別和 Chrome DevTools Protocol 實現的遊戲自動化系統。支援多瀏覽器並行控制、本地 Proxy 中繼、自動下注、錯誤自動恢復和免費遊戲購買等功能。
 
-## 🎉 最新更新 (v1.25.0)
+## 🎉 最新更新 (v1.26.0)
+
+- 🧹 **移除錯誤訊息自動檢測功能** - 簡化系統架構，提升效能
+  - **移除檢測邏輯**：完全移除 error_message 相關的雙區域模板匹配檢測
+  - **移除背景監控**：移除專門的錯誤訊息監控執行緒 (\_error_monitor_loop)
+  - **移除相關常數**：清理 ERROR*MESSAGE_LEFT/RIGHT、ERROR_MESSAGE*\*\_X/Y 等座標定義
+  - **移除擷取工具**：移除 'e' 命令（capture_error_message_template）
+  - **保留核心功能**：黑屏檢測、game_return 處理等核心恢復機制完整保留
+  - **重構監控流程**：將原有監控功能整合為 \_blackscreen_monitor_loop，專注於黑屏和返回按鈕檢測
+  - **提升效能**：減少不必要的檢測操作，降低 CPU 使用率，提升系統響應速度
+
+### v1.25.0 更新內容
 
 - 🎯 **優化登入彈窗檢測邏輯** - 智能區分彈窗類型，精準處理
   - **智能彈窗識別**：透過檢查 span 內容和輸入框自動判斷彈窗類型

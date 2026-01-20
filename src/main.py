@@ -13,10 +13,11 @@
 - 完善的錯誤處理與重試機制
 
 作者: 凡臻科技
-版本: 1.24.1
+版本: 1.26.0
 Python: 3.8+
 
 版本歷史:
+- v1.26.0: 移除錯誤訊息自動檢測功能（移除所有 error_message 相關邏輯、常數定義、檢測方法和背景監控執行緒；保留黑屏和 game_return 檢測功能；簡化監控流程，提升系統效能）
 - v1.25.0: 優化登入彈窗檢測邏輯（透過檢查 span 內容和輸入框判斷彈窗類型，區分登入表單與公告彈窗；公告彈窗自動關閉不重試，登入表單才執行重試邏輯；支援多種公告關鍵字識別，避免誤判提升登入成功率）
 - v1.24.1: 優化登入流程穩定性（新增登入表單確認機制，確保表單完全載入後才輸入帳號密碼；登入表單打開失敗時自動重試最多 3 次；登入後自動檢測並關閉公告彈窗，避免誤判登入狀態；調整登入重試檢查時間從 10 秒改為 5 秒，加快重試響應速度）
 - v1.24.0: 新增登入失敗自動重試機制（點擊登入按鈕後等待 10 秒檢查登入彈窗是否還存在，若存在則自動重新輸入帳號密碼並重試，最多重試 3 次，有效提升登入成功率）
@@ -183,8 +184,6 @@ class Constants:
     LOBBY_CONFIRM = "lobby_confirm.png"
     LOBBY_RETURN = "lobby_return.png"  # 大廳返回模板
     GAME_RETURN = "game_return.png"  # 遊戲返回模板
-    ERROR_MESSAGE_LEFT = "error_message_left.png"  # 左側錯誤訊息模板
-    ERROR_MESSAGE_RIGHT = "error_message_right.png"  # 右側錯誤訊息模板
     BLACK_SCREEN = "black_screen.png"  # 黑屏模板
     MATCH_THRESHOLD = 0.8  # 圖片匹配閾值
     BETSIZE_MATCH_THRESHOLD = 0.85  # 金額識別匹配閾值
@@ -268,13 +267,6 @@ class Constants:
     BETSIZE_DISPLAY_X = 0.72            # 金額顯示位置 X 座標
     BETSIZE_DISPLAY_Y = 0.89            # 金額顯示位置 Y 座標
 
-    # 錯誤訊息圖片識別座標（基於預設視窗大小）
-    ERROR_MESSAGE_LEFT_X = 240  # 左側錯誤訊息區域 X 座標
-    ERROR_MESSAGE_LEFT_Y = 188  # 左側錯誤訊息區域 Y 座標
-    ERROR_MESSAGE_RIGHT_X = 360  # 右側錯誤訊息區域 X 座標
-    ERROR_MESSAGE_RIGHT_Y = 188   # 右側錯誤訊息區域 Y 座標
-    ERROR_MESSAGE_PERSIST_SECONDS = 1  # 錯誤訊息持續秒數閾值
-
     # 黑屏截圖座標（基於預設視窗大小）
     BLACKSCREEN_CENTER_X = 300  # 黑屏區域中心 X 座標
     BLACKSCREEN_CENTER_Y = 195  # 黑屏區域中心 Y 座標
@@ -297,7 +289,7 @@ class Constants:
     # 截圖裁切範圍（像素）
     BETSIZE_CROP_MARGIN_X = 40  # 金額模板水平裁切邊距
     BETSIZE_CROP_MARGIN_Y = 10  # 金額模板垂直裁切邊距
-    TEMPLATE_CROP_MARGIN = 20    # 通用模板裁切邊距（用於 lobby_confirm、error_message 等）
+    TEMPLATE_CROP_MARGIN = 20    # 通用模板裁切邊距（用於 lobby_confirm 等）
     
     # 遊戲金額配置（使用 frozenset 提升查詢效率）
     GAME_BETSIZE = frozenset((
@@ -2598,72 +2590,6 @@ class SyncBrowserOperator:
             self.logger.error(f"截取金額模板失敗: {e}")
             return False
 
-    def capture_error_message_template(self, driver: WebDriver) -> bool:
-        """截取錯誤訊息模板（同時截取左右兩側）。
-        
-        使用與 detect_error_message_in_region 相同的座標和裁切尺寸。
-        
-        Args:
-            driver: WebDriver 實例
-            
-        Returns:
-            bool: 截取成功返回True
-        """
-        try:
-            # 截取整個瀏覽器畫面
-            screenshot = driver.get_screenshot_as_png()
-            screenshot_img = Image.open(io.BytesIO(screenshot))
-            
-            # 獲取實際截圖尺寸
-            width, height = screenshot_img.size
-            
-            # 使用與檢測時相同的裁切邊距
-            margin = Constants.TEMPLATE_CROP_MARGIN
-            
-            # 使用輔助函式取得專案根目錄
-            img_dir = get_resource_path("img")
-            img_dir.mkdir(parents=True, exist_ok=True)
-            
-            success_count = 0
-            
-            # 截取左側錯誤訊息
-            left_x = Constants.ERROR_MESSAGE_LEFT_X
-            left_y = Constants.ERROR_MESSAGE_LEFT_Y
-            
-            crop_left = max(0, left_x - margin)
-            crop_top = max(0, left_y - margin)
-            crop_right = min(width, left_x + margin)
-            crop_bottom = min(height, left_y + margin)
-            
-            left_cropped = screenshot_img.crop((crop_left, crop_top, crop_right, crop_bottom))
-            left_filename = Constants.ERROR_MESSAGE_LEFT
-            left_path = img_dir / left_filename
-            left_cropped.save(left_path)
-            self.logger.info(f"[成功] 左側錯誤訊息模板已儲存: {left_filename} (座標: {left_x},{left_y}, 邊距: {margin})")
-            success_count += 1
-            
-            # 截取右側錯誤訊息
-            right_x = Constants.ERROR_MESSAGE_RIGHT_X
-            right_y = Constants.ERROR_MESSAGE_RIGHT_Y
-            
-            crop_left = max(0, right_x - margin)
-            crop_top = max(0, right_y - margin)
-            crop_right = min(width, right_x + margin)
-            crop_bottom = min(height, right_y + margin)
-            
-            right_cropped = screenshot_img.crop((crop_left, crop_top, crop_right, crop_bottom))
-            right_filename = Constants.ERROR_MESSAGE_RIGHT
-            right_path = img_dir / right_filename
-            right_cropped.save(right_path)
-            self.logger.info(f"[成功] 右側錯誤訊息模板已儲存: {right_filename} (座標: {right_x},{right_y}, 邊距: {margin})")
-            success_count += 1
-            
-            return success_count == 2
-            
-        except Exception as e:
-            self.logger.error(f"截取錯誤訊息模板失敗: {e}")
-            return False
-
     def capture_blackscreen_template(self, driver: WebDriver) -> bool:
         """截取黑屏區域模板。
         
@@ -3066,76 +2992,6 @@ class ImageDetector:
             self.logger.error(f"瀏覽器圖片檢測失敗 {e}")
             return None
     
-    def detect_error_message_in_region(
-        self, 
-        driver: WebDriver, 
-        x: int, 
-        y: int, 
-        margin: int = Constants.TEMPLATE_CROP_MARGIN,
-        threshold: float = Constants.MATCH_THRESHOLD
-    ) -> bool:
-        """檢測指定區域是否包含錯誤訊息。
-        
-        Args:
-            driver: WebDriver 實例
-            x: 區域中心 X 座標
-            y: 區域中心 Y 座標
-            margin: 裁切邊距
-            threshold: 匹配閾值
-            
-        Returns:
-            是否檢測到錯誤訊息
-        """
-        try:
-            # 檢查瀏覽器是否仍然有效
-            try:
-                _ = driver.current_url
-            except Exception:
-                self.logger.debug(f"瀏覽器已關閉，跳過錯誤訊息檢測")
-                return False
-            
-            # 截取全螢幕
-            screenshot = self.capture_screenshot(driver)
-            if screenshot is None:
-                return False
-            
-            # 獲取截圖尺寸
-            height, width = screenshot.shape[:2]
-            
-            # 計算裁切範圍
-            crop_left = max(0, x - margin)
-            crop_top = max(0, y - margin)
-            crop_right = min(width, x + margin)
-            crop_bottom = min(height, y + margin)
-            
-            # 裁切區域
-            cropped = screenshot[crop_top:crop_bottom, crop_left:crop_right]
-            
-            # 讀取錯誤訊息模板
-            template_path = self.get_template_path(Constants.ERROR_MESSAGE)
-            if not template_path.exists():
-                self.logger.debug(f"錯誤訊息模板不存在: {template_path}")
-                return False
-            
-            template = cv2_imread_unicode(template_path)
-            if template is None:
-                self.logger.debug("無法讀取錯誤訊息模板")
-                return False
-            
-            # 轉換為灰階
-            cropped_gray = cv2.cvtColor(cropped, cv2.COLOR_BGR2GRAY)
-            template_gray = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
-            
-            # 模板匹配
-            result = cv2.matchTemplate(cropped_gray, template_gray, cv2.TM_CCOEFF_NORMED)
-            _, max_val, _, _ = cv2.minMaxLoc(result)
-            
-            return max_val >= threshold
-            
-        except Exception as e:
-            self.logger.debug(f"錯誤訊息檢測失敗: {e}")
-            return False
-
     def detect_black_screen(
         self, 
         driver: WebDriver,
@@ -3227,66 +3083,6 @@ class BrowserRecoveryManager:
         self.image_detector = image_detector
         self.browser_operator = browser_operator
         self.logger = logger or LoggerFactory.get_logger()
-    
-    def detect_error_message(self, driver: WebDriver) -> bool:
-        """檢測瀏覽器中是否出現錯誤訊息（雙區域檢測）。
-        
-        Args:
-            driver: WebDriver 實例
-            
-        Returns:
-            是否檢測到錯誤訊息
-        """
-        try:
-            # 截取螢幕以獲取匹配值
-            screenshot = self.image_detector.capture_screenshot(driver)
-            if screenshot is None:
-                return False
-            
-            # 讀取左側模板
-            left_template_path = self.image_detector.get_template_path(Constants.ERROR_MESSAGE_LEFT)
-            if not left_template_path.exists():
-                self.logger.debug(f"左側錯誤訊息模板不存在: {left_template_path}")
-                return False
-            
-            left_template = cv2_imread_unicode(left_template_path)
-            if left_template is None:
-                self.logger.debug("無法讀取左側錯誤訊息模板")
-                return False
-            
-            # 讀取右側模板
-            right_template_path = self.image_detector.get_template_path(Constants.ERROR_MESSAGE_RIGHT)
-            if not right_template_path.exists():
-                self.logger.debug(f"右側錯誤訊息模板不存在: {right_template_path}")
-                return False
-            
-            right_template = cv2_imread_unicode(right_template_path)
-            if right_template is None:
-                self.logger.debug("無法讀取右側錯誤訊息模板")
-                return False
-            
-            # 檢測左側區域（使用左側模板）
-            left_match = self._check_region(
-                screenshot, left_template,
-                Constants.ERROR_MESSAGE_LEFT_X,
-                Constants.ERROR_MESSAGE_LEFT_Y,
-                "左側"
-            )
-            
-            # 檢測右側區域（使用右側模板）
-            right_match = self._check_region(
-                screenshot, right_template,
-                Constants.ERROR_MESSAGE_RIGHT_X,
-                Constants.ERROR_MESSAGE_RIGHT_Y,
-                "右側"
-            )
-            
-            # 兩個區域都檢測到才算有錯誤
-            return left_match[1] and right_match[1]
-            
-        except Exception as e:
-            self.logger.debug(f"錯誤訊息檢測失敗: {e}")
-            return False
     
     def detect_black_screen(self, driver: WebDriver) -> bool:
         """檢測瀏覽器中是否出現黑屏。
@@ -4151,10 +3947,7 @@ class GameControlCenter:
         self.auto_skip_thread: Optional[threading.Thread] = None  # 自動跳過點擊執行緒
         self._auto_skip_stop_event = threading.Event()  # 自動跳過停止事件
         
-        # 錯誤訊息監控相關
-        self.error_monitor_running = False  # 錯誤監控運行狀態
-        self.error_monitor_thread: Optional[threading.Thread] = None  # 錯誤監控執行緒
-        self._error_monitor_stop_event = threading.Event()  # 錯誤監控停止事件
+        # 黑屏檢測時間戳（key: 瀏覽器索引）
         self._blackscreen_timestamps: Dict[int, Optional[float]] = {}  # 黑屏首次檢測時間戳（key: 瀏覽器索引）
         
         # 規則執行時間控制相關
@@ -4217,9 +4010,6 @@ class GameControlCenter:
 【工具與系統】
   c                   截取金額模板（用於優化金額識別）
                       提示: 在遊戲中調整到特定金額後使用
-
-  e                   截取錯誤訊息模板（用於錯誤檢測）
-                      提示: 在出現錯誤訊息時使用
 
   k                   截取黑屏模板（座標 300,195，範圍 50px）
                       提示: 選擇單一瀏覽器截取，檔名固定為 black_screen.png
@@ -4590,21 +4380,20 @@ class GameControlCenter:
         self.time_monitor_thread = None
         self.time_monitor_running = False
     
-    def _error_monitor_loop(self) -> None:
-        """錯誤訊息監控循環（每 10 秒檢測一次）。
+    def _blackscreen_monitor_loop(self) -> None:
+        """黑屏監控循環（每 10 秒檢測一次）。
         
-        持續運行直到收到停止信號，用於自動檢測並處理錯誤訊息。
+        持續運行直到收到停止信號，用於自動檢測並處理黑屏和 game_return。
         """
-        self.logger.info("[啟動] 錯誤訊息監控功能已啟動（每 10 秒檢測一次）")
+        self.logger.info("[啟動] 黑屏監控功能已啟動（每 10 秒檢測一次）")
         
         check_count = 0
         refresh_count = 0
         
-        while not self._error_monitor_stop_event.is_set():
+        while self.running:
             try:
-                # 等待 10 秒，如果收到停止信號則立即退出
-                if self._error_monitor_stop_event.wait(timeout=10):
-                    break
+                # 等待 10 秒
+                time.sleep(10)
                 
                 check_count += 1
                 
@@ -4656,20 +4445,6 @@ class GameControlCenter:
                                 self.logger.debug(f"[檢測] 瀏覽器 {i} 黑屏已消失")
                                 self._blackscreen_timestamps[i] = None
                         
-                        # 檢測是否有錯誤訊息（會自動記錄匹配值）
-                        has_error = self.recovery_manager.detect_error_message(context.driver)
-                        
-                        if has_error:
-                            self.logger.warning(f"[檢測] 瀏覽器 {i} 出現錯誤訊息，正在導航到遊戲頁面並重新登入...")
-                            
-                            # 導航到遊戲頁面並完成登入流程
-                            if self.recovery_manager.refresh_and_login(context):
-                                refresh_count += 1
-                                self.logger.info(f"[成功] 瀏覽器 {i} 已導航並重新登入完成")
-                            else:
-                                self.logger.error(f"[失敗] 瀏覽器 {i} 導航或登入失敗")
-                            continue
-                        
                         # 檢測是否有 game_return 圖片
                         has_game_return = self.recovery_manager.detect_game_return(context.driver)
                         
@@ -4696,48 +4471,15 @@ class GameControlCenter:
                         # 靜默處理錯誤，避免日誌過多
                         pass
                 
-                # 每雔一段時間顯示一次統計信息（例如每 30 次）
+                # 每一段時間顯示一次統計信息（例如每 30 次）
                 if check_count % 30 == 0:
-                    self.logger.debug(f"錯誤監控已檢測 {check_count} 次，重整 {refresh_count} 次")
+                    self.logger.debug(f"黑屏監控已檢測 {check_count} 次，重整 {refresh_count} 次")
                     
             except Exception as e:
-                self.logger.error(f"錯誤監控發生錯誤: {e}")
-                self._error_monitor_stop_event.wait(timeout=Constants.STOP_EVENT_ERROR_WAIT)
+                self.logger.error(f"黑屏監控發生錯誤: {e}")
+                time.sleep(Constants.STOP_EVENT_ERROR_WAIT)
         
-        self.logger.info(f"[停止] 錯誤訊息監控功能已停止（共檢測 {check_count} 次，重整 {refresh_count} 次）")
-    
-    def _start_error_monitor(self) -> None:
-        """啟動錯誤訊息監控功能。"""
-        if self.error_monitor_running:
-            self.logger.debug("錯誤訊息監控功能已在運行中")
-            return
-        
-        # 清除停止事件
-        self._error_monitor_stop_event.clear()
-        
-        # 啟動錯誤監控執行緒
-        self.error_monitor_thread = threading.Thread(
-            target=self._error_monitor_loop,
-            daemon=True,
-            name="ErrorMonitorThread"
-        )
-        self.error_monitor_thread.start()
-        self.error_monitor_running = True
-    
-    def _stop_error_monitor(self) -> None:
-        """停止錯誤訊息監控功能。"""
-        if not self.error_monitor_running:
-            return
-        
-        # 設置停止事件
-        self._error_monitor_stop_event.set()
-        
-        # 等待執行緒結束
-        if self.error_monitor_thread and self.error_monitor_thread.is_alive():
-            self.error_monitor_thread.join(timeout=Constants.AUTO_PRESS_THREAD_JOIN_TIMEOUT)
-        
-        self.error_monitor_thread = None
-        self.error_monitor_running = False
+        self.logger.info(f"[停止] 黑屏監控功能已停止（共檢測 {check_count} 次，重整 {refresh_count} 次）")
     
     def _rule_execution_loop(self) -> None:
         """規則執行主循環（在獨立執行緒中運行）。
@@ -5873,43 +5615,6 @@ class GameControlCenter:
                     except Exception as e:
                         self.logger.error(f"截取失敗: {e}")
             
-            elif cmd == 'e':
-                self.logger.info("")
-                self.logger.info("=== 截取錯誤訊息模板工具 ===")
-                self.logger.info("將同時截取左側和右側錯誤訊息區域")
-                self.logger.info("請確保遊戲畫面中出現錯誤訊息")
-                self.logger.info("")
-                
-                try:
-                    print("按 Enter 鍵開始截取（或輸入 q 退出）: ", end="", flush=True)
-                    user_input = input().strip().lower()
-                    
-                    # 檢查是否要退出
-                    if user_input == 'q':
-                        self.logger.info("退出錯誤訊息模板工具")
-                    else:
-                        # 使用第一個有效的瀏覽器截取
-                        valid_browser_found = False
-                        for context in self.browser_contexts:
-                            if self._is_browser_alive(context.driver):
-                                if self.browser_operator.capture_error_message_template(context.driver):
-                                    self.logger.info("[成功] 錯誤訊息模板截取成功（左側和右側）")
-                                    valid_browser_found = True
-                                    break
-                                else:
-                                    self.logger.error("✗ 模板截取失敗")
-                                    break
-                        
-                        if not valid_browser_found:
-                            self.logger.error("沒有可用的瀏覽器")
-                            
-                except EOFError:
-                    self.logger.info("退出錯誤訊息模板工具")
-                except KeyboardInterrupt:
-                    self.logger.info("\n退出錯誤訊息模板工具")
-                except Exception as e:
-                    self.logger.error(f"截取失敗: {e}")
-            
             elif cmd == 'k':
                 self.logger.info("")
                 self.logger.info("=== 截取黑屏模板工具 ===")
@@ -6059,8 +5764,8 @@ class GameControlCenter:
         self.logger.info(f"[成功] 已連接 {len(self.browser_contexts)} 個瀏覽器")
         self.logger.info("")
         
-        # 啟動錯誤訊息監控功能
-        self._start_error_monitor()
+        # 啟動黑屏監控功能
+        threading.Thread(target=self._blackscreen_monitor_loop, daemon=True, name="BlackscreenMonitorThread").start()
         
         # 自動顯示幫助訊息
         self.show_help()
@@ -6113,10 +5818,6 @@ class GameControlCenter:
             if self.auto_start_timer and self.auto_start_timer.is_alive():
                 self.auto_start_timer.cancel()
             
-            # 確保停止錯誤監控功能
-            if self.error_monitor_running:
-                self._stop_error_monitor()
-            
             # 確保停止自動跳過點擊功能
             if self.auto_skip_running:
                 self._stop_auto_skip_click()
@@ -6133,10 +5834,6 @@ class GameControlCenter:
     def stop(self) -> None:
         """停止控制中心"""
         self.running = False
-        
-        # 確保停止錯誤監控功能
-        if self.error_monitor_running:
-            self._stop_error_monitor()
         
         # 確保停止自動跳過點擊功能
         if self.auto_skip_running:
@@ -6737,32 +6434,11 @@ class AutoSlotGameApp:
                         browser_states[i]['error_start_time'] = None
                         continue
                     
-                    # 前幾次不檢查錯誤訊息
-                    if browser_states[i]['lobby_confirm_attempts'] <= Constants.LOBBY_CONFIRM_CHECK_ATTEMPTS:
-                        continue
-                    
-                    # 檢測錯誤訊息
-                    has_error = self.recovery_manager.detect_error_message(context.driver)
-                    
-                    if has_error:
-                        if browser_states[i]['error_start_time'] is None:
-                            # 第一次檢測到錯誤
-                            browser_states[i]['error_start_time'] = current_time
-                            new_errors.append(i)
-                        else:
-                            # 持續檢測到錯誤
-                            elapsed = current_time - browser_states[i]['error_start_time']
-                            if elapsed >= Constants.ERROR_MESSAGE_PERSIST_SECONDS:
-                                errors_to_restart.append(i)
-                    else:
-                        # 未檢測到錯誤，重置計時
-                        if browser_states[i]['error_start_time'] is not None:
-                            browser_states[i]['error_start_time'] = None
-                
                 except Exception as e:
                     self.logger.error(f"瀏覽器 {i} 檢測過程發生錯誤: {e}")
             
-            # 輸出新檢測到的錯誤
+            # 檢查是否有需要重整的瀏覽器（移除錯誤檢測相關邏輯後，此處可能沒有輸出）
+            # 輸出新檢測到的錯誤（已移除）
             if new_errors:
                 self.logger.warning(f"檢測到錯誤訊息: 瀏覽器 {', '.join(map(str, new_errors))}")
             
