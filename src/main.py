@@ -17,6 +17,7 @@
 Python: 3.8+
 
 版本歷史:
+- v1.25.0: 優化登入彈窗檢測邏輯（透過檢查 span 內容和輸入框判斷彈窗類型，區分登入表單與公告彈窗；公告彈窗自動關閉不重試，登入表單才執行重試邏輯；支援多種公告關鍵字識別，避免誤判提升登入成功率）
 - v1.24.1: 優化登入流程穩定性（新增登入表單確認機制，確保表單完全載入後才輸入帳號密碼；登入表單打開失敗時自動重試最多 3 次；登入後自動檢測並關閉公告彈窗，避免誤判登入狀態；調整登入重試檢查時間從 10 秒改為 5 秒，加快重試響應速度）
 - v1.24.0: 新增登入失敗自動重試機制（點擊登入按鈕後等待 10 秒檢查登入彈窗是否還存在，若存在則自動重新輸入帳號密碼並重試，最多重試 3 次，有效提升登入成功率）
 - v1.23.0: 優化登入流程與修復緩衝阻塞問題（登入表單等待改用 element_to_be_clickable 確保元素可互動；創建 FlushingStreamHandler 實現全域自動刷新機制，解決多執行緒環境下日誌輸出阻塞問題；黑屏恢復時自動關閉公告彈窗）
@@ -133,7 +134,7 @@ __all__ = [
 class Constants:
     """系統常量"""
     # 版本資訊
-    VERSION = "1.22.1"
+    VERSION = "1.25.0"
     SYSTEM_NAME = "金富翁遊戲自動化系統"
     
     DEFAULT_LIB_PATH = "lib"
@@ -1946,51 +1947,91 @@ class SyncBrowserOperator:
                 while login_attempt <= max_login_attempts:
                     time.sleep(5)  # 等待 5 秒後檢查
                     
-                    # 先檢查並關閉公告彈窗（如果存在）
                     try:
-                        close_button = driver.find_element(By.CSS_SELECTOR, ".icon-close")
-                        if close_button.is_displayed():
-                            close_button.click()
-                            self.logger.info(f"[{credential.username}] 已關閉公告彈窗")
-                            time.sleep(1)  # 等待彈窗關閉
-                    except Exception:
-                        # 沒有公告彈窗，繼續
-                        pass
-                    
-                    try:
-                        # 檢查登入彈窗是否還存在
+                        # 檢查彈窗是否還存在
                         popup = driver.find_element(By.CSS_SELECTOR, ".popup-wrap, .popup-account-container")
                         
                         if popup.is_displayed():
-                            self.logger.warning(f"[{credential.username}] 登入彈窗仍存在，可能登入失敗，重新輸入帳號密碼（第 {login_attempt}/{max_login_attempts} 次重試）")
+                            # 檢查彈窗內的 span 內容，判斷是公告還是登入表單
+                            is_announcement = False
+                            is_login_form = False
                             
-                            # 重新輸入帳號
-                            username_input = WebDriverWait(driver, 10).until(
-                                EC.element_to_be_clickable((By.XPATH, Constants.USERNAME_INPUT))
-                            )
-                            username_input.clear()
-                            time.sleep(0.5)
-                            username_input.send_keys(credential.username)
-                            self.logger.debug(f"[{credential.username}] 已重新輸入帳號")
+                            try:
+                                # 檢查是否為公告（尋找公告特徵文字）
+                                spans = popup.find_elements(By.TAG_NAME, "span")
+                                for span in spans:
+                                    span_text = span.text.strip()
+                                    # 根據實際公告內容調整判斷條件
+                                    if any(keyword in span_text for keyword in ["公告", "通知", "活動", "最新消息"]):
+                                        is_announcement = True
+                                        self.logger.debug(f"[{credential.username}] 檢測到公告彈窗: {span_text[:20]}...")
+                                        break
+                                
+                                # 檢查是否為登入表單（尋找帳號/密碼輸入框）
+                                try:
+                                    popup.find_element(By.XPATH, Constants.USERNAME_INPUT)
+                                    popup.find_element(By.XPATH, Constants.PASSWORD_INPUT)
+                                    is_login_form = True
+                                except Exception:
+                                    pass
+                                    
+                            except Exception as e:
+                                self.logger.debug(f"[{credential.username}] 檢查彈窗內容時發生錯誤: {e}")
                             
-                            # 重新輸入密碼
-                            password_input = WebDriverWait(driver, 10).until(
-                                EC.element_to_be_clickable((By.XPATH, Constants.PASSWORD_INPUT))
-                            )
-                            password_input.clear()
-                            time.sleep(0.5)
-                            password_input.send_keys(credential.password)
-                            self.logger.debug(f"[{credential.username}] 已重新輸入密碼")
+                            # 如果是公告，關閉它並繼續檢查
+                            if is_announcement and not is_login_form:
+                                self.logger.info(f"[{credential.username}] 檢測到公告彈窗，嘗試關閉...")
+                                try:
+                                    close_button = popup.find_element(By.CSS_SELECTOR, ".icon-close, .close-btn")
+                                    close_button.click()
+                                    self.logger.info(f"[{credential.username}] 已關閉公告彈窗")
+                                    time.sleep(1)  # 等待彈窗關閉
+                                    continue  # 繼續下一次循環檢查
+                                except Exception as e:
+                                    self.logger.warning(f"[{credential.username}] 無法關閉公告彈窗: {e}")
                             
-                            # 重新點擊登入按鈕
-                            login_button = WebDriverWait(driver, 10).until(
-                                EC.element_to_be_clickable((By.XPATH, Constants.LOGIN_BUTTON))
-                            )
-                            login_button.click()
-                            self.logger.info(f"[{credential.username}] 已重新點擊登入按鈕")
-                            
-                            time.sleep(Constants.LOGIN_WAIT_TIME)
-                            login_attempt += 1
+                            # 如果是登入表單，說明登入失敗，需要重試
+                            if is_login_form:
+                                self.logger.warning(f"[{credential.username}] 登入表單仍存在，登入失敗，重新輸入帳號密碼（第 {login_attempt}/{max_login_attempts} 次重試）")
+                                
+                                # 重新輸入帳號
+                                username_input = WebDriverWait(driver, 10).until(
+                                    EC.element_to_be_clickable((By.XPATH, Constants.USERNAME_INPUT))
+                                )
+                                username_input.clear()
+                                time.sleep(0.5)
+                                username_input.send_keys(credential.username)
+                                self.logger.debug(f"[{credential.username}] 已重新輸入帳號")
+                                
+                                # 重新輸入密碼
+                                password_input = WebDriverWait(driver, 10).until(
+                                    EC.element_to_be_clickable((By.XPATH, Constants.PASSWORD_INPUT))
+                                )
+                                password_input.clear()
+                                time.sleep(0.5)
+                                password_input.send_keys(credential.password)
+                                self.logger.debug(f"[{credential.username}] 已重新輸入密碼")
+                                
+                                # 重新點擊登入按鈕
+                                login_button = WebDriverWait(driver, 10).until(
+                                    EC.element_to_be_clickable((By.XPATH, Constants.LOGIN_BUTTON))
+                                )
+                                login_button.click()
+                                self.logger.info(f"[{credential.username}] 已重新點擊登入按鈕")
+                                
+                                time.sleep(Constants.LOGIN_WAIT_TIME)
+                                login_attempt += 1
+                            elif not is_announcement:
+                                # 既不是公告也不是登入表單，可能是其他彈窗，嘗試關閉
+                                self.logger.debug(f"[{credential.username}] 檢測到未知彈窗，嘗試關閉...")
+                                try:
+                                    close_button = popup.find_element(By.CSS_SELECTOR, ".icon-close, .close-btn")
+                                    close_button.click()
+                                    time.sleep(1)
+                                    continue
+                                except Exception:
+                                    # 無法關閉，跳出循環
+                                    break
                         else:
                             # 彈窗不可見，登入成功
                             break
@@ -3011,6 +3052,13 @@ class ImageDetector:
             如果未找到: None
         """
         try:
+            # 檢查瀏覽器是否仍然有效
+            try:
+                _ = driver.current_url
+            except Exception:
+                self.logger.warning(f"瀏覽器已關閉，無法進行圖片檢測")
+                return None
+            
             screenshot = self.capture_screenshot(driver)
             template_path = self.get_template_path(template_name)
             return self.match_template(screenshot, template_path, threshold)
@@ -3039,6 +3087,13 @@ class ImageDetector:
             是否檢測到錯誤訊息
         """
         try:
+            # 檢查瀏覽器是否仍然有效
+            try:
+                _ = driver.current_url
+            except Exception:
+                self.logger.debug(f"瀏覽器已關閉，跳過錯誤訊息檢測")
+                return False
+            
             # 截取全螢幕
             screenshot = self.capture_screenshot(driver)
             if screenshot is None:
@@ -4108,6 +4163,10 @@ class GameControlCenter:
         self.time_monitor_running = False  # 時間監控運行狀態
         self.time_monitor_thread: Optional[threading.Thread] = None  # 時間監控執行緒
         self._time_monitor_stop_event = threading.Event()  # 時間監控停止事件
+        
+        # 自動執行相關
+        self.user_has_input = False  # 記錄用戶是否有輸入過命令
+        self.auto_start_timer: Optional[threading.Timer] = None  # 自動啟動計時器
         
         # 初始化恢復管理器
         self.image_detector = ImageDetector(logger=self.logger)
@@ -6006,11 +6065,36 @@ class GameControlCenter:
         # 自動顯示幫助訊息
         self.show_help()
         
+        # 啟動60秒自動執行計時器
+        self.logger.info("")
+        self.logger.info("⏰ 將在 60 秒後自動執行 'r 4' 命令（4小時規則執行）")
+        self.logger.info("   如需取消，請輸入任意命令")
+        self.logger.info("")
+        
+        def auto_execute_r4():
+            """60秒後自動執行 r 4 命令"""
+            if not self.user_has_input and self.running:
+                self.logger.info("")
+                self.logger.info("⏰ 60秒已到，自動執行 'r 4' 命令...")
+                self.logger.info("")
+                self.process_command("r 4")
+        
+        self.auto_start_timer = threading.Timer(60.0, auto_execute_r4)
+        self.auto_start_timer.daemon = True
+        self.auto_start_timer.start()
+        
         try:
             while self.running:
                 try:
                     print(">>> ", end="", flush=True)
                     command = input().strip()
+                    
+                    # 記錄用戶已經輸入過命令，取消自動執行
+                    if not self.user_has_input:
+                        self.user_has_input = True
+                        if self.auto_start_timer and self.auto_start_timer.is_alive():
+                            self.auto_start_timer.cancel()
+                            self.logger.info("[提示] 已取消自動執行 'r 4' 命令")
                     
                     if command:
                         if not self.process_command(command):
@@ -6025,6 +6109,10 @@ class GameControlCenter:
                     self.logger.info("\n[警告] 使用者中斷，退出控制中心")
                     break
         finally:
+            # 取消自動執行計時器
+            if self.auto_start_timer and self.auto_start_timer.is_alive():
+                self.auto_start_timer.cancel()
+            
             # 確保停止錯誤監控功能
             if self.error_monitor_running:
                 self._stop_error_monitor()
