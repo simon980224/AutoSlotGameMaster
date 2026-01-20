@@ -2,14 +2,24 @@
 
 > 金富翁遊戲自動化系統 - 多瀏覽器並行控制、圖片識別、Proxy 中繼
 
-[![Version](https://img.shields.io/badge/version-1.26.0-brightgreen.svg)](https://github.com/simon980224/AutoSlotGameMaster)
+[![Version](https://img.shields.io/badge/version-1.26.1-brightgreen.svg)](https://github.com/simon980224/AutoSlotGameMaster)
 [![Python Version](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](https://github.com/simon980224/AutoSlotGameMaster)
 
 一個使用 Selenium WebDriver、OpenCV 圖片識別和 Chrome DevTools Protocol 實現的遊戲自動化系統。支援多瀏覽器並行控制、本地 Proxy 中繼、自動下注、錯誤自動恢復和免費遊戲購買等功能。
 
-## 🎉 最新更新 (v1.26.0)
+## 🎉 最新更新 (v1.26.1)
+
+- ⚡ **簡化登入後公告處理邏輯** - 大幅提升登入速度和穩定性
+  - **移除複雜判斷**：不再檢測彈窗類型（公告 vs 登入表單），直接強制關閉
+  - **移除循環檢測**：取消最多 5 次的彈窗檢查循環，避免卡住
+  - **統一處理策略**：登入後統一使用 JavaScript 強制移除所有彈窗 DOM 元素
+  - **優化等待時間**：總等待時間從可能超過 30 秒優化為固定 7 秒（5 秒登入 + 2 秒等待彈窗）
+  - **提升穩定性**：避免因彈窗類型識別失敗或找不到關閉按鈕導致的無限等待
+  - **簡化日誌**：移除冗長的彈窗檢測日誌，只保留關鍵步驟輸出
+
+### v1.26.0 更新內容
 
 - 🧹 **移除錯誤訊息自動檢測功能** - 簡化系統架構，提升效能
   - **移除檢測邏輯**：完全移除 error_message 相關的雙區域模板匹配檢測

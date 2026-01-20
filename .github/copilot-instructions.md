@@ -8,10 +8,11 @@
 
 ## 版本資訊
 
-**目前版本**: v1.26.0
+**目前版本**: v1.26.1
 
 **更新內容**:
 
+- v1.26.1: 簡化登入後公告處理邏輯（移除複雜的彈窗類型判斷和循環檢測機制，改為登入後直接使用 JavaScript 強制關閉所有彈窗；等待時間從可能超過 30 秒優化為固定 7 秒；避免卡在彈窗檢測循環，提升登入流程穩定性和響應速度）
 - v1.26.0: 移除錯誤訊息自動檢測功能（移除所有 error_message 相關邏輯、常數定義、檢測方法和背景監控執行緒；保留黑屏和 game_return 檢測功能；重構為 \_blackscreen_monitor_loop，簡化監控流程，提升系統效能）
 - v1.25.0: 優化登入彈窗檢測邏輯（透過檢查 span 內容和輸入框判斷彈窗類型，區分登入表單與公告彈窗；公告彈窗自動關閉不重試，登入表單才執行重試邏輯；支援多種公告關鍵字識別，避免誤判提升登入成功率）
 - v1.24.1: 優化登入流程穩定性（新增登入表單確認機制，確保表單完全載入後才輸入帳號密碼；登入表單打開失敗時自動重試最多 3 次；登入後自動檢測並關閉公告彈窗，避免誤判登入狀態；調整登入重試檢查時間從 10 秒改為 5 秒，加快重試響應速度）
@@ -173,6 +174,82 @@ Chrome (使用本地 Proxy)
 - `TEMPLATE_CROP_MARGIN = 20` - 通用模板裁切邊距
 
 **重要原則**: 任何需要調整的數值都應定義為常數，避免在程式碼中出現魔法數字
+
+## v1.26.1 新增功能詳解
+
+### 簡化登入後公告處理邏輯
+
+**問題**: 登入後的彈窗檢測邏輯過於複雜，包含多層判斷（公告 vs 登入表單）、循環檢測（最多 5 次）、關閉按鈕搜尋（5 種選擇器），導致：
+
+- 可能卡在循環檢測中超過 30 秒
+- 找不到關閉按鈕時陷入重試
+- 彈窗類型識別失敗導致誤判
+- 日誌輸出冗長難以追蹤
+
+**解決方案**:
+徹底簡化流程，移除所有複雜判斷，改為直接強制關閉：
+
+```python
+# 點擊登入按鈕
+login_button.click()
+self.logger.info(f"[{credential.username}] 已點擊登入按鈕，等待登入完成...")
+
+time.sleep(Constants.LOGIN_WAIT_TIME)  # 等待登入完成 (5秒)
+
+# 登入後直接強制關閉所有彈窗（公告、廣告等）
+self.logger.debug(f"[{credential.username}] 開始關閉登入後的公告彈窗...")
+time.sleep(2)  # 等待公告彈窗可能出現
+
+try:
+    # 使用 JavaScript 強制隱藏所有彈窗
+    driver.execute_script("""
+        const popups = document.querySelectorAll('.popup-container, .popup-wrap, .popup-account-container');
+        popups.forEach(popup => {
+            popup.style.display = 'none';
+            popup.style.visibility = 'hidden';
+            popup.remove();
+        });
+
+        // 移除遮罩層
+        const overlays = document.querySelectorAll('[class*="overlay"], [class*="mask"]');
+        overlays.forEach(overlay => overlay.remove());
+    """)
+    self.logger.info(f"[{credential.username}] ✓ 已關閉所有公告彈窗")
+except Exception as e:
+    self.logger.debug(f"[{credential.username}] 關閉公告彈窗時發生錯誤（可忽略）: {e}")
+```
+
+**優勢**:
+
+- **執行快速**：總共只需 7 秒（5 秒登入 + 2 秒等待），不會卡住
+- **無需判斷**：不檢測彈窗類型，統一處理
+- **強制關閉**：JavaScript 直接移除 DOM 元素，100% 成功
+- **日誌清晰**：只輸出關鍵步驟，不再有複雜的循環檢測日誌
+- **避免誤判**：不會因為彈窗類型識別失敗而陷入無限循環
+
+**移除的複雜邏輯**:
+
+- ❌ 彈窗類型檢測（公告 vs 登入表單）
+- ❌ 循環檢測機制（最多 5 次）
+- ❌ 關閉按鈕搜尋（5 種選擇器）
+- ❌ 條件分支處理（is_announcement, is_login_form）
+- ❌ 冗長的日誌輸出
+
+**工作流程**:
+
+```
+點擊登入按鈕
+    ↓
+等待 5 秒（登入完成）
+    ↓
+等待 2 秒（公告可能出現）
+    ↓
+JavaScript 強制關閉所有彈窗
+    ↓
+完成 ✓
+```
+
+**相關程式碼**: `SyncBrowserOperator.perform_login_all()` - [main.py#L1931-L1950]
 
 ## v1.23.0 新增功能詳解
 

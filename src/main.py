@@ -13,10 +13,11 @@
 - 完善的錯誤處理與重試機制
 
 作者: 凡臻科技
-版本: 1.26.0
+版本: 1.26.1
 Python: 3.8+
 
 版本歷史:
+- v1.26.1: 簡化登入後公告處理邏輯（移除複雜的彈窗類型判斷和循環檢測機制，改為登入後直接使用 JavaScript 強制關閉所有彈窗；等待時間從可能超過 30 秒優化為固定 7 秒；避免卡在彈窗檢測循環，提升登入流程穩定性和響應速度）
 - v1.26.0: 移除錯誤訊息自動檢測功能（移除所有 error_message 相關邏輯、常數定義、檢測方法和背景監控執行緒；保留黑屏和 game_return 檢測功能；簡化監控流程，提升系統效能）
 - v1.25.0: 優化登入彈窗檢測邏輯（透過檢查 span 內容和輸入框判斷彈窗類型，區分登入表單與公告彈窗；公告彈窗自動關閉不重試，登入表單才執行重試邏輯；支援多種公告關鍵字識別，避免誤判提升登入成功率）
 - v1.24.1: 優化登入流程穩定性（新增登入表單確認機制，確保表單完全載入後才輸入帳號密碼；登入表單打開失敗時自動重試最多 3 次；登入後自動檢測並關閉公告彈窗，避免誤判登入狀態；調整登入重試檢查時間從 10 秒改為 5 秒，加快重試響應速度）
@@ -158,12 +159,12 @@ class Constants:
     # GAME_PAGE = "https://www.sf-16888.com/#/home/loding?game_code=golden-seth&factory_code=ATG&state=true&name=戰神賽特2%20覺醒之力"
     
     # FIN
-    LOGIN_PAGE = "https://www.fin88.app/"
-    GAME_PAGE = "https://www.fin88.app/"
+    # LOGIN_PAGE = "https://www.fin88.app/"
+    # GAME_PAGE = "https://www.fin88.app/"
 
     # TG
-    # LOGIN_PAGE = "https://www.tg5688.com"
-    # GAME_PAGE = "https://www.tg5688.com"
+    LOGIN_PAGE = "https://www.tg5688.com"
+    GAME_PAGE = "https://www.tg5688.com"
 
     # 頁面元素選擇器
     INITIAL_LOGIN_BUTTON = "//button[contains(@class, 'btn') and contains(@class, 'login') and contains(@class, 'pc') and text()='登入']"
@@ -173,8 +174,8 @@ class Constants:
     POPUP_CLOSE_BUTTON = "//button[contains(@class, 'btn-close')]"
     SEARCH_BUTTON = "//button[contains(@class, 'search-btn')]"
     SEARCH_INPUT = "//input[@placeholder='按換行鍵搜索']"
-    GAME_XPATH = "//div[contains(@class, 'game-card-container') and .//div[contains(@style, 'ATG-egyptian-mythology.png')]]" # 賽特1（第二個大卡片-戰神埃及神話）
-    # GAME_XPATH = "//div[contains(@class, 'game-card-container') and contains(@class, 'big')]" # 賽特2（第一個大卡片）
+    # GAME_XPATH = "//div[contains(@class, 'game-card-container') and .//div[contains(@style, 'ATG-egyptian-mythology.png')]]" # 賽特1（第二個大卡片-戰神埃及神話）
+    GAME_XPATH = "//div[contains(@class, 'game-card-container') and contains(@class, 'big')]" # 賽特2（第一個大卡片）
     GAME_IFRAME = "//iframe[contains(@class, 'iframe-item')]"
     GAME_CANVAS = "GameCanvas"
     
