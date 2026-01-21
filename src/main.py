@@ -1,38 +1,82 @@
 """
-賽特遊戲自動化系統 - Main 入口點
+賽特遊戲自動化系統
 
-這是 v2.0.0 的主程式入口，使用模組化的 autoslot 套件。
-核心功能已拆分到 autoslot 模組中，提升可維護性和可擴展性。
+核心特性:
+- 完整型別提示與協議 (Protocol)
+- 上下文管理器與資源自動清理
+- 依賴注入與工廠模式
+- 執行緒池並行處理
+- 本地 Proxy 中繼伺服器
+- 圖片識別與自動化操作
+- 多瀏覽器實例管理
+- 彩色日誌系統
+- 完善的錯誤處理與重試機制
 
 作者: 凡臻科技
-版本: 2.0.0
+版本: 1.26.1
 Python: 3.8+
 
-模組結構:
-- autoslot.core: 核心模組（常數、例外、資料模型）
-- autoslot.utils: 工具模組（日誌、輔助函式）
-- autoslot.config: 配置模組（配置讀取）
-- autoslot.managers: 管理器模組（待完整遷移）
-- autoslot.operators: 操作器模組（待完整遷移）
-- autoslot.detectors: 檢測器模組（待完整遷移）
-- autoslot.app: 應用程式模組（待完整遷移）
-
 版本歷史:
-- v2.0.0: 模組化重構（將單一檔案拆分為多個模組，提升可維護性和可擴展性）
-- v1.27.0 ~ v1.0.0: 詳見 autoslot.__init__.py 中的完整版本歷史
+- v1.26.1: 簡化登入後公告處理邏輯（移除複雜的彈窗類型判斷和循環檢測機制，改為登入後直接使用 JavaScript 強制關閉所有彈窗；等待時間從可能超過 30 秒優化為固定 7 秒；避免卡在彈窗檢測循環，提升登入流程穩定性和響應速度）
+- v1.26.0: 移除錯誤訊息自動檢測功能（移除所有 error_message 相關邏輯、常數定義、檢測方法和背景監控執行緒；保留黑屏和 game_return 檢測功能；簡化監控流程，提升系統效能）
+- v1.25.0: 優化登入彈窗檢測邏輯（透過檢查 span 內容和輸入框判斷彈窗類型，區分登入表單與公告彈窗；公告彈窗自動關閉不重試，登入表單才執行重試邏輯；支援多種公告關鍵字識別，避免誤判提升登入成功率）
+- v1.24.1: 優化登入流程穩定性（新增登入表單確認機制，確保表單完全載入後才輸入帳號密碼；登入表單打開失敗時自動重試最多 3 次；登入後自動檢測並關閉公告彈窗，避免誤判登入狀態；調整登入重試檢查時間從 10 秒改為 5 秒，加快重試響應速度）
+- v1.24.0: 新增登入失敗自動重試機制（點擊登入按鈕後等待 10 秒檢查登入彈窗是否還存在，若存在則自動重新輸入帳號密碼並重試，最多重試 3 次，有效提升登入成功率）
+- v1.23.0: 優化登入流程與修復緩衝阻塞問題（登入表單等待改用 element_to_be_clickable 確保元素可互動；創建 FlushingStreamHandler 實現全域自動刷新機制，解決多執行緒環境下日誌輸出阻塞問題；黑屏恢復時自動關閉公告彈窗）
+- v1.22.1: 優化等待時間與自動跳過間隔（將搜尋「戰神」後的等待時間從 10 秒優化為 5 秒，統一遊戲載入等待時間為 5 秒；調整自動跳過點擊間隔從 10 秒改為 60 秒，減少不必要的操作頻率）
+- v1.22.0: 優化登入與恢復流程（修正等待 lobby_login 超時問題：在等待過程中同時檢測 game_return，若直接出現則視為登入成功；延長搜尋「戰神」後的等待時間從 3 秒改為 10 秒，確保搜尋結果完全載入）
+- v1.21.1: 優化黑屏恢復流程（將視窗放大方式從 2 倍改為全螢幕，確保 DOM 元素完全展開，提升自動導航成功率）
+- v1.21.0: 優化規則執行結束流程（關閉前回到登入頁面並等待 10 秒，確保伺服器端正確處理登出）
+- v1.20.0: 新增 lobby_return 檢測與自動恢復功能（點擊 game_return 後自動檢測 lobby_return，若出現則執行完整登入流程：回到 LOGIN_PAGE → 放大視窗 → 搜尋戰神 → 點擊遊戲 → 完成登入）
+- v1.19.0: 優化 game_return 點擊功能（調整 iframe 檢測順序為先檢查外層頁面，增加重試機制與詳細日誌，提升首次點擊成功率）
+- v1.18.0: 新增 game_return 圖片檢測功能（自動檢測並點擊返回遊戲提示，優化錯誤恢復流程為完整登入流程）
+- v1.17.1: 修正自動跳過點擊功能的時間戳錯誤（將 AUTO_SKIP_CLICK_INTERVAL 從極大值改為 86400 秒，避免 timestamp too large 錯誤）
+- v1.17.0: 優化調整金額功能（每次調整間隔改為3秒，超過最大嘗試次數自動關閉該瀏覽器）
+- v1.16.1: 修正規則執行時間控制功能（優化時間到達後的自動退出機制，使用 os._exit() 強制退出；短時間執行時更頻繁顯示剩餘時間）
+- v1.16.0: 新增規則執行時間控制功能（'r' 命令支援可選的小時參數，時間到後自動關閉所有瀏覽器並退出）
+- v1.15.0: 新增錯誤訊息自動監控與重整功能（每 10 秒檢測，雙區域模板匹配，'e' 命令截取模板）
+- v1.14.3: 修正按下 'p' 後規則仍繼續執行的問題（在規則執行的關鍵步驟之間加入停止檢查）
+- v1.14.2: 修正規則執行循環問題（'f' 規則執行後正確清除停止事件，確保循環繼續）
+- v1.14.1: 修正規則執行中 'f' 規則 AttributeError 問題（改用 browser_operator.last_canvas_rect）
+- v1.14.0: 擴展規則執行功能，支援 'f' 類型規則（購買免費遊戲），規則格式: f:金額
+- v1.13.0: 擴展規則執行功能，支援自動旋轉規則（'a' 類型）和標準規則（'s' 類型）混合執行
+- v1.12.1: 修正規則執行中關閉瀏覽器導致程序停頓的問題（添加瀏覽器狀態檢測）
+- v1.12.0: 移除視窗大小鎖定功能，允許用戶自由調整視窗大小（初始仍為 600x400）
+- v1.11.0: 新增自動跳過點擊功能，每 30 秒自動點擊跳過區域（背景執行，持續運行）
+- v1.10.0: 新增視窗大小鎖定功能，自動監控並恢復視窗大小（位置可自由移動）
+- v1.9.0: 優化系統啟動流程（自動顯示完整指令列表，移除 emoji 符號，統一日誌格式）
+- v1.8.0: 優化關閉瀏覽器功能（'q' 指令），支援選擇性關閉指定瀏覽器
+- v1.7.1: 修正金額識別問題（統一使用 Constants 定義，移除重複定義和硬編碼數值）
+- v1.7.0: 新增規則執行功能（'r' 指令），支援自動切換金額並按空白鍵，規則循環執行
+- v1.6.2: 調整遊戲金額配置（GAME_BETSIZE 和 GAME_BETSIZE_TUPLE），從 73 種金額優化為 64 種金額
+- v1.6.1: 調整金額顯示和裁切參數（BETSIZE_DISPLAY_Y: 380→370, CROP_MARGIN_X: 50→40, CROP_MARGIN_Y: 20→10）
+- v1.6.0: 優化登入流程（新增錯誤訊息檢測與自動重啟機制）
+- v1.5.0: 統一管理所有魔法數字（視窗尺寸、座標、等待時間、重試次數等）
+- v1.4.3: 優化瀏覽器網路設定（啟用 QUIC、TCP Fast Open、NetworkService）
+- v1.4.2: 修正 Windows 中文路徑截圖儲存失敗問題
+- v1.4.1: 新增瀏覽器靜音功能，自動將所有瀏覽器設為靜音
+- v1.4.0: 優化免費遊戲結算流程（3秒後開始點擊，間隔3秒，共5次）
+- v1.3.0: 新增自動旋轉功能（支援 10、50、100 次）
+- v1.2.0: 新增專案啟動前自動清除 chromedriver 快取功能
+- v1.1.0: 修正 OpenCV 無法讀取中文路徑圖片的問題
+- v1.0.0: 初始版本發布
 """
 
 import datetime
+import logging
+import sys
+import platform
 import socket
 import select
 import base64
 import time
-import os
-import random
-from typing import Optional, List, Dict, Tuple, Any, Callable
+import subprocess
+from typing import Optional, List, Dict, Tuple, Any, Callable, Protocol, Union
 from pathlib import Path
+from dataclasses import dataclass, field
 from contextlib import contextmanager, suppress
 from concurrent.futures import ThreadPoolExecutor, as_completed, Future
+from enum import Enum
 import threading
 
 # Selenium WebDriver 相關
@@ -41,59 +85,929 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.webdriver import WebDriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, WebDriverException
 from webdriver_manager.chrome import ChromeDriverManager
 
 # 圖片處理相關
 import cv2
 import numpy as np
+from PIL import Image
 import io
 
-# 從 autoslot 模組導入（v2.0.0 模組化架構）
-from autoslot import (
-    # 核心常數
-    Constants,
+
+# 導出的公共 API
+__all__ = [
+    # 常量
+    'Constants',
+    # 資料類別
+    'UserCredential',
+    'BetRule',
+    'ProxyInfo',
+    'BrowserContext',
+    'OperationResult',
     # 例外類別
-    AutoSlotGameError,
-    ConfigurationError,
-    BrowserCreationError,
-    ProxyServerError,
-    ImageDetectionError,
-    # 資料模型
-    UserCredential,
-    BetRule,
-    ProxyInfo,
-    BrowserContext,
-    OperationResult,
-    # 日誌系統
-    LogLevel,
-    LoggerFactory,
-    # 輔助函式
-    cleanup_chromedriver_processes,
-    get_resource_path,
-    cv2_imread_unicode,
-    # 配置讀取
-    ConfigReader,
-)
-
-
-# 補充導入（避免重複定義衝突）
-import logging
-import sys
-import platform
-import subprocess
-from dataclasses import dataclass, field
-from enum import Enum
-from typing import Protocol, Union
-from PIL import Image
+    'AutoSlotGameError',
+    'ConfigurationError',
+    'BrowserCreationError',
+    'ProxyServerError',
+    'ImageDetectionError',
+    # 日誌類別
+    'LogLevel',
+    'LoggerFactory',
+    # 輔助類別
+    'BrowserHelper',
+    # 主要類別
+    'ConfigReader',
+    'BrowserManager',
+    'LocalProxyServerManager',
+    'SyncBrowserOperator',
+    'ImageDetector',
+    'BrowserRecoveryManager',
+    'GameControlCenter',
+    'AutoSlotGameApp',
+]
 
 
 # ============================================================================
-# Proxy 伺服器 (待遷移到 autoslot.managers)
+# 常量定義
+# ============================================================================
+
+class Constants:
+    """系統常量"""
+    # 版本資訊
+    VERSION = "1.27.0"
+    SYSTEM_NAME = "賽特遊戲自動化系統"
+    
+    DEFAULT_LIB_PATH = "lib"
+    DEFAULT_CREDENTIALS_FILE = "用戶資料.txt"
+    DEFAULT_RULES_FILE = "用戶規則.txt"
+    
+    DEFAULT_PROXY_START_PORT = 9000
+    DEFAULT_TIMEOUT_SECONDS = 30
+    DEFAULT_PAGE_LOAD_TIMEOUT = 600
+    DEFAULT_SCRIPT_TIMEOUT = 600
+    DEFAULT_IMPLICIT_WAIT = 60
+    
+    MAX_THREAD_WORKERS = 10
+    PROXY_SERVER_BIND_HOST = "127.0.0.1"
+    PROXY_BUFFER_SIZE = 4096
+    PROXY_SELECT_TIMEOUT = 1.0
+    
+    # URL 配置
+    # LOGIN_PAGE = "https://m.jfw-win.com/#/login?redirect=%2Fhome%2Fpage"
+    # GAME_PAGE = "https://www.sf-16888.com/#/home/loding?game_code=golden-seth&factory_code=ATG&state=true&name=戰神賽特2%20覺醒之力"
+    
+    # FIN
+    LOGIN_PAGE = "https://www.fin88.app/"
+    GAME_PAGE = "https://www.fin88.app/"
+
+    # TG 勿刪除
+    # LOGIN_PAGE = "https://www.tg5688.com"
+    # GAME_PAGE = "https://www.tg5688.com"
+
+    # 頁面元素選擇器
+    INITIAL_LOGIN_BUTTON = "//button[contains(@class, 'btn') and contains(@class, 'login') and contains(@class, 'pc') and text()='登入']"
+    USERNAME_INPUT = "//input[@placeholder='請輸入帳號/手機號']"
+    PASSWORD_INPUT = "//input[@placeholder='請輸入您的登入密碼']"
+    LOGIN_BUTTON = "//button[contains(@class, 'custom-button') and @type='submit' and text()='登入遊戲']"
+    POPUP_CLOSE_BUTTON = "//button[contains(@class, 'btn-close')]"
+    SEARCH_BUTTON = "//button[contains(@class, 'search-btn')]"
+    SEARCH_INPUT = "//input[@placeholder='按換行鍵搜索']"
+    GAME_XPATH = "//div[contains(@class, 'game-card-container') and .//div[contains(@style, 'ATG-egyptian-mythology.png')]]" # 賽特1（第二個大卡片-戰神埃及神話）
+    # GAME_XPATH = "//div[contains(@class, 'game-card-container') and contains(@class, 'big')]" # 賽特2（第一個大卡片）勿刪除
+    GAME_IFRAME = "//iframe[contains(@class, 'iframe-item')]"
+    GAME_CANVAS = "GameCanvas"
+    
+    # 圖片檢測配置
+    IMAGE_DIR = "img"
+    LOBBY_LOGIN = "lobby_login.png"
+    LOBBY_CONFIRM = "lobby_confirm.png"
+    LOBBY_RETURN = "lobby_return.png"  # 大廳返回模板
+    GAME_RETURN = "game_return.png"  # 遊戲返回模板
+    BLACK_SCREEN = "black_screen.png"  # 黑屏模板
+    MATCH_THRESHOLD = 0.8  # 圖片匹配閾值
+    BETSIZE_MATCH_THRESHOLD = 0.85  # 金額識別匹配閾值
+    DETECTION_INTERVAL = 1.0  # 檢測間隔（秒）
+    MAX_DETECTION_ATTEMPTS = 60  # 最大檢測次數
+    
+    # Canvas 動態計算比例（用於點擊座標）
+    # lobby_login 按鈕座標比例
+    LOBBY_LOGIN_BUTTON_X_RATIO = 0.5  # lobby_login 開始遊戲按鈕 X 座標比例
+    LOBBY_LOGIN_BUTTON_Y_RATIO = 0.9   # lobby_login 開始遊戲按鈕 Y 座標比例
+    
+    # lobby_confirm 按鈕座標比例
+    LOBBY_CONFIRM_BUTTON_X_RATIO = 0.74  # lobby_confirm 確認按鈕 X 座標比例
+    LOBBY_CONFIRM_BUTTON_Y_RATIO = 0.85  # lobby_confirm 確認按鈕 Y 座標比例
+    
+    # 購買免費遊戲按鈕座標比例
+    BUY_FREE_GAME_BUTTON_X_RATIO = 0.15  # 免費遊戲區域按鈕 X 座標比例
+    BUY_FREE_GAME_BUTTON_Y_RATIO = 0.75  # 免費遊戲區域按鈕 Y 座標比例
+    BUY_FREE_GAME_CONFIRM_X_RATIO = 0.65  # 免費遊戲確認按鈕 X 座標比例
+    BUY_FREE_GAME_CONFIRM_Y_RATIO = 0.9   # 免費遊戲確認按鈕 Y 座標比例
+    BUY_FREE_GAME_WAIT_SECONDS = 10  # 購買後等待秒數
+    
+    # game_return 返回確認按鈕座標比例
+    GAME_CONFIRM_BUTTON_X_RATIO = 0.5  # game_return 確認按鈕 X 座標比例
+    GAME_CONFIRM_BUTTON_Y_RATIO = 0.55  # game_return 確認按鈕 Y 座標比例
+    
+    # 自動旋轉按鈕座標比例
+    AUTO_SPIN_BUTTON_X_RATIO = 0.8  # 自動轉按鈕 X 座標比例
+    AUTO_SPIN_BUTTON_Y_RATIO = 0.77   # 自動轉按鈕 Y 座標比例
+    AUTO_SPIN_10_X_RATIO = 0.4        # 10次按鈕 X 座標比例
+    AUTO_SPIN_10_Y_RATIO = 0.5       # 10次按鈕 Y 座標比例
+    AUTO_SPIN_50_X_RATIO = 0.5       # 50次按鈕 X 座標比例
+    AUTO_SPIN_50_Y_RATIO = 0.5       # 50次按鈕 Y 座標比例
+    AUTO_SPIN_100_X_RATIO = 0.57      # 100次按鈕 X 座標比例
+    AUTO_SPIN_100_Y_RATIO = 0.5      # 100次按鈕 Y 座標比例
+    
+    # 操作相關常量
+    DEFAULT_WAIT_SECONDS = 3  # 預設等待時間（秒）
+    DETECTION_PROGRESS_INTERVAL = 20  # 檢測進度顯示間隔
+    
+    # 操作等待時間（秒）
+    LOGIN_WAIT_TIME = 5          # 登入後等待時間
+    BETSIZE_ADJUST_STEP_WAIT = 3.0  # 調整金額每步等待時間
+    BETSIZE_ADJUST_VERIFY_WAIT = 2.0  # 調整金額驗證前等待時間
+    BETSIZE_ADJUST_RETRY_WAIT = 1.0  # 調整金額重試等待時間
+    BETSIZE_READ_RETRY_WAIT = 0.5    # 讀取金額重試等待時間
+    FREE_GAME_CLICK_WAIT = 2     # 免費遊戲點擊間隔
+    FREE_GAME_SETTLE_INITIAL_WAIT = 3  # 免費遊戲結算初始等待
+    FREE_GAME_SETTLE_CLICK_INTERVAL = 3  # 免費遊戲結算點擊間隔
+    AUTO_SPIN_MENU_WAIT = 0.5    # 自動旋轉選單等待時間
+    PROXY_SERVER_START_WAIT = 1  # Proxy 伺服器啟動等待時間
+    TEMPLATE_CAPTURE_WAIT = 1    # 模板截取後等待時間
+    DETECTION_COMPLETE_WAIT = 2  # 檢測完成後等待時間
+    RULE_SWITCH_WAIT = 1.0       # 規則切換等待時間
+    AUTO_PRESS_THREAD_JOIN_TIMEOUT = 2.0  # 自動按鍵執行緒結束等待時間
+    AUTO_PRESS_STOP_TIMEOUT = 5.0  # 自動按鍵停止等待超時時間
+    STOP_EVENT_WAIT_TIMEOUT = 5.0  # 停止事件等待超時時間
+    STOP_EVENT_ERROR_WAIT = 1.0    # 停止事件錯誤等待時間
+    SERVER_SOCKET_TIMEOUT = 1.0    # 伺服器 Socket 超時時間
+    CLEANUP_PROCESS_TIMEOUT = 10   # 清除程序超時時間（秒）
+    AUTO_SKIP_CLICK_INTERVAL = 60  # 自動跳過點擊間隔時間（秒）# 設為 86400表示不啟用
+    RULE_EXECUTION_TIME_CHECK_INTERVAL = 10  # 規則執行時間檢查間隔（秒）
+    
+    # 重試與循環配置
+    BETSIZE_ADJUST_MAX_ATTEMPTS = 400  # 調整金額最大嘗試次數
+    BETSIZE_READ_MAX_RETRIES = 2       # 讀取金額最大重試次數
+    FREE_GAME_SETTLE_CLICK_COUNT = 5   # 免費遊戲結算點擊次數
+    DETECTION_WAIT_MAX_ATTEMPTS = 20   # 檢測等待最大嘗試次數
+    LOBBY_CONFIRM_CHECK_ATTEMPTS = 3   # lobby_confirm 檢測嘗試次數（之後檢查錯誤）
+    
+    # 視窗排列配置
+    DEFAULT_WINDOW_WIDTH = 600
+    DEFAULT_WINDOW_HEIGHT = 400
+    DEFAULT_WINDOW_COLUMNS = 4
+    
+    # 下注金額調整按鈕座標
+    BETSIZE_INCREASE_BUTTON_X = 0.8     # 增加金額按鈕 X 座標
+    BETSIZE_INCREASE_BUTTON_Y = 0.89    # 增加金額按鈕 Y 座標
+    BETSIZE_DECREASE_BUTTON_X =  0.63   # 減少金額按鈕 X 座標
+    BETSIZE_DECREASE_BUTTON_Y =  0.89   # 減少金額按鈕 Y 座標
+    BETSIZE_DISPLAY_X = 0.72            # 金額顯示位置 X 座標
+    BETSIZE_DISPLAY_Y = 0.89            # 金額顯示位置 Y 座標
+
+    # 黑屏截圖座標（基於預設視窗大小）
+    BLACKSCREEN_CENTER_X = 300  # 黑屏區域中心 X 座標
+    BLACKSCREEN_CENTER_Y = 195  # 黑屏區域中心 Y 座標
+    BLACKSCREEN_CROP_MARGIN_X = 125  # 黑屏截圖裁切邊距（左右）
+    BLACKSCREEN_CROP_MARGIN_Y = 75   # 黑屏截圖裁切邊距（上下）
+    BLACKSCREEN_PERSIST_SECONDS = 10  # 黑屏持續秒數閾值
+
+    # 返回遊戲提示截圖座標（基於預設視窗大小，使用與黑屏相同的座標）
+    GAME_RETURN_CENTER_X = 290  # 返回遊戲提示中心 X 座標
+    GAME_RETURN_CENTER_Y = 160  # 返回遊戲提示中心 Y 座標
+    GAME_RETURN_CROP_MARGIN_X = 50  # 返回遊戲提示裁切邊距（左右）
+    GAME_RETURN_CROP_MARGIN_Y = 10   # 返回遊戲提示裁切邊距（上下）
+
+    # 大廳返回提示截圖座標（基於預設視窗大小）
+    LOBBY_RETURN_CENTER_X = 300  # 大廳返回提示中心 X 座標
+    LOBBY_RETURN_CENTER_Y = 200  # 大廳返回提示中心 Y 座標
+    LOBBY_RETURN_CROP_MARGIN_X = 50  # 大廳返回提示裁切邊距（左右）
+    LOBBY_RETURN_CROP_MARGIN_Y = 20  # 大廳返回提示裁切邊距（上下）
+
+    # 截圖裁切範圍（像素）
+    BETSIZE_CROP_MARGIN_X = 40  # 金額模板水平裁切邊距
+    BETSIZE_CROP_MARGIN_Y = 10  # 金額模板垂直裁切邊距
+    TEMPLATE_CROP_MARGIN = 20    # 通用模板裁切邊距（用於 lobby_confirm 等）
+    
+    # 遊戲金額配置（使用 frozenset 提升查詢效率）
+    GAME_BETSIZE = frozenset((
+        2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 48, 56, 60, 64, 72, 80, 96, 100, 120, 140, 160, 180, 200, 240, 280, 300, 320, 360, 400, 420, 480, 500, 540, 560, 600, 640, 700, 720, 800, 840, 900, 960, 980, 1000, 1080, 1120, 1200, 1260, 1280, 1400, 1440, 1500, 1600, 1800, 2000, 2100, 2400, 2700, 3000
+    ))
+    
+    # 遊戲金額列表（用於索引計算）
+    GAME_BETSIZE_TUPLE = (
+        2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 48, 56, 60, 64, 72, 80, 96, 100, 120, 140, 160, 180, 200, 240, 280, 300, 320, 360, 400, 420, 480, 500, 540, 560, 600, 640, 700, 720, 800, 840, 900, 960, 980, 1000, 1080, 1120, 1200, 1260, 1280, 1400, 1440, 1500, 1600, 1800, 2000, 2100, 2400, 2700, 3000
+    )
+
+
+# ============================================================================
+# 輔助函式
+# ============================================================================
+
+def cleanup_chromedriver_processes() -> None:
+    """清除所有緩存的 chromedriver 程序。
+    
+    在程式啟動前執行，確保沒有殘留的 chromedriver 程序佔用資源。
+    支援 Windows、macOS 和 Linux 作業系統。
+    """
+    logger = LoggerFactory.get_logger()
+    system = platform.system().lower()
+    
+    logger.info("=" * 60)
+    logger.info("【系統初始化】清理殘留程序")
+    logger.info("=" * 60)
+    
+    try:
+        if system == "windows":
+            # Windows: 使用 taskkill 命令
+            result = subprocess.run(
+                ["taskkill", "/F", "/IM", "chromedriver.exe"],
+                capture_output=True,
+                text=True,
+                timeout=Constants.CLEANUP_PROCESS_TIMEOUT
+            )
+            
+            # 檢查結果
+            if result.returncode == 0:
+                logger.info("[成功] 已清除 Windows 上的 chromedriver 程序")
+            elif "找不到" in result.stdout or "not found" in result.stdout.lower():
+                logger.info("[成功] 沒有殘留的 chromedriver 程序")
+            else:
+                logger.debug(f"taskkill 執行結果: {result.stdout.strip()}")
+                
+        elif system in ["darwin", "linux"]:
+            # macOS/Linux: 使用 killall 命令
+            result = subprocess.run(
+                ["killall", "-9", "chromedriver"],
+                capture_output=True,
+                text=True,
+                timeout=Constants.CLEANUP_PROCESS_TIMEOUT
+            )
+            
+            # killall 在沒有找到程序時會返回非 0，這是正常的
+            if result.returncode == 0:
+                logger.info(f"[成功] 已清除 {system.upper()} 上的 chromedriver 程序")
+            else:
+                logger.info("[成功] 沒有殘留的 chromedriver 程序")
+        else:
+            logger.warning(f"[警告] 不支援的作業系統: {system}，跳過清除 chromedriver")
+            
+    except subprocess.TimeoutExpired:
+        logger.warning("[警告] 清除 chromedriver 程序逾時")
+    except FileNotFoundError:
+        logger.info("[成功] 沒有殘留的 chromedriver 程序")
+    except Exception as e:
+        logger.warning(f"[警告] 清除程序時發生錯誤: {e}")
+    
+    logger.info("")
+
+
+def get_resource_path(relative_path: str = "") -> Path:
+    """取得資源檔案的絕對路徑。
+    
+    在開發環境中，返回專案根目錄的路徑。
+    在打包後的環境中，返回 exe 所在目錄的路徑（而非臨時目錄）。
+    
+    Args:
+        relative_path: 相對於根目錄的路徑
+        
+    Returns:
+        資源檔案的絕對路徑
+    """
+    if getattr(sys, 'frozen', False):
+        # 打包後：使用 exe 所在目錄（不是 _MEIPASS 臨時目錄）
+        # 因為 lib 和 img 應該放在 exe 旁邊，方便使用者編輯
+        base_path = Path(sys.executable).resolve().parent
+    else:
+        # 開發環境：使用 main.py 的父目錄的父目錄
+        base_path = Path(__file__).resolve().parent.parent
+    
+    if relative_path:
+        return base_path / relative_path
+    return base_path
+
+
+def cv2_imread_unicode(file_path: Union[str, Path], flags: int = cv2.IMREAD_COLOR) -> Optional[np.ndarray]:
+    """安全讀取圖片（支援 Unicode 路徑）。
+    
+    OpenCV 的 cv2.imread() 無法處理包含中文或其他非 ASCII 字元的路徑。
+    此函式使用 numpy 和 PIL 作為替代方案。
+    
+    Args:
+        file_path: 圖片檔案路徑（支援中文路徑）
+        flags: OpenCV 讀取標誌（cv2.IMREAD_COLOR, cv2.IMREAD_GRAYSCALE 等）
+        
+    Returns:
+        圖片的 numpy 陣列，失敗返回 None
+    """
+    try:
+        # 轉換為 Path 物件
+        path = Path(file_path)
+        
+        # 使用 PIL 讀取圖片（PIL 支援 Unicode 路徑）
+        pil_image = Image.open(path)
+        
+        # 轉換為 numpy 陣列
+        img_array = np.array(pil_image)
+        
+        # 根據讀取標誌處理圖片
+        if flags == cv2.IMREAD_GRAYSCALE:
+            # 轉換為灰階
+            if len(img_array.shape) == 3:
+                img_array = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
+        elif flags == cv2.IMREAD_COLOR:
+            # 確保是彩色圖片
+            if len(img_array.shape) == 2:
+                # 灰階轉彩色
+                img_array = cv2.cvtColor(img_array, cv2.COLOR_GRAY2RGB)
+            elif img_array.shape[2] == 4:
+                # RGBA 轉 RGB
+                img_array = cv2.cvtColor(img_array, cv2.COLOR_RGBA2RGB)
+            # PIL 使用 RGB，OpenCV 使用 BGR，需要轉換
+            if len(img_array.shape) == 3 and img_array.shape[2] == 3:
+                img_array = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
+        
+        return img_array
+        
+    except Exception as e:
+        # 返回 None 保持與 cv2.imread() 相同的行為
+        return None
+
+
+# ============================================================================
+# 資料類別
+# ============================================================================
+
+@dataclass(frozen=True)
+class UserCredential:
+    """使用者憑證資料結構（不可變）。"""
+    username: str
+    password: str
+    proxy: Optional[str] = None
+    
+    def __post_init__(self) -> None:
+        """驗證資料完整性"""
+        if not self.username or not self.password:
+            raise ValueError("使用者名稱和密碼不能為空")
+
+
+@dataclass(frozen=True)
+class BetRule:
+    """下注規則資料結構（不可變）。
+    
+    支援三種類型:
+    - 'a' (自動旋轉): amount, spin_count
+    - 's' (標準規則): amount, duration, min_seconds, max_seconds
+    - 'f' (購買免費遊戲): amount
+    """
+    rule_type: str  # 'a'、's' 或 'f'
+    amount: float
+    spin_count: Optional[int] = None  # 'a' 類型使用
+    duration: Optional[int] = None  # 's' 類型使用（分鐘）
+    min_seconds: Optional[float] = None  # 's' 類型使用
+    max_seconds: Optional[float] = None  # 's' 類型使用
+    
+    def __post_init__(self) -> None:
+        """驗證資料完整性"""
+        if self.amount <= 0:
+            raise ValueError(f"下注金額必須大於 0: {self.amount}")
+        
+        if self.rule_type == 'a':
+            # 自動旋轉規則驗證
+            if self.spin_count is None:
+                raise ValueError("自動旋轉規則必須指定次數")
+            if self.spin_count not in [10, 50, 100]:
+                raise ValueError(f"自動旋轉次數必須是 10、50 或 100: {self.spin_count}")
+        
+        elif self.rule_type == 's':
+            # 標準規則驗證
+            if self.duration is None or self.duration <= 0:
+                raise ValueError(f"持續時間必須大於 0: {self.duration}")
+            if self.min_seconds is None or self.min_seconds <= 0:
+                raise ValueError(f"最小間隔秒數必須大於 0: {self.min_seconds}")
+            if self.max_seconds is None or self.max_seconds <= 0:
+                raise ValueError(f"最大間隔秒數必須大於 0: {self.max_seconds}")
+            if self.min_seconds > self.max_seconds:
+                raise ValueError(f"最小間隔不能大於最大間隔: {self.min_seconds} > {self.max_seconds}")
+        
+        elif self.rule_type == 'f':
+            # 購買免費遊戲規則驗證（只需要金額）
+            pass
+        
+        else:
+            raise ValueError(f"無效的規則類型: {self.rule_type}，必須是 'a'、's' 或 'f'")
+
+
+@dataclass(frozen=True)
+class ProxyInfo:
+    """Proxy 資訊資料結構（不可變）。"""
+    host: str
+    port: int
+    username: str
+    password: str
+    
+    def __post_init__(self) -> None:
+        """驗證資料完整性"""
+        if not self.host:
+            raise ValueError("Proxy 主機不能為空")
+        if not (0 < self.port < 65536):
+            raise ValueError(f"Proxy 埠號無效: {self.port}")
+        if not self.username:
+            raise ValueError("Proxy 使用者名稱不能為空")
+    
+    def to_url(self) -> str:
+        """轉換為 Proxy URL 格式。
+        
+        Returns:
+            格式化的 Proxy URL
+        """
+        # 使用字串拼接而非 f-string 在大量呼叫時更高效
+        return f"http://{self.username}:{self.password}@{self.host}:{self.port}"
+    
+    def to_connection_string(self) -> str:
+        """轉換為連接字串格式（快取結果）。
+        
+        Returns:
+            格式化的連接字串 "host:port:username:password"
+        """
+        return f"{self.host}:{self.port}:{self.username}:{self.password}"
+    
+    def __str__(self) -> str:
+        """字串表示（隱藏敏感資訊）"""
+        return f"ProxyInfo({self.host}:{self.port}, user={self.username[:3]}***)"
+    
+    @staticmethod
+    def from_connection_string(connection_string: str) -> 'ProxyInfo':
+        """從連接字串建立 ProxyInfo 實例。
+        
+        Args:
+            connection_string: 格式為 "host:port:username:password"
+            
+        Returns:
+            ProxyInfo 實例
+            
+        Raises:
+            ValueError: 格式不正確時
+        """
+        parts = connection_string.split(':')
+        if len(parts) < 4:
+            raise ValueError(f"Proxy 連接字串格式不正確: {connection_string}")
+        
+        return ProxyInfo(
+            host=parts[0],
+            port=int(parts[1]),
+            username=parts[2],
+            password=':'.join(parts[3:])  # 密碼可能包含冒號
+        )
+
+
+@dataclass
+class BrowserContext:
+    """瀏覽器上下文資訊。
+    
+    封裝瀏覽器實例及其相關資訊，提供便捷的存取介面。
+    
+    Attributes:
+        driver: WebDriver 實例
+        credential: 使用者憑證
+        index: 瀏覽器索引（從 1 開始）
+        proxy_port: Proxy 埠號（可選）
+        created_at: 建立時間戳
+    """
+    driver: WebDriver
+    credential: UserCredential
+    index: int
+    proxy_port: Optional[int] = None
+    created_at: float = field(default_factory=time.time)
+    
+    @property
+    def age_in_seconds(self) -> float:
+        """取得瀏覽器實例的存活時間（秒）"""
+        return time.time() - self.created_at
+
+
+class OperationResult:
+    """操作結果封裝。
+    
+    用於封裝操作的執行結果，包含成功狀態、資料、錯誤和訊息。
+    
+    Attributes:
+        success: 操作是否成功
+        data: 操作返回的資料
+        error: 發生的例外（如果有）
+        message: 額外的訊息
+    """
+    def __init__(
+        self, 
+        success: bool, 
+        data: Any = None, 
+        error: Optional[Exception] = None,
+        message: str = ""
+    ):
+        self.success = success
+        self.data = data
+        self.error = error
+        self.message = message
+    
+    def __bool__(self) -> bool:
+        return self.success
+    
+    def __repr__(self) -> str:
+        status = "成功" if self.success else "失敗"
+        return f"OperationResult({status}, {self.message})"
+
+
+# ============================================================================
+# 例外類別
+# ============================================================================
+
+class AutoSlotGameError(Exception):
+    """基礎例外類別"""
+    pass
+
+
+class ConfigurationError(AutoSlotGameError):
+    """配置相關錯誤"""
+    pass
+
+
+class BrowserCreationError(AutoSlotGameError):
+    """瀏覽器建立錯誤"""
+    pass
+
+
+class ProxyServerError(AutoSlotGameError):
+    """Proxy 伺服器錯誤"""
+    pass
+
+
+class ImageDetectionError(AutoSlotGameError):
+    """圖片檢測錯誤"""
+    pass
+
+
+# ============================================================================
+# 日誌系統
+# ============================================================================
+
+class LogLevel(Enum):
+    """日誌等級"""
+    DEBUG = logging.DEBUG
+    INFO = logging.INFO
+    WARNING = logging.WARNING
+    ERROR = logging.ERROR
+    CRITICAL = logging.CRITICAL
+
+
+class ColoredFormatter(logging.Formatter):
+    """帶顏色的日誌格式化器。
+    
+    使用 ANSI 顏色碼為不同等級的日誌訊息添加顏色。
+    """
+    
+    # ANSI 顏色碼
+    COLORS = {
+        'RESET': "\033[0m",
+        'INFO': "\033[32m",       # 綠色
+        'WARNING': "\033[33m",    # 黃色
+        'ERROR': "\033[31m",      # 紅色
+        'CRITICAL': "\033[35m",   # 紫色
+        'DEBUG': "\033[36m",      # 青色
+        'TIMESTAMP': "\033[90m",  # 灰色
+    }
+    
+    def __init__(self, fmt: Optional[str] = None, datefmt: Optional[str] = None) -> None:
+        """初始化顏色格式化器。
+        
+        Args:
+            fmt: 日誌格式字串
+            datefmt: 日期格式字串
+        """
+        super().__init__(fmt, datefmt)
+        self.formatters = {
+            logging.DEBUG: self._create_formatter(self.COLORS['DEBUG'], 'DEBUG'),
+            logging.INFO: self._create_formatter(self.COLORS['INFO'], 'INFO'),
+            logging.WARNING: self._create_formatter(self.COLORS['WARNING'], 'WARNING'),
+            logging.ERROR: self._create_formatter(self.COLORS['ERROR'], 'ERROR'),
+            logging.CRITICAL: self._create_formatter(self.COLORS['CRITICAL'], 'CRITICAL'),
+        }
+    
+    def _create_formatter(self, color: str, level_name: str) -> logging.Formatter:
+        """建立指定顏色的格式化器"""
+        return logging.Formatter(
+            f"{self.COLORS['TIMESTAMP']}%(asctime)s{self.COLORS['RESET']} - "
+            f"{color}%(levelname)-8s{self.COLORS['RESET']} - "
+            f"%(message)s"
+        )
+    
+    def format(self, record: logging.LogRecord) -> str:
+        """格式化日誌記錄。
+        
+        Args:
+            record: 日誌記錄物件
+            
+        Returns:
+            格式化後的日誌字串
+        """
+        formatter = self.formatters.get(record.levelno)
+        if formatter:
+            return formatter.format(record)
+        return super().format(record)
+
+
+class FlushingStreamHandler(logging.StreamHandler):
+    """自動刷新的 StreamHandler，解決多執行緒環境下的緩衝阻塞問題。"""
+    
+    def emit(self, record: logging.LogRecord) -> None:
+        """輸出日誌記錄並強制刷新緩衝區。
+        
+        Args:
+            record: 日誌記錄物件
+        """
+        try:
+            super().emit(record)
+            self.flush()  # 每次輸出後立即刷新
+        except Exception:
+            self.handleError(record)
+
+
+class LoggerFactory:
+    """Logger 工廠類別 - 使用單例模式優化效能"""
+    
+    _loggers: Dict[str, logging.Logger] = {}
+    _lock = threading.RLock()  # 使用 RLock 避免死鎖
+    _formatter: Optional[ColoredFormatter] = None  # 共用 formatter 實例
+    
+    @classmethod
+    def get_logger(
+        cls, 
+        name: str = "AutoSlotGame",
+        level: LogLevel = LogLevel.INFO
+    ) -> logging.Logger:
+        """取得或建立 logger 實例（執行緒安全）。
+        
+        Args:
+            name: Logger 名稱
+            level: 日誌等級
+            
+        Returns:
+            配置完成的 Logger 物件
+        """
+        # 快速路徑：無鎖檢查（大多數情況下避免加鎖）
+        if name in cls._loggers:
+            return cls._loggers[name]
+        
+        with cls._lock:
+            # 雙重檢查避免重複建立
+            if name in cls._loggers:
+                return cls._loggers[name]
+            
+            logger = logging.getLogger(name)
+            logger.setLevel(level.value)
+            logger.propagate = False
+            
+            # 避免重複添加 handler
+            if not logger.handlers:
+                # 共用 formatter 實例以節省記憶體
+                if cls._formatter is None:
+                    cls._formatter = ColoredFormatter()
+                
+                # 使用自動刷新的 Handler 避免緩衝阻塞
+                console_handler = FlushingStreamHandler(sys.stdout)
+                console_handler.setLevel(level.value)
+                console_handler.setFormatter(cls._formatter)
+                logger.addHandler(console_handler)
+            
+            cls._loggers[name] = logger
+            return logger
+
+
+# ============================================================================
+# 配置讀取器 (使用 Protocol 和依賴注入)
+# ============================================================================
+
+class ConfigReaderProtocol(Protocol):
+    """配置讀取器協議"""
+    
+    def read_user_credentials(self, filename: str) -> List[UserCredential]:
+        """讀取使用者憑證"""
+        ...
+    
+    def read_bet_rules(self, filename: str) -> List[BetRule]:
+        """讀取下注規則"""
+        ...
+
+
+class ConfigReader:
+    """配置檔案讀取器。
+    
+    讀取並解析系統所需的各種配置檔案。
+    採用上下文管理器和更好的錯誤處理。
+    
+    Attributes:
+        lib_path: 配置檔案所在目錄路徑
+        logger: 日誌記錄器
+    """
+    
+    def __init__(
+        self, 
+        lib_path: Optional[Path] = None,
+        logger: Optional[logging.Logger] = None
+    ) -> None:
+        """初始化配置讀取器。
+        
+        Args:
+            lib_path: 配置檔案目錄路徑,預設為專案的 lib 目錄
+            logger: 日誌記錄器
+        """
+        if lib_path is None:
+            # 使用輔助函式取得專案根目錄
+            lib_path = get_resource_path(Constants.DEFAULT_LIB_PATH)
+        
+        self.lib_path = Path(lib_path)
+        self.logger = logger or LoggerFactory.get_logger()
+        
+        # 驗證目錄存在
+        if not self.lib_path.exists():
+            raise ConfigurationError(f"配置目錄不存在: {self.lib_path}")
+    
+    def _read_file_lines(self, filename: str, skip_header: bool = True) -> List[str]:
+        """讀取檔案並返回有效行列表（優化版）。
+        
+        Args:
+            filename: 檔案名稱
+            skip_header: 是否跳過首行標題
+            
+        Returns:
+            有效行列表（去除空行和註釋）
+            
+        Raises:
+            ConfigurationError: 檔案讀取失敗
+        """
+        file_path = self.lib_path / filename
+        
+        if not file_path.exists():
+            raise ConfigurationError(f"找不到配置檔案: {file_path}")
+        
+        try:
+            with open(file_path, 'r', encoding='utf-8', buffering=8192) as f:
+                lines = f.readlines()
+            
+            # 跳過標題行
+            start_index = 1 if skip_header and lines else 0
+            
+            # 使用列表推導式（更高效）
+            valid_lines = [
+                line.strip() 
+                for line in lines[start_index:] 
+                if (stripped := line.strip()) and not stripped.startswith('#')
+            ]
+            
+            return valid_lines
+            
+        except (IOError, OSError) as e:
+            raise ConfigurationError(f"讀取檔案失敗 {filename}: {e}") from e
+        except Exception as e:
+            raise ConfigurationError(f"解析檔案失敗 {filename}: {e}") from e
+    
+    def read_user_credentials(
+        self, 
+        filename: str = Constants.DEFAULT_CREDENTIALS_FILE
+    ) -> List[UserCredential]:
+        """讀取使用者憑證檔案。
+        
+        檔案格式: 帳號,密碼,出口IP (首行為標題)
+        第三欄為出口 IP（可選），程式會自動組合完整的 proxy 連接字串
+        
+        Args:
+            filename: 檔案名稱
+            
+        Returns:
+            使用者憑證列表
+            
+        Raises:
+            ConfigurationError: 讀取或解析失敗
+        """
+        credentials = []
+        lines = self._read_file_lines(filename, skip_header=True)
+        
+        for line_number, line in enumerate(lines, start=2):  # +2 因為跳過標題
+            try:
+                parts = [p.strip() for p in line.split(',')]
+                
+                if len(parts) < 2:
+                    self.logger.warning(f"第 {line_number} 行格式不完整 已跳過 {line}")
+                    continue
+                
+                username = parts[0]
+                password = parts[1]
+                
+                proxy = parts[2] if len(parts) >= 3 and parts[2].strip() else None
+                
+                credentials.append(UserCredential(
+                    username=username,
+                    password=password,
+                    proxy=proxy
+                ))  
+                
+            except ValueError as e:
+                self.logger.warning(f"第 {line_number} 行資料無效 {e}")
+                continue
+        
+        return credentials
+    
+    def read_bet_rules(
+        self, 
+        filename: str = Constants.DEFAULT_RULES_FILE
+    ) -> List[BetRule]:
+        """讀取下注規則檔案。
+        
+        支援三種格式:
+        - a:金額:次數 (自動旋轉規則)
+        - s:金額:時間(分鐘):最小(秒數):最大(秒數) (標準規則)
+        - f:金額 (購買免費遊戲)
+        
+        Args:
+            filename: 檔案名稱
+            
+        Returns:
+            下注規則列表
+            
+        Raises:
+            ConfigurationError: 讀取或解析失敗
+        """
+        rules = []
+        lines = self._read_file_lines(filename, skip_header=True)
+        
+        for line_number, line in enumerate(lines, start=2):
+            try:
+                parts = line.split(':')
+                
+                if len(parts) < 2:
+                    self.logger.warning(f"第 {line_number} 行格式不完整 已跳過 {line}")
+                    continue
+                
+                rule_type = parts[0].strip().lower()
+                
+                if rule_type == 'a':
+                    # 自動旋轉規則: a:金額:次數
+                    if len(parts) < 3:
+                        self.logger.warning(f"第 {line_number} 行格式不完整 已跳過 {line}")
+                        continue
+                    
+                    amount = float(parts[1].strip())
+                    spin_count = int(parts[2].strip())
+                    
+                    rules.append(BetRule(
+                        rule_type='a',
+                        amount=amount,
+                        spin_count=spin_count
+                    ))
+                    
+                elif rule_type == 's':
+                    # 標準規則: s:金額:時間:最小秒數:最大秒數
+                    if len(parts) < 5:
+                        self.logger.warning(f"第 {line_number} 行格式不完整 已跳過 {line}")
+                        continue
+                    
+                    amount = float(parts[1].strip())
+                    duration = int(parts[2].strip())
+                    min_seconds = float(parts[3].strip())
+                    max_seconds = float(parts[4].strip())
+                    
+                    rules.append(BetRule(
+                        rule_type='s',
+                        amount=amount,
+                        duration=duration,
+                        min_seconds=min_seconds,
+                        max_seconds=max_seconds
+                    ))
+                    
+                elif rule_type == 'f':
+                    # 購買免費遊戲規則: f:金額
+                    amount = float(parts[1].strip())
+                    
+                    rules.append(BetRule(
+                        rule_type='f',
+                        amount=amount
+                    ))
+                    
+                else:
+                    self.logger.warning(f"第 {line_number} 行無效的規則類型 '{rule_type}' 已跳過")
+                    continue
+                
+            except (ValueError, IndexError) as e:
+                self.logger.warning(f"第 {line_number} 行無法解析 {e}")
+                continue
+        
+        return rules
+
+
+# ============================================================================
+# Proxy 伺服器 (改進資源管理和執行緒安全)
 # ============================================================================
 
 class ProxyConnectionHandler:
