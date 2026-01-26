@@ -13,10 +13,11 @@
 - 完善的錯誤處理與重試機制
 
 作者: 凡臻科技
-版本: 1.27.0
+版本: 1.28.0
 Python: 3.8+
 
 版本歷史:
+- v1.28.0: 優化金額調整機制（改為無限等待模式，移除最大嘗試次數限制和關閉瀏覽器邏輯；所有瀏覽器會持續嘗試調整金額直到成功，確保全部完成後才進入下一個動作；避免因暫時性識別失敗導致瀏覽器被關閉）
 - v1.27.0: 優化 Proxy 配置管理（將 Brightdata proxy 共同配置提取到 Constants，包含 PROXY_HOST、PROXY_PORT、PROXY_USERNAME_BASE、PROXY_PASSWORD；用戶資料檔案簡化為僅存儲出口 IP，程式自動組合完整 proxy 連接字串；提升配置安全性和可維護性，完全隱藏供應商資訊）
 - v1.26.1: 簡化登入後公告處理邏輯（移除複雜的彈窗類型判斷和循環檢測機制，改為登入後直接使用 JavaScript 強制關閉所有彈窗；等待時間從可能超過 30 秒優化為固定 7 秒；避免卡在彈窗檢測循環，提升登入流程穩定性和響應速度）
 - v1.26.0: 移除錯誤訊息自動檢測功能（移除所有 error_message 相關邏輯、常數定義、檢測方法和背景監控執行緒；保留黑屏和 game_return 檢測功能；簡化監控流程，提升系統效能）
@@ -137,7 +138,7 @@ __all__ = [
 class Constants:
     """系統常量"""
     # 版本資訊
-    VERSION = "1.27.0"
+    VERSION = "1.28.0"
     SYSTEM_NAME = "賽特遊戲自動化系統"
     
     DEFAULT_LIB_PATH = "lib"
@@ -160,12 +161,12 @@ class Constants:
     # GAME_PAGE = "https://www.sf-16888.com/#/home/loding?game_code=golden-seth&factory_code=ATG&state=true&name=戰神賽特2%20覺醒之力"
     
     # FIN
-    LOGIN_PAGE = "https://www.fin88.app/"
-    GAME_PAGE = "https://www.fin88.app/"
+    LOGIN_PAGE = "https://www.fin88.app"
+    GAME_PAGE = "https://www.fin88.app"
 
-    # TG 勿刪除
-    # LOGIN_PAGE = "https://www.tg5688.com"
-    # GAME_PAGE = "https://www.tg5688.com"
+    # FPD 勿刪除
+    # LOGIN_PAGE = "https://richpanda.vip"
+    # GAME_PAGE = "https://richpanda.vip"
 
     # 頁面元素選擇器
     INITIAL_LOGIN_BUTTON = "//button[contains(@class, 'btn') and contains(@class, 'login') and contains(@class, 'pc') and text()='登入']"
@@ -2229,48 +2230,28 @@ class SyncBrowserOperator:
         timeout: Optional[float] = None,
         silent: bool = False
     ) -> List[OperationResult]:
-        """同步調整所有瀏覽器的下注金額。
+        """同步調整所有瀏覽器的下注金額（無限等待版）。
+        
+        所有瀏覽器會無限等待直到金額調整完成，才會一起進入下一個動作。
         
         Args:
             browser_contexts: 瀏覽器上下文列表
             target_amount: 目標金額
-            timeout: 超時時間
+            timeout: 已棄用，保留參數以維持向後相容
             silent: 是否靜默模式（不輸出詳細日誌）
             
         Returns:
             操作結果列表
         """
-        browsers_to_close = []  # 記錄需要關閉的瀏覽器
-        
         def adjust_operation(context: BrowserContext, index: int, total: int) -> bool:
-            try:
-                return self.adjust_betsize(context.driver, target_amount, silent=silent)
-            except Exception as e:
-                # 調整失敗，記錄需要關閉的瀏覽器
-                self.logger.error(f"瀏覽器 {index} ({context.credential.username}) 金額調整失敗: {e}")
-                browsers_to_close.append((index - 1, context))  # 記錄索引位置（從0開始）
-                return False
+            return self.adjust_betsize(context.driver, target_amount, silent=silent)
         
         results = self.execute_sync(
             browser_contexts,
             adjust_operation,
             f"調整下注金額到 {target_amount}",
-            timeout=timeout
+            timeout=None  # 無超時限制
         )
-        
-        # 關閉並移除失敗的瀏覽器
-        if browsers_to_close:
-            self.logger.warning(f"將關閉 {len(browsers_to_close)} 個調整金額失敗的瀏覽器")
-            # 從後往前關閉，避免索引問題
-            for idx, context in sorted(browsers_to_close, key=lambda x: x[0], reverse=True):
-                try:
-                    username = context.credential.username
-                    self.logger.info(f"關閉瀏覽器 {idx + 1} ({username})...")
-                    context.driver.quit()
-                    browser_contexts.pop(idx)
-                    self.logger.info(f"[成功] 已關閉瀏覽器 {idx + 1} ({username})")
-                except Exception as e:
-                    self.logger.error(f"關閉瀏覽器 {idx + 1} 時發生錯誤: {e}")
         
         return results
     
@@ -2403,20 +2384,17 @@ class SyncBrowserOperator:
         BrowserHelper.execute_cdp_click(driver, actual_x, actual_y)
     
     def adjust_betsize(self, driver: WebDriver, target_amount: float, max_attempts: int = None, silent: bool = False) -> bool:
-        """調整下注金額到目標值（優化版）。
+        """調整下注金額到目標值（無限等待版）。
         
         Args:
             driver: WebDriver 實例
             target_amount: 目標金額
-            max_attempts: 最大嘗試次數（預設使用常數）
+            max_attempts: 已棄用，保留參數以維持向後相容
             silent: 是否靜默模式（不輸出詳細日誌）
             
         Returns:
             bool: 調整成功返回True
         """
-        if max_attempts is None:
-            max_attempts = Constants.BETSIZE_ADJUST_MAX_ATTEMPTS
-        
         try:
             # 檢查目標金額
             if target_amount not in Constants.GAME_BETSIZE:
@@ -2424,12 +2402,16 @@ class SyncBrowserOperator:
                     self.logger.error(f"目標金額 {target_amount} 不在可用金額列表中")
                 return False
             
-            # 取得當前金額
-            current_amount = self.get_current_betsize(driver, silent=silent)
-            if current_amount is None:
-                # 即使在 silent 模式下也要記錄識別失敗，這是關鍵錯誤
-                self.logger.error("[錯誤] 無法識別目前金額，請確認 img/bet_size/ 中有對應的金額模板")
-                return False
+            # 無限等待直到成功取得當前金額
+            attempt = 0
+            current_amount = None
+            while current_amount is None:
+                current_amount = self.get_current_betsize(driver, silent=silent)
+                if current_amount is None:
+                    attempt += 1
+                    if attempt == 1 or attempt % 20 == 0:
+                        self.logger.warning(f"[警告] 無法識別目前金額，持續等待中... (嘗試 {attempt} 次)")
+                    time.sleep(Constants.BETSIZE_ADJUST_RETRY_WAIT)
             
             # 檢查是否已是目標金額
             if current_amount == target_amount:
@@ -2454,15 +2436,18 @@ class SyncBrowserOperator:
                 click_y_ratio = Constants.BETSIZE_DECREASE_BUTTON_Y
                 direction = "減少"
             
-            # 逐步調整，每次點擊後都檢查是否達到目標
-            for attempt in range(max_attempts):
+            # 無限循環調整，直到達到目標金額
+            attempt = 0
+            while True:
+                attempt += 1
+                
                 # 先檢查當前金額
                 current_amount = self.get_current_betsize(driver, silent=silent)
                 
                 if current_amount is None:
                     # 記錄金額識別失敗
-                    if attempt == 0 or attempt % 20 == 0:
-                        self.logger.warning(f"[警告] 金額識別失敗 (嘗試 {attempt + 1}/{max_attempts})")
+                    if attempt % 20 == 0:
+                        self.logger.warning(f"[警告] 金額識別失敗，持續等待中... (嘗試 {attempt} 次)")
                     time.sleep(Constants.BETSIZE_ADJUST_RETRY_WAIT)
                     continue
                 
@@ -2478,16 +2463,12 @@ class SyncBrowserOperator:
                 # 等待畫面更新
                 time.sleep(Constants.BETSIZE_ADJUST_STEP_WAIT)
             
-            # 超過最大嘗試次數，拋出異常讓上層處理
-            error_msg = f"金額調整失敗，已達最大嘗試次數 {max_attempts}"
-            if not silent:
-                self.logger.error(f"[錯誤] {error_msg}")
-            raise Exception(error_msg)
-            
         except Exception as e:
             if not silent:
                 self.logger.error(f"[錯誤] 調整過程發生錯誤: {e}")
-            raise
+            # 發生異常時等待後重試
+            time.sleep(1)
+            return self.adjust_betsize(driver, target_amount, silent=silent)
     
     def capture_betsize_template(self, driver: WebDriver, amount: float) -> bool:
         """截取下注金額模板。
