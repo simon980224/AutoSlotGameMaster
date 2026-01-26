@@ -47,6 +47,7 @@ from webdriver_manager.chrome import ChromeDriverManager
 import cv2
 import numpy as np
 from PIL import Image
+import io
 
 
 # ============================================================================
@@ -103,6 +104,25 @@ class Constants:
     SEARCH_INPUT = "//input[@placeholder='按換行鍵搜索']"
     GAME_XPATH = "//div[contains(@class, 'game-card-container') and .//div[contains(@style, 'ATG-egyptian-mythology.png')]]"
     GAME_IFRAME = "//iframe[contains(@class, 'iframe-item')]"
+    GAME_CANVAS = "GameCanvas"  # 遊戲 Canvas 元素 ID
+    
+    # 圖片檢測配置
+    IMAGE_DIR = "img"
+    GAME_LOGIN = "game_login.png"
+    GAME_CONFIRM = "game_confirm.png"
+    MATCH_THRESHOLD = 0.8  # 圖片匹配閾值
+    DETECTION_INTERVAL = 1.0  # 檢測間隔（秒）
+    MAX_DETECTION_ATTEMPTS = 60  # 最大檢測次數
+    DETECTION_PROGRESS_INTERVAL = 20  # 檢測進度顯示間隔
+    
+    # Canvas 動態計算比例（用於點擊座標）
+    GAME_LOGIN_BUTTON_X_RATIO = 0.5   # game_login 開始遊戲按鈕 X 座標比例
+    GAME_LOGIN_BUTTON_Y_RATIO = 0.9   # game_login 開始遊戲按鈕 Y 座標比例
+    GAME_CONFIRM_BUTTON_X_RATIO = 0.74  # game_confirm 確認按鈕 X 座標比例
+    GAME_CONFIRM_BUTTON_Y_RATIO = 0.85  # game_confirm 確認按鈕 Y 座標比例
+    
+    # 控制中心配置
+    AUTO_SKIP_CLICK_INTERVAL = 30  # 自動跳過點擊間隔（秒）
 
 
 # ============================================================================
@@ -126,6 +146,11 @@ class BrowserCreationError(AutoSlotGameError):
 
 class ProxyServerError(AutoSlotGameError):
     """代理伺服器錯誤"""
+    pass
+
+
+class ImageDetectionError(AutoSlotGameError):
+    """圖片檢測錯誤"""
     pass
 
 
@@ -612,6 +637,53 @@ def get_resource_path(relative_path: str = "") -> Path:
     return base_path
 
 
+def cv2_imread_unicode(file_path: Union[str, Path], flags: int = cv2.IMREAD_COLOR) -> Optional[np.ndarray]:
+    """安全讀取圖片（支援 Unicode 路徑）。
+    
+    OpenCV 的 cv2.imread() 無法處理包含中文或其他非 ASCII 字元的路徑。
+    此函式使用 numpy 和 PIL 作為替代方案。
+    
+    Args:
+        file_path: 圖片檔案路徑（支援中文路徑）
+        flags: OpenCV 讀取標誌（cv2.IMREAD_COLOR, cv2.IMREAD_GRAYSCALE 等）
+        
+    Returns:
+        圖片的 numpy 陣列，失敗返回 None
+    """
+    try:
+        # 轉換為 Path 物件
+        path = Path(file_path)
+        
+        # 使用 PIL 讀取圖片（PIL 支援 Unicode 路徑）
+        pil_image = Image.open(path)
+        
+        # 轉換為 numpy 陣列
+        img_array = np.array(pil_image)
+        
+        # 根據讀取標誌處理圖片
+        if flags == cv2.IMREAD_GRAYSCALE:
+            # 轉換為灰階
+            if len(img_array.shape) == 3:
+                img_array = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
+        elif flags == cv2.IMREAD_COLOR:
+            # 確保是彩色圖片
+            if len(img_array.shape) == 2:
+                # 灰階轉彩色
+                img_array = cv2.cvtColor(img_array, cv2.COLOR_GRAY2RGB)
+            elif img_array.shape[2] == 4:
+                # RGBA 轉 RGB
+                img_array = cv2.cvtColor(img_array, cv2.COLOR_RGBA2RGB)
+            # PIL 使用 RGB，OpenCV 使用 BGR，需要轉換
+            if len(img_array.shape) == 3 and img_array.shape[2] == 3:
+                img_array = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
+        
+        return img_array
+        
+    except Exception:
+        # 返回 None 保持與 cv2.imread() 相同的行為
+        return None
+
+
 # ============================================================================
 # 配置讀取器
 # ============================================================================
@@ -1086,6 +1158,234 @@ class LocalProxyServerManager:
 
 
 # ============================================================================
+# 瀏覽器輔助工具
+# ============================================================================
+
+class BrowserHelper:
+    """瀏覽器操作輔助類別。
+    
+    提供常用的瀏覽器操作方法，避免程式碼重複。
+    包括座標計算、按鍵模擬等。
+    """
+    
+    @staticmethod
+    def execute_cdp_space_key(driver: WebDriver) -> None:
+        """使用 Chrome DevTools Protocol 按下空白鍵。
+        
+        Args:
+            driver: WebDriver 實例
+        """
+        # 按下空白鍵
+        driver.execute_cdp_cmd("Input.dispatchKeyEvent", {
+            "type": "keyDown",
+            "key": " ",
+            "code": "Space",
+            "windowsVirtualKeyCode": 32,
+            "nativeVirtualKeyCode": 32
+        })
+        # 釋放空白鍵
+        driver.execute_cdp_cmd("Input.dispatchKeyEvent", {
+            "type": "keyUp",
+            "key": " ",
+            "code": "Space",
+            "windowsVirtualKeyCode": 32,
+            "nativeVirtualKeyCode": 32
+        })
+    
+    @staticmethod
+    def calculate_click_position(
+        canvas_rect: Dict[str, float],
+        x_ratio: float,
+        y_ratio: float
+    ) -> Tuple[float, float]:
+        """根據 Canvas 區域和比例計算點擊座標。
+        
+        Args:
+            canvas_rect: Canvas 區域資訊 {"x", "y", "w", "h"}
+            x_ratio: X 座標比例
+            y_ratio: Y 座標比例
+            
+        Returns:
+            (x, y) 實際座標
+        """
+        x = canvas_rect["x"] + canvas_rect["w"] * x_ratio
+        y = canvas_rect["y"] + canvas_rect["h"] * y_ratio
+        return x, y
+
+
+# ============================================================================
+# 圖片檢測器
+# ============================================================================
+
+class ImageDetector:
+    """圖片檢測器。
+    
+    提供螢幕截圖、圖片比對和座標定位功能。
+    使用 OpenCV 進行模板匹配，支援多種圖片格式。
+    
+    Attributes:
+        logger: 日誌記錄器
+        project_root: 專案根目錄
+        image_dir: 圖片目錄
+    """
+    
+    def __init__(self, logger: Optional[logging.Logger] = None):
+        """初始化圖片檢測器"""
+        self.logger = logger or LoggerFactory.get_logger()
+        
+        # 使用輔助函式取得專案根目錄和圖片目錄
+        self.project_root = get_resource_path()
+        self.image_dir = get_resource_path(Constants.IMAGE_DIR)
+        
+        # 確保圖片目錄存在
+        self.image_dir.mkdir(parents=True, exist_ok=True)
+    
+    def get_template_path(self, template_name: str) -> Path:
+        """取得模板圖片路徑。
+        
+        Args:
+            template_name: 模板圖片檔名
+            
+        Returns:
+            模板圖片完整路徑
+        """
+        return self.image_dir / template_name
+    
+    def template_exists(self, template_name: str) -> bool:
+        """檢查模板圖片是否存在。
+        
+        Args:
+            template_name: 模板圖片檔名
+            
+        Returns:
+            是否存在
+        """
+        return self.get_template_path(template_name).exists()
+    
+    def capture_screenshot(self, driver: WebDriver, save_path: Optional[Path] = None) -> np.ndarray:
+        """截取瀏覽器畫面。
+        
+        Args:
+            driver: WebDriver 實例
+            save_path: 儲存路徑（可選）
+            
+        Returns:
+            OpenCV 格式的圖片陣列 (BGR)
+            
+        Raises:
+            ImageDetectionError: 截圖失敗
+        """
+        try:
+            # 取得截圖（base64 格式）
+            screenshot_base64 = driver.get_screenshot_as_base64()
+            
+            # 解碼並轉換為 OpenCV 格式
+            screenshot_bytes = base64.b64decode(screenshot_base64)
+            image = Image.open(io.BytesIO(screenshot_bytes))
+            image_cv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+            
+            # 如果指定了儲存路徑，則儲存圖片
+            if save_path:
+                save_path.parent.mkdir(parents=True, exist_ok=True)
+                
+                # 使用支援 Unicode 路徑的方式儲存圖片
+                is_success, buffer = cv2.imencode('.png', image_cv)
+                if is_success:
+                    with open(save_path, 'wb') as f:
+                        f.write(buffer.tobytes())
+                    self.logger.info(f"[資訊] 截圖已儲存 {save_path}")
+                else:
+                    raise ImageDetectionError(f"圖片編碼失敗")
+            
+            return image_cv
+            
+        except Exception as e:
+            raise ImageDetectionError(f"截圖失敗: {e}") from e
+    
+    def match_template(
+        self, 
+        screenshot: np.ndarray, 
+        template_path: Path, 
+        threshold: float = Constants.MATCH_THRESHOLD
+    ) -> Optional[Tuple[int, int, float]]:
+        """在截圖中尋找模板圖片。
+        
+        Args:
+            screenshot: 截圖（OpenCV 格式）
+            template_path: 模板圖片路徑
+            threshold: 匹配閾值（0-1）
+            
+        Returns:
+            如果找到: (x, y, confidence) - 中心座標和信心度
+            如果未找到: None
+            
+        Raises:
+            ImageDetectionError: 檢測失敗
+        """
+        try:
+            if not template_path.exists():
+                raise FileNotFoundError(f"模板圖片不存在: {template_path}")
+            
+            # 讀取模板圖片（使用支援 Unicode 路徑的函式）
+            template = cv2_imread_unicode(template_path, cv2.IMREAD_COLOR)
+            if template is None:
+                raise ImageDetectionError(f"無法讀取模板圖片: {template_path}")
+            
+            # 取得模板尺寸
+            template_h, template_w = template.shape[:2]
+            
+            # 執行模板匹配
+            result = cv2.matchTemplate(screenshot, template, cv2.TM_CCOEFF_NORMED)
+            min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
+            
+            # 檢查是否超過閾值
+            if max_val >= threshold:
+                # 計算中心座標
+                center_x = max_loc[0] + template_w // 2
+                center_y = max_loc[1] + template_h // 2
+                return (center_x, center_y, max_val)
+            
+            return None
+            
+        except FileNotFoundError:
+            raise
+        except Exception as e:
+            raise ImageDetectionError(f"圖片匹配失敗: {e}") from e
+    
+    def detect_in_browser(
+        self, 
+        driver: WebDriver, 
+        template_name: str, 
+        threshold: float = Constants.MATCH_THRESHOLD
+    ) -> Optional[Tuple[int, int, float]]:
+        """在瀏覽器中檢測模板圖片。
+        
+        Args:
+            driver: WebDriver 實例
+            template_name: 模板圖片檔名
+            threshold: 匹配閾值
+            
+        Returns:
+            如果找到: (x, y, confidence)
+            如果未找到: None
+        """
+        try:
+            # 檢查瀏覽器是否仍然有效
+            try:
+                _ = driver.current_url
+            except Exception:
+                self.logger.warning(f"[警告] 瀏覽器已關閉，無法進行圖片檢測")
+                return None
+            
+            screenshot = self.capture_screenshot(driver)
+            template_path = self.get_template_path(template_name)
+            return self.match_template(screenshot, template_path, threshold)
+        except Exception as e:
+            self.logger.error(f"[錯誤] 瀏覽器圖片檢測失敗: {e}")
+            return None
+
+
+# ============================================================================
 # 瀏覽器管理器
 # ============================================================================
 
@@ -1247,6 +1547,441 @@ class BrowserManager:
                 with suppress(Exception):
                     driver.quit()
                 self.logger.debug(f"[除錯] 瀏覽器 #{index} 已關閉")
+
+
+# ============================================================================
+# 遊戲控制中心
+# ============================================================================
+
+class GameControlCenter:
+    """遊戲控制中心。
+    
+    提供互動式命令列介面來控制多個瀏覽器，功能包括：
+    - 自動按鍵（每個瀏覽器獨立執行緒）
+    - 暫停/繼續操作
+    - 調整下注金額
+    - 購買免費遊戲
+    - 關閉瀏覽器
+    
+    """
+    
+    def __init__(
+        self,
+        browser_threads: List['BrowserThread'],
+        bet_rules: List[BetRule],
+        canvas_rect: Optional[Dict[str, float]] = None,
+        logger: Optional[logging.Logger] = None
+    ):
+        """初始化控制中心。
+        
+        Args:
+            browser_threads: 瀏覽器執行緒列表
+            bet_rules: 下注規則列表
+            canvas_rect: Canvas 區域資訊（可選）
+            logger: 日誌記錄器
+        """
+        self.logger = logger or LoggerFactory.get_logger()
+        self.browser_threads = browser_threads
+        self.bet_rules = bet_rules
+        self.canvas_rect = canvas_rect
+        
+        # 控制狀態
+        self.running = False
+        self.auto_press_running = False
+        
+        # 執行緒控制
+        self._stop_event = threading.Event()
+        self.auto_press_threads: Dict[int, threading.Thread] = {}
+    
+    def _get_active_browsers(self) -> List['BrowserThread']:
+        """取得所有活躍的瀏覽器執行緒。
+        
+        Returns:
+            活躍的瀏覽器執行緒列表
+        """
+        return [bt for bt in self.browser_threads if bt.is_browser_alive()]
+    
+    def _is_browser_alive(self, driver: WebDriver) -> bool:
+        """檢查瀏覽器是否仍然有效。
+        
+        Args:
+            driver: WebDriver 實例
+            
+        Returns:
+            bool: True 表示瀏覽器有效，False 表示已關閉
+        """
+        try:
+            _ = driver.current_url
+            return True
+        except Exception:
+            return False
+    
+    def show_help(self) -> None:
+        """顯示指令說明。"""
+        help_text = """
+==========================================================
+                    【遊戲控制中心 - 指令說明】
+==========================================================
+
+【自動操作】
+  s <最小>,<最大>     開始自動按鍵（設定隨機間隔秒數）
+                      範例: s 1,2  → 每次間隔 1~2 秒按空白鍵
+                   
+  p                   暫停目前運行的自動操作
+
+【金額與遊戲】  
+  b <金額>            調整所有瀏覽器的下注金額
+                      範例: b 2, b 4, b 10, b 100
+  
+  f <編號>            購買免費遊戲
+                      f 0      → 所有瀏覽器
+                      f 1      → 第 1 個瀏覽器
+
+【系統指令】
+  h                   顯示此幫助信息
+
+  q <編號>            關閉指定瀏覽器
+                      q 0      → 關閉所有瀏覽器並退出程式
+                      q 1      → 關閉第 1 個瀏覽器
+
+==========================================================
+"""
+        self.logger.info(help_text)
+    
+    def _auto_press_loop_single(self, bt: 'BrowserThread', browser_index: int) -> None:
+        """單個瀏覽器的自動按鍵循環。
+        
+        Args:
+            bt: BrowserThread 實例
+            browser_index: 瀏覽器索引（1-based）
+        """
+        import random
+        
+        press_count = 0
+        username = bt.context.credential.username if bt.context else "Unknown"
+        
+        while not self._stop_event.is_set():
+            try:
+                # 檢查瀏覽器是否仍然有效
+                if not bt.is_browser_alive():
+                    self.logger.warning(f"瀏覽器 {browser_index} ({username}) 已關閉，停止自動按鍵")
+                    break
+                
+                press_count += 1
+                
+                # 執行按空白鍵
+                def press_space_task(context: BrowserContext) -> bool:
+                    BrowserHelper.execute_cdp_space_key(context.driver)
+                    return True
+                
+                bt.execute_task(press_space_task)
+                
+                # 每個瀏覽器使用獨立的隨機間隔
+                interval = random.uniform(self.min_interval, self.max_interval)
+                
+                # 使用 wait 而非 sleep，這樣可以立即響應停止信號
+                if self._stop_event.wait(timeout=interval):
+                    break
+                    
+            except Exception as e:
+                self.logger.error(f"瀏覽器 {browser_index} ({username}) 執行錯誤: {e}")
+                self._stop_event.wait(timeout=1.0)
+        
+        self.logger.info(f"瀏覽器 {browser_index} ({username}) 已停止，共執行 {press_count} 次")
+    
+    def _start_auto_press(self) -> None:
+        """為每個瀏覽器啟動獨立的自動按鍵執行緒。"""
+        if self.auto_press_running:
+            self.logger.warning("自動按鍵已在運行中")
+            return
+        
+        # 檢查是否已設定間隔時間
+        if not hasattr(self, 'min_interval') or not hasattr(self, 'max_interval'):
+            self.logger.warning("請先使用 's <最小>,<最大>' 命令設定間隔時間")
+            return
+        
+        # 清除停止事件
+        self._stop_event.clear()
+        self.auto_press_threads.clear()
+        
+        # 取得活躍的瀏覽器
+        active_browsers = self._get_active_browsers()
+        
+        # 為每個瀏覽器啟動獨立執行緒
+        for i, bt in enumerate(active_browsers, 1):
+            thread = threading.Thread(
+                target=self._auto_press_loop_single,
+                args=(bt, i),
+                daemon=True,
+                name=f"AutoPressThread-{i}"
+            )
+            self.auto_press_threads[i] = thread
+            thread.start()
+        
+        self.auto_press_running = True
+        
+        self.logger.info(f"[成功] 已啟動 {len(active_browsers)} 個瀏覽器的自動按鍵")
+    
+    def _stop_auto_press(self) -> None:
+        """停止所有自動按鍵執行緒。"""
+        if not self.auto_press_running:
+            self.logger.warning("自動按鍵未在運行")
+            return
+        
+        # 設置停止事件
+        self._stop_event.set()
+        
+        # 等待所有執行緒結束
+        stopped_count = 0
+        for browser_index, thread in self.auto_press_threads.items():
+            if thread and thread.is_alive():
+                thread.join(timeout=1.0)
+                
+                if not thread.is_alive():
+                    stopped_count += 1
+                else:
+                    self.logger.warning(f"瀏覽器 {browser_index} 的執行緒未能正常結束")
+            else:
+                stopped_count += 1
+        
+        self.logger.info(f"[成功] 已停止 {stopped_count}/{len(self.auto_press_threads)} 個瀏覽器")
+        
+        self.auto_press_threads.clear()
+        self.auto_press_running = False
+    
+    def process_command(self, command: str) -> bool:
+        """處理用戶指令。
+        
+        Args:
+            command: 用戶輸入的指令
+            
+        Returns:
+            是否繼續運行（False 表示退出）
+        """
+        command = command.strip().lower()
+        
+        if not command:
+            return True
+        
+        # 解析指令和參數
+        parts = command.split(maxsplit=1)
+        cmd = parts[0] if parts else ""
+        command_arguments = parts[1] if len(parts) > 1 else ""
+        
+        try:
+            if cmd == 'q':
+                # 關閉瀏覽器指令
+                return self._handle_quit_command(command_arguments)
+            
+            elif cmd == 'h':
+                self.show_help()
+            
+            elif cmd == 's':
+                # 開始自動按鍵
+                return self._handle_start_command(command_arguments)
+            
+            elif cmd == 'p':
+                # 暫停指令
+                if self.auto_press_running:
+                    self._stop_auto_press()
+                    self.logger.info("")
+                    self.logger.info("[成功] 已暫停自動按鍵")
+                    self.logger.info("")
+                    self.show_help()
+                else:
+                    self.logger.warning("[警告] 目前沒有運行中的自動操作")
+            
+            elif cmd == 'b':
+                # 調整金額（簡化版 - 尚未實作完整邏輯）
+                self.logger.info("[提示] 金額調整功能尚未完整實作")
+            
+            elif cmd == 'f':
+                # 購買免費遊戲（簡化版 - 尚未實作完整邏輯）
+                self.logger.info("[提示] 購買免費遊戲功能尚未完整實作")
+            
+            else:
+                self.logger.warning(f"[警告] 未知指令: {cmd}")
+                self.logger.info("   輸入 'h' 查看指令說明")
+                
+        except Exception as e:
+            self.logger.error(f"[錯誤] 處理指令時發生錯誤: {e}")
+        
+        return True
+    
+    def _handle_quit_command(self, arguments: str) -> bool:
+        """處理關閉瀏覽器指令。
+        
+        Args:
+            arguments: 指令參數
+            
+        Returns:
+            是否繼續運行
+        """
+        if not arguments:
+            self.logger.error("指令格式錯誤，請使用: q <編號>")
+            self.logger.info("  q 0      - 關閉所有瀏覽器並退出")
+            self.logger.info("  q 1      - 關閉第 1 個瀏覽器")
+            return True
+        
+        try:
+            index = int(arguments)
+            active_browsers = self._get_active_browsers()
+            
+            if index == 0:
+                # 關閉所有瀏覽器
+                self.logger.info(f"開始關閉所有 {len(active_browsers)} 個瀏覽器...")
+                
+                for i, bt in enumerate(active_browsers, 1):
+                    try:
+                        bt.stop()
+                        username = bt.context.credential.username if bt.context else "Unknown"
+                        self.logger.info(f"[成功] 已關閉瀏覽器 {i} ({username})")
+                    except Exception as e:
+                        self.logger.error(f"關閉瀏覽器 {i} 失敗: {e}")
+                
+                self.logger.info("所有瀏覽器已關閉，退出控制中心")
+                return False
+            
+            elif 1 <= index <= len(active_browsers):
+                # 關閉指定瀏覽器
+                bt = active_browsers[index - 1]
+                username = bt.context.credential.username if bt.context else "Unknown"
+                
+                try:
+                    bt.stop()
+                    self.logger.info(f"[成功] 已關閉瀏覽器 {index} ({username})")
+                except Exception as e:
+                    self.logger.error(f"關閉瀏覽器 {index} 失敗: {e}")
+                
+                # 檢查是否還有瀏覽器在運行
+                remaining = len(self._get_active_browsers())
+                if remaining == 0:
+                    self.logger.info("所有瀏覽器已關閉，退出控制中心")
+                    return False
+                else:
+                    self.logger.info(f"剩餘 {remaining} 個瀏覽器仍在運行")
+            else:
+                self.logger.error(f"瀏覽器編號無效，請輸入 0 (全部) 或 1-{len(active_browsers)} 之間的數字")
+        
+        except ValueError:
+            self.logger.error(f"無效的編號: {arguments}，請輸入數字")
+        
+        return True
+    
+    def _handle_start_command(self, arguments: str) -> bool:
+        """處理開始自動按鍵指令。
+        
+        Args:
+            arguments: 指令參數
+            
+        Returns:
+            是否繼續運行
+        """
+        if not arguments:
+            self.logger.error("[錯誤] 指令格式錯誤")
+            self.logger.info("   正確格式: s <最小>,<最大>")
+            self.logger.info("   範例: s 1,2  → 間隔 1~2 秒按空白鍵")
+            return True
+        
+        # 解析用戶輸入的間隔時間
+        try:
+            interval_parts = arguments.split(',')
+            if len(interval_parts) != 2:
+                self.logger.error("[錯誤] 間隔格式錯誤，需要兩個數字")
+                self.logger.info("   範例: s 1,2 或 s 1.5,3")
+                return True
+            
+            min_interval = float(interval_parts[0].strip())
+            max_interval = float(interval_parts[1].strip())
+            
+            if min_interval <= 0 or max_interval <= 0:
+                self.logger.error("[錯誤] 間隔時間必須大於 0")
+                return True
+            
+            if min_interval > max_interval:
+                self.logger.error("[錯誤] 最小間隔不能大於最大間隔")
+                self.logger.info(f"   您輸入的: 最小={min_interval}, 最大={max_interval}")
+                return True
+                
+        except ValueError:
+            self.logger.error("[錯誤] 間隔格式錯誤，請輸入有效的數字")
+            self.logger.info("   範例: s 1,2 或 s 1.5,3")
+            return True
+        
+        # 檢查是否已在運行
+        if self.auto_press_running:
+            self.logger.warning("[警告] 自動按鍵已在運行中")
+            self.logger.info(f"   目前設定: {self.min_interval}~{self.max_interval} 秒")
+            self.logger.info("   提示: 請先使用 'p' 暫停，再重新啟動")
+            return True
+        
+        # 設置間隔時間
+        self.min_interval = min_interval
+        self.max_interval = max_interval
+        
+        active_count = len(self._get_active_browsers())
+        
+        self.logger.info("")
+        self.logger.info("[成功] 自動按鍵已啟動")
+        self.logger.info(f"  > 間隔時間: {min_interval}~{max_interval} 秒")
+        self.logger.info(f"  > 瀏覽器數: {active_count} 個")
+        self.logger.info("  > 暫停指令: p")
+        self.logger.info("")
+        
+        # 啟動自動按鍵
+        self._start_auto_press()
+        
+        return True
+    
+    def start(self) -> None:
+        """啟動控制中心。"""
+        self.running = True
+        self.logger.info("")
+        self.logger.info("=" * 60)
+        self.logger.info("           【遊戲控制中心】已啟動")
+        self.logger.info("=" * 60)
+        self.logger.info("")
+        
+        active_count = len(self._get_active_browsers())
+        self.logger.info(f"[成功] 已連接 {active_count} 個瀏覽器")
+        self.logger.info("")
+        
+        # 自動顯示幫助訊息
+        self.show_help()
+        
+        try:
+            while self.running:
+                try:
+                    print(">>> ", end="", flush=True)
+                    command = input().strip()
+                    
+                    if command:
+                        if not self.process_command(command):
+                            break
+                    else:
+                        self.logger.warning("[警告] 請輸入指令（輸入 'h' 查看幫助）")
+                        
+                except EOFError:
+                    self.logger.info("\n[警告] 檢測到 EOF，退出控制中心")
+                    break
+                except KeyboardInterrupt:
+                    self.logger.info("\n[警告] 使用者中斷，退出控制中心")
+                    break
+        finally:
+            # 確保停止所有自動操作
+            if self.auto_press_running:
+                self._stop_auto_press()
+            
+            self.running = False
+            self.logger.info("[成功] 控制中心已關閉")
+    
+    def stop(self) -> None:
+        """停止控制中心。"""
+        self.running = False
+        
+        # 確保停止自動按鍵
+        if self.auto_press_running:
+            self._stop_auto_press()
 
 
 # ============================================================================
@@ -1631,12 +2366,10 @@ class AutoSlotGameAppStarter:
                 login_button = WebDriverWait(driver, 15).until(
                     EC.element_to_be_clickable((By.XPATH, Constants.LOGIN_BUTTON))
                 )
-                driver.execute_script("arguments[0].click();", login_button)
-                
+                driver.execute_script("arguments[0].click();", login_button)        
                 time.sleep(3)  # 等待登入完成
                 
                 # 7. 關閉所有彈窗
-                time.sleep(2)
                 driver.execute_script("""
                     const popups = document.querySelectorAll('.popup-container, .popup-wrap, .popup-account-container');
                     popups.forEach(popup => {
@@ -1670,27 +2403,44 @@ class AutoSlotGameAppStarter:
             driver = context.driver
             
             try:
-                # 1. 點擊搜尋按鈕
+                # 1. 關閉可能出現的公告彈窗
+                try:
+                    driver.execute_script("""
+                        // 隱藏所有彈窗容器
+                        const popups = document.querySelectorAll('.popup-container, .popup-wrap, .popup-account-container');
+                        popups.forEach(popup => {
+                            popup.style.display = 'none';
+                            popup.style.visibility = 'hidden';
+                            popup.remove();
+                        });
+                        
+                        // 移除遮罩層
+                        const overlays = document.querySelectorAll('[class*="overlay"], [class*="mask"]');
+                        overlays.forEach(overlay => overlay.remove());
+                    """)
+                    time.sleep(0.5)
+                except Exception:
+                    pass  # 沒有彈窗也沒關係
+                
+                # 2. 點擊搜尋按鈕
                 search_btn = driver.find_element(By.XPATH, Constants.SEARCH_BUTTON)
                 search_btn.click()
-                time.sleep(1)
+                time.sleep(3)  # 等待搜尋輸入框顯示
                 
-                # 2. 輸入「戰神」
+                # 3. 輸入「戰神」
                 search_input = driver.find_element(By.XPATH, Constants.SEARCH_INPUT)
                 search_input.clear()
                 search_input.send_keys('戰神')
                 search_input.send_keys('\n')
-                
                 time.sleep(5)  # 等待搜尋結果載入
                 
-                # 3. 點擊遊戲
+                # 4. 點擊遊戲
                 game_element = driver.find_element(By.XPATH, Constants.GAME_XPATH)
                 game_element.click()
-                
                 time.sleep(5)  # 等待遊戲載入
                 
-                # 4. 切換到 iframe
-                time.sleep(2)
+                # 5. 切換到 iframe
+                time.sleep(3)  # 等待 iframe 載入
                 iframe = WebDriverWait(driver, 10).until(
                     EC.presence_of_element_located((By.XPATH, Constants.GAME_IFRAME))
                 )
@@ -1735,6 +2485,387 @@ class AutoSlotGameAppStarter:
         
         self.logger.info(f"[成功] {success_count}/{len(self.browser_threads)} 個視窗已排列完成 ({columns} 列, {width}x{height})")
         self.logger.info("")
+    
+    def execute_image_detection_flow(self) -> None:
+        """步驟 9: 執行圖片檢測流程
+        
+        包含 game_login 和 game_confirm 的檢測與處理。
+        流程:
+        1. 檢測 game_login → 點擊
+        2. 檢測 game_confirm → 點擊
+        """
+        self.logger.info("=" * 60)
+        self.logger.info("【步驟 9】執行圖片檢測流程")
+        self.logger.info("=" * 60)
+        
+        if not self.browser_threads:
+            self.logger.error("[錯誤] 沒有可用的瀏覽器實例")
+            return
+        
+        # 初始化圖片檢測器
+        image_detector = ImageDetector(logger=self.logger)
+        
+        # 階段 1: 處理 game_login
+        self.logger.info("")
+        self.logger.info("【階段 1】檢測 game_login 畫面")
+        self._handle_game_login(image_detector)
+        
+        # 階段 2: 處理 game_confirm
+        self.logger.info("")
+        self.logger.info("【階段 2】檢測 game_confirm 畫面")
+        self._handle_game_confirm(image_detector)
+        
+        self.logger.info("")
+        self.logger.info("[成功] 圖片檢測與初始化完成")
+        self.logger.info("")
+    
+    def _handle_game_login(self, image_detector: ImageDetector) -> None:
+        """處理 game_login 的檢測與點擊。
+        
+        Args:
+            image_detector: 圖片檢測器實例
+        """
+        template_name = Constants.GAME_LOGIN
+        display_name = "game_login"
+        
+        # 1. 檢查模板是否存在，若不存在則引導用戶擷取
+        if not image_detector.template_exists(template_name):
+            self._prompt_capture_template(image_detector, template_name, display_name)
+        
+        # 2. 持續檢測直到所有瀏覽器都找到圖片
+        self._continuous_detect_until_found(image_detector, template_name, display_name)
+        
+        # 3. 等待一下後點擊
+        time.sleep(1)
+        
+        # 4. 使用 Canvas 比例計算座標並點擊
+        def click_game_login(context: BrowserContext) -> bool:
+            try:
+                driver = context.driver
+                
+                # 取得 Canvas 區域
+                rect = driver.execute_script(f"""
+                    const canvas = document.getElementById('{Constants.GAME_CANVAS}');
+                    const r = canvas.getBoundingClientRect();
+                    return {{x: r.left, y: r.top, w: r.width, h: r.height}};
+                """)
+                
+                # 使用 calculate_click_position 計算點擊座標
+                click_x, click_y = BrowserHelper.calculate_click_position(
+                    rect,
+                    Constants.GAME_LOGIN_BUTTON_X_RATIO,
+                    Constants.GAME_LOGIN_BUTTON_Y_RATIO
+                )
+                
+                # 執行 CDP 點擊
+                for event_type in ["mousePressed", "mouseReleased"]:
+                    driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
+                        "type": event_type,
+                        "x": click_x,
+                        "y": click_y,
+                        "button": "left",
+                        "clickCount": 1
+                    })
+                self.logger.debug(f"[除錯] 瀏覽器 {context.index} 已點擊 {display_name} (座標: {click_x:.0f}, {click_y:.0f})")
+                return True
+                
+            except Exception as e:
+                self.logger.error(f"[錯誤] 瀏覽器 {context.index} 點擊 {display_name} 失敗: {e}")
+                return False
+        
+        results = self.execute_on_all_browsers(click_game_login)
+        success_count = sum(1 for _, result, error in results if error is None and result)
+        self.logger.info(f"[成功] {success_count}/{len(self.browser_threads)} 個瀏覽器已點擊 {display_name}")
+        
+        # 5. 等待圖片消失
+        self._wait_for_image_disappear(image_detector, template_name)
+    
+    def _handle_game_confirm(self, image_detector: ImageDetector) -> None:
+        """處理 game_confirm 的檢測與點擊。
+        
+        Args:
+            image_detector: 圖片檢測器實例
+        """
+        template_name = Constants.GAME_CONFIRM
+        display_name = "game_confirm"
+        
+        # 1. 檢查模板是否存在，若不存在則引導用戶擷取
+        if not image_detector.template_exists(template_name):
+            self._prompt_capture_template(image_detector, template_name, display_name)
+        
+        # 2. 持續檢測直到所有瀏覽器都找到圖片
+        self._continuous_detect_until_found(image_detector, template_name, display_name)
+        
+        # 3. 等待一下後點擊
+        time.sleep(1)
+        
+        # 4. 使用 Canvas 比例計算座標並點擊
+        def click_game_confirm(context: BrowserContext) -> bool:
+            try:
+                driver = context.driver
+                
+                # 取得 Canvas 區域
+                rect = driver.execute_script(f"""
+                    const canvas = document.getElementById('{Constants.GAME_CANVAS}');
+                    const r = canvas.getBoundingClientRect();
+                    return {{x: r.left, y: r.top, w: r.width, h: r.height}};
+                """)
+                
+                # 使用 calculate_click_position 計算點擊座標
+                click_x, click_y = BrowserHelper.calculate_click_position(
+                    rect,
+                    Constants.GAME_CONFIRM_BUTTON_X_RATIO,
+                    Constants.GAME_CONFIRM_BUTTON_Y_RATIO
+                )
+                
+                # 執行 CDP 點擊
+                for event_type in ["mousePressed", "mouseReleased"]:
+                    driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
+                        "type": event_type,
+                        "x": click_x,
+                        "y": click_y,
+                        "button": "left",
+                        "clickCount": 1
+                    })
+                self.logger.debug(f"[除錯] 瀏覽器 {context.index} 已點擊 {display_name} (座標: {click_x:.0f}, {click_y:.0f})")
+                return True
+                
+            except Exception as e:
+                self.logger.error(f"[錯誤] 瀏覽器 {context.index} 點擊 {display_name} 失敗: {e}")
+                return False
+        
+        results = self.execute_on_all_browsers(click_game_confirm)
+        success_count = sum(1 for _, result, error in results if error is None and result)
+        self.logger.info(f"[成功] {success_count}/{len(self.browser_threads)} 個瀏覽器已點擊 {display_name}")
+        
+        # 5. 等待圖片消失
+        self._wait_for_image_disappear(image_detector, template_name)
+        
+        # 6. 等待遊戲完全載入
+        time.sleep(3)
+        self.logger.info("[成功] 所有瀏覽器已準備就緒")
+    
+    def _continuous_detect_until_found(
+        self, 
+        image_detector: ImageDetector, 
+        template_name: str, 
+        display_name: str
+    ) -> List[Optional[Tuple[int, int, float]]]:
+        """持續檢測直到在所有瀏覽器中找到圖片。
+        
+        Args:
+            image_detector: 圖片檢測器實例
+            template_name: 模板圖片檔名
+            display_name: 顯示名稱
+            
+        Returns:
+            檢測結果列表
+        """
+        attempt = 0
+        total_browsers = len(self.browser_threads)
+        
+        self.logger.info(f"[資訊] 開始檢測 {display_name}...")
+        
+        while True:
+            attempt += 1
+            
+            # 在所有瀏覽器中檢測
+            detection_results: List[Optional[Tuple[int, int, float]]] = []
+            
+            def detect_task(context: BrowserContext) -> Optional[Tuple[int, int, float]]:
+                return image_detector.detect_in_browser(context.driver, template_name)
+            
+            results = self.execute_on_all_browsers(detect_task)
+            detection_results = [result for _, result, error in results if error is None]
+            
+            found_count = sum(1 for result in detection_results if result is not None)
+            
+            # 當所有瀏覽器都找到圖片時返回
+            if found_count == total_browsers:
+                self.logger.info(f"[成功] 所有瀏覽器都已檢測到 {display_name}")
+                return detection_results
+            
+            # 每 10 次檢測顯示一次進度
+            if attempt % Constants.DETECTION_PROGRESS_INTERVAL == 0:
+                self.logger.info(f"   檢測進度: {found_count}/{total_browsers} 個瀏覽器已就緒")
+                sys.stdout.flush()  # 確保緩衝區刷新
+            
+            time.sleep(Constants.DETECTION_INTERVAL)
+    
+    def _prompt_capture_template(
+        self, 
+        image_detector: ImageDetector, 
+        template_name: str, 
+        display_name: str
+    ) -> None:
+        """提示用戶擷取模板圖片。
+        
+        當模板圖片不存在時，引導用戶選擇瀏覽器並擷取畫面作為模板。
+        
+        Args:
+            image_detector: 圖片檢測器實例
+            template_name: 模板檔名
+            display_name: 顯示名稱
+        """
+        self.logger.info("")
+        self.logger.info("=" * 60)
+        self.logger.info(f"[警告] 模板圖片不存在: {template_name}")
+        self.logger.info("=" * 60)
+        self.logger.info("")
+        self.logger.info(f"[提示] 需要擷取 {display_name} 的參考圖片")
+        self.logger.info("   請確保目標瀏覽器的遊戲畫面已顯示目標內容")
+        self.logger.info("")
+        
+        # 檢查是否有可用的瀏覽器
+        if not self.browser_threads:
+            self.logger.error("[錯誤] 沒有可用的瀏覽器實例")
+            raise RuntimeError("沒有可用的瀏覽器實例")
+        
+        # 顯示可選擇的瀏覽器列表
+        self.logger.info("請選擇要擷取的瀏覽器:")
+        available_browsers = []
+        for thread in self.browser_threads:
+            if thread.context and thread.is_browser_alive():
+                username = thread.context.credential.username
+                self.logger.info(f"  {thread.index}  - 瀏覽器 {thread.index} ({username})")
+                available_browsers.append(thread)
+        
+        if not available_browsers:
+            self.logger.error("[錯誤] 沒有可用的瀏覽器")
+            raise RuntimeError("沒有可用的瀏覽器")
+        
+        self.logger.info("  q  - 取消")
+        self.logger.info("")
+        
+        try:
+            print("請輸入編號: ", end="", flush=True)
+            sys.stdout.flush()  # 確保緩衝區刷新
+            user_input = input().strip().lower()
+            
+            # 檢查是否要取消
+            if user_input == 'q':
+                self.logger.warning("[警告] 使用者取消擷取")
+                raise KeyboardInterrupt("使用者取消")
+            
+            # 解析瀏覽器編號
+            try:
+                browser_index = int(user_input)
+                
+                # 尋找對應的瀏覽器
+                selected_thread = None
+                for thread in available_browsers:
+                    if thread.index == browser_index:
+                        selected_thread = thread
+                        break
+                
+                if selected_thread is None:
+                    self.logger.error(f"[錯誤] 無效的瀏覽器編號: {browser_index}")
+                    # 遞迴重試
+                    self._prompt_capture_template(image_detector, template_name, display_name)
+                    return
+                
+                # 擷取並儲存模板
+                template_path = image_detector.get_template_path(template_name)
+                image_detector.capture_screenshot(selected_thread.context.driver, template_path)
+                
+                self.logger.info("")
+                self.logger.info(f"[成功] 模板圖片已建立: {template_path}")
+                self.logger.info("")
+                
+            except ValueError:
+                self.logger.error(f"[錯誤] 無效的輸入: {user_input}")
+                # 遞迴重試
+                self._prompt_capture_template(image_detector, template_name, display_name)
+                return
+            
+        except (EOFError, KeyboardInterrupt):
+            self.logger.warning("")
+            self.logger.warning("[警告] 使用者取消擷取")
+            raise
+    
+    def _wait_for_image_disappear(self, image_detector: ImageDetector, template_name: str) -> None:
+        """持續等待圖片在所有瀏覽器中消失。
+        
+        Args:
+            image_detector: 圖片檢測器實例
+            template_name: 模板圖片檔名
+        """
+        attempt = 0
+        total_browsers = len(self.browser_threads)
+        
+        while True:
+            attempt += 1
+            
+            # 檢測所有瀏覽器中仍存在圖片的數量
+            still_present_count = 0
+            
+            def detect_task(context: BrowserContext) -> bool:
+                """返回 True 表示圖片仍存在"""
+                result = image_detector.detect_in_browser(context.driver, template_name)
+                return result is not None
+            
+            results = self.execute_on_all_browsers(detect_task)
+            still_present_count = sum(1 for _, result, error in results if error is None and result)
+            
+            disappeared_count = total_browsers - still_present_count
+            
+            # 如果所有瀏覽器都沒有找到圖片，則返回
+            if still_present_count == 0:
+                self.logger.info(f"[成功] 圖片已消失")
+                return
+            
+            # 每 10 次檢測顯示一次進度
+            if attempt % 10 == 0:
+                self.logger.info(f"   等待中... ({disappeared_count}/{total_browsers} 已消失)")
+                sys.stdout.flush()  # 確保緩衝區刷新
+            
+            time.sleep(Constants.DETECTION_INTERVAL)
+    
+    def start_control_center(self) -> None:
+        """步驟 10: 啟動遊戲控制中心
+        
+        建立並啟動 GameControlCenter 實例，提供互動式命令列介面。
+        對應 main_flow_explanation.md 第 105 行:
+        ClickLobbyConfirm --> StartControlCenter[啟動遊戲控制中心]
+        """
+        self.logger.info("=" * 60)
+        self.logger.info("【步驟 10】啟動遊戲控制中心")
+        self.logger.info("=" * 60)
+        
+        if not self.browser_threads:
+            self.logger.error("[錯誤] 沒有可用的瀏覽器實例")
+            return
+        
+        # 嘗試取得 Canvas 區域資訊（用於點擊座標計算）
+        canvas_rect = None
+        for bt in self.browser_threads:
+            if bt.context and bt.is_browser_alive():
+                try:
+                    def get_canvas_rect(context: BrowserContext) -> Optional[Dict[str, float]]:
+                        return context.driver.execute_script(f"""
+                            const canvas = document.getElementById('{Constants.GAME_CANVAS}');
+                            if (!canvas) return null;
+                            const r = canvas.getBoundingClientRect();
+                            return {{x: r.left, y: r.top, w: r.width, h: r.height}};
+                        """)
+                    
+                    result = bt.execute_task(get_canvas_rect)
+                    if result:
+                        canvas_rect = result
+                        break
+                except Exception:
+                    pass
+        
+        # 建立控制中心實例
+        control_center = GameControlCenter(
+            browser_threads=self.browser_threads,
+            bet_rules=self.rules,
+            canvas_rect=canvas_rect,
+            logger=self.logger
+        )
+        
+        # 啟動控制中心（阻塞式，直到使用者退出）
+        control_center.start()
 
 
 # ============================================================================
@@ -1778,15 +2909,17 @@ def main():
             # 步驟 8: 調整視窗排列
             starter.arrange_windows()
             
+            # 步驟 9: 執行圖片檢測流程
+            starter.execute_image_detection_flow()
+            
             logger.info("=" * 60)
             logger.info("【啟動完成】")
             logger.info("=" * 60)
             logger.info("[成功] 所有瀏覽器已就緒")
             logger.info("")
             
-            # 暫時保持程式運行，讓使用者可以看到瀏覽器
-            logger.info("[資訊] 按 Enter 鍵結束程式...")
-            input()
+            # 步驟 10: 啟動遊戲控制中心（阻塞式，直到使用者退出）
+            starter.start_control_center()
             
         else:
             logger.error("[錯誤] 初始化失敗，程式退出")
