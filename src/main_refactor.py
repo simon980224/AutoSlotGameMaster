@@ -17,7 +17,6 @@ Python: 3.8+
 
 import logging
 import sys
-import platform
 import socket
 import select
 import base64
@@ -258,6 +257,195 @@ class BrowserContext:
         return time.time() - self.created_at
 
 
+class BrowserThread(threading.Thread):
+    """瀏覽器專屬執行緒。
+    
+    每個瀏覽器實例都有自己的專屬執行緒，從建立到關閉的所有操作
+    都在同一個執行緒中執行，確保執行緒安全性。
+    
+    Attributes:
+        index: 瀏覽器索引（從 1 開始）
+        credential: 使用者憑證
+        proxy_port: 代理埠號（可選）
+        browser_manager: 瀏覽器管理器
+        context: 瀏覽器上下文（建立後填充）
+    """
+    
+    def __init__(
+        self,
+        index: int,
+        credential: UserCredential,
+        browser_manager: 'BrowserManager',
+        proxy_port: Optional[int] = None,
+        logger: Optional[logging.Logger] = None
+    ):
+        super().__init__(name=f"BrowserThread-{index}", daemon=True)
+        self.index = index
+        self.credential = credential
+        self.proxy_port = proxy_port
+        self.browser_manager = browser_manager
+        self.logger = logger or LoggerFactory.get_logger()
+        
+        # 瀏覽器上下文（在執行緒中建立）
+        self.context: Optional[BrowserContext] = None
+        self.driver: Optional[WebDriver] = None
+        
+        # 執行緒控制
+        self._stop_event = threading.Event()
+        self._ready_event = threading.Event()  # 瀏覽器就緒事件
+        self._creation_error: Optional[Exception] = None
+        
+        # 任務佇列
+        self._task_queue: List[Tuple[Callable, tuple, dict]] = []
+        self._task_lock = threading.Lock()
+        self._task_event = threading.Event()  # 有新任務時通知
+        self._task_result: Any = None
+        self._task_done_event = threading.Event()  # 任務完成事件
+    
+    def run(self) -> None:
+        """執行緒主迴圈。"""
+        try:
+            # 1. 建立瀏覽器
+            self._create_browser()
+            
+            if self.driver is None:
+                return
+            
+            # 2. 通知瀏覽器已就緒
+            self._ready_event.set()
+            
+            # 3. 主迴圈：等待任務或停止信號
+            while not self._stop_event.is_set():
+                # 等待任務或停止信號（每秒檢查一次）
+                if self._task_event.wait(timeout=1.0):
+                    self._task_event.clear()
+                    self._process_tasks()
+            
+        except Exception as e:
+            self.logger.error(f"瀏覽器 {self.index} 執行緒異常: {e}")
+        finally:
+            # 4. 清理資源
+            self._cleanup()
+    
+    def _create_browser(self) -> None:
+        """在執行緒中建立瀏覽器。"""
+        try:
+            self.driver = self.browser_manager.create_webdriver(
+                local_proxy_port=self.proxy_port
+            )
+            
+            self.context = BrowserContext(
+                driver=self.driver,
+                credential=self.credential,
+                index=self.index,
+                proxy_port=self.proxy_port
+            )
+            
+        except Exception as e:
+            self._creation_error = e
+            self._ready_event.set()  # 即使失敗也要通知
+    
+    def _process_tasks(self) -> None:
+        """處理任務佇列中的所有任務。"""
+        while True:
+            with self._task_lock:
+                if not self._task_queue:
+                    break
+                func, args, kwargs = self._task_queue.pop(0)
+            
+            try:
+                # 將 context 注入到任務中
+                self._task_result = func(self.context, *args, **kwargs)
+            except Exception as e:
+                self._task_result = e
+            finally:
+                self._task_done_event.set()
+    
+    def _cleanup(self) -> None:
+        """清理瀏覽器資源。"""
+        if self.driver:
+            try:
+                self.driver.quit()
+                self.logger.info(f"[成功] 已關閉瀏覽器 {self.index}")
+            except Exception as e:
+                self.logger.warning(f"[警告] 關閉瀏覽器 {self.index} 時發生錯誤: {e}")
+            finally:
+                self.driver = None
+                self.context = None
+    
+    def wait_until_ready(self, timeout: Optional[float] = None) -> bool:
+        """等待瀏覽器就緒。
+        
+        Args:
+            timeout: 超時時間（秒），None 表示無限等待
+            
+        Returns:
+            瀏覽器是否成功建立
+        """
+        self._ready_event.wait(timeout=timeout)
+        return self.context is not None and self._creation_error is None
+    
+    def get_creation_error(self) -> Optional[Exception]:
+        """取得建立瀏覽器時的錯誤。"""
+        return self._creation_error
+    
+    def execute_task(
+        self, 
+        func: Callable[[BrowserContext], Any],
+        *args,
+        timeout: Optional[float] = None,
+        **kwargs
+    ) -> Any:
+        """在瀏覽器執行緒中執行任務。
+        
+        Args:
+            func: 要執行的函數，第一個參數會是 BrowserContext
+            *args: 額外的位置參數
+            timeout: 超時時間（秒）
+            **kwargs: 額外的關鍵字參數
+            
+        Returns:
+            任務執行的結果
+        """
+        if not self.is_alive() or self._stop_event.is_set():
+            raise RuntimeError(f"瀏覽器 {self.index} 執行緒已停止")
+        
+        # 重置任務完成事件
+        self._task_done_event.clear()
+        self._task_result = None
+        
+        # 加入任務佇列
+        with self._task_lock:
+            self._task_queue.append((func, args, kwargs))
+        
+        # 通知執行緒有新任務
+        self._task_event.set()
+        
+        # 等待任務完成
+        if self._task_done_event.wait(timeout=timeout):
+            result = self._task_result
+            if isinstance(result, Exception):
+                raise result
+            return result
+        else:
+            raise TimeoutError(f"瀏覽器 {self.index} 任務執行超時")
+    
+    def stop(self) -> None:
+        """停止執行緒。"""
+        self._stop_event.set()
+        self._task_event.set()  # 喚醒等待中的執行緒
+    
+    def is_browser_alive(self) -> bool:
+        """檢查瀏覽器是否仍然有效。"""
+        if self.driver is None:
+            return False
+        try:
+            _ = self.driver.current_url
+            return True
+        except Exception:
+            return False
+
+
 class OperationResult:
     """操作結果封裝。
     
@@ -405,60 +593,6 @@ def get_resource_path(relative_path: str = "") -> Path:
     if relative_path:
         return base_path / relative_path
     return base_path
-
-
-def cleanup_chromedriver_processes() -> None:
-    """清除所有殘留的 chromedriver 程序。
-    
-    在程式啟動前執行，確保沒有殘留的 chromedriver 程序佔用資源。
-    支援 Windows、macOS 和 Linux 作業系統。
-    """
-    logger = LoggerFactory.get_logger()
-    system = platform.system().lower()
-    
-    logger.info("=" * 60)
-    logger.info("【系統初始化】清理殘留程序")
-    logger.info("=" * 60)
-    
-    try:
-        if system == "windows":
-            result = subprocess.run(
-                ["taskkill", "/F", "/IM", "chromedriver.exe"],
-                capture_output=True,
-                text=True,
-                timeout=Constants.CLEANUP_PROCESS_TIMEOUT
-            )
-            
-            if result.returncode == 0:
-                logger.info("[成功] 已清除 Windows 上的 chromedriver 程序")
-            elif "找不到" in result.stdout or "not found" in result.stdout.lower():
-                logger.info("[成功] 沒有殘留的 chromedriver 程序")
-            else:
-                logger.debug(f"taskkill 執行結果: {result.stdout.strip()}")
-                
-        elif system in ["darwin", "linux"]:
-            result = subprocess.run(
-                ["killall", "-9", "chromedriver"],
-                capture_output=True,
-                text=True,
-                timeout=Constants.CLEANUP_PROCESS_TIMEOUT
-            )
-            
-            if result.returncode == 0:
-                logger.info(f"[成功] 已清除 {system.upper()} 上的 chromedriver 程序")
-            else:
-                logger.info("[成功] 沒有殘留的 chromedriver 程序")
-        else:
-            logger.warning(f"[警告] 不支援的作業系統: {system}，跳過清除 chromedriver")
-            
-    except subprocess.TimeoutExpired:
-        logger.warning("[警告] 清除 chromedriver 程序逾時")
-    except FileNotFoundError:
-        logger.info("[成功] 沒有殘留的 chromedriver 程序")
-    except Exception as e:
-        logger.warning(f"[警告] 清除程序時發生錯誤: {e}")
-    
-    logger.info("")
 
 
 # ============================================================================
@@ -897,7 +1031,6 @@ class LocalProxyServerManager:
             
             time.sleep(Constants.PROXY_SERVER_START_WAIT)
             
-            self.logger.info(f"[成功] 代理中繼已啟動 (埠: {local_port})")
             return local_port
             
         except Exception as e:
@@ -1058,24 +1191,14 @@ class BrowserManager:
     
     def _create_webdriver_with_local_driver(self, chrome_options: Options) -> WebDriver:
         """使用本機驅動程式建立 WebDriver。"""
-        import os
-        
         project_root = get_resource_path()
-        
-        system = platform.system().lower()
-        driver_filename = "chromedriver.exe" if system == "windows" else "chromedriver"
-        
-        driver_path = project_root / driver_filename
+        driver_path = project_root / "chromedriver.exe"
         
         if not driver_path.exists():
             raise FileNotFoundError(
                 f"找不到驅動程式檔案\n"
-                f"請確保 {driver_filename} 存在於專案根目錄"
+                f"請確保 chromedriver.exe 存在於專案根目錄"
             )
-        
-        if system in ["darwin", "linux"]:
-            with suppress(Exception):
-                os.chmod(driver_path, 0o755)
         
         try:
             service = Service(str(driver_path))
@@ -1121,7 +1244,12 @@ class AutoSlotGameAppStarter:
     - 載入配置檔案
     - 自動決定瀏覽器數量
     - 啟動代理中繼伺服器
-    - 建立瀏覽器實例
+    - 建立瀏覽器實例（每個瀏覽器使用專屬執行緒）
+    
+    架構特點：
+    - 每個瀏覽器都有自己的專屬執行緒 (BrowserThread)
+    - 從建立到關閉的所有操作都在同一執行緒中執行
+    - 透過 execute_task() 方法在瀏覽器執行緒中執行任務
     """
     
     def __init__(self, logger: Optional[logging.Logger] = None):
@@ -1129,7 +1257,10 @@ class AutoSlotGameAppStarter:
         self.config_reader: Optional[ConfigReader] = None
         self.proxy_manager: Optional[LocalProxyServerManager] = None
         self.browser_manager: Optional[BrowserManager] = None
-        self.browser_contexts: List[BrowserContext] = []
+        
+        # 瀏覽器執行緒列表（取代原本的 browser_contexts）
+        self.browser_threads: List[BrowserThread] = []
+        
         self.credentials: List[UserCredential] = []
         self.rules: List[BetRule] = []
     
@@ -1137,33 +1268,29 @@ class AutoSlotGameAppStarter:
         """執行完整的初始化流程。
         
         流程:
-        1. 清除殘留 chromedriver 程序
-        2. 載入配置檔案
-        3. 自動決定瀏覽器數量
-        4. 啟動代理中繼伺服器
-        5. 建立瀏覽器實例
+        1. 載入配置檔案
+        2. 自動決定瀏覽器數量
+        3. 啟動代理中繼伺服器
+        4. 建立瀏覽器實例
         
         Returns:
             初始化是否成功
         """
         try:
-            # 步驟 1: 清除殘留 chromedriver 程序
-            self._step_cleanup_chromedriver()
-            
-            # 步驟 2: 載入配置檔案
+            # 步驟 1: 載入配置檔案
             self._step_load_config()
             
-            # 步驟 3: 自動決定瀏覽器數量
+            # 步驟 2: 自動決定瀏覽器數量
             browser_count = self._step_determine_browser_count()
             
             if browser_count == 0:
                 self.logger.error("沒有可用的用戶帳號，無法繼續")
                 return False
             
-            # 步驟 4: 啟動代理中繼伺服器
+            # 步驟 3: 啟動代理中繼伺服器
             proxy_ports = self._step_start_proxy_servers(browser_count)
             
-            # 步驟 5: 建立瀏覽器實例
+            # 步驟 4: 建立瀏覽器實例
             self._step_create_browsers(browser_count, proxy_ports)
             
             return True
@@ -1172,14 +1299,10 @@ class AutoSlotGameAppStarter:
             self.logger.error(f"初始化失敗: {e}")
             return False
     
-    def _step_cleanup_chromedriver(self) -> None:
-        """步驟 1: 清除殘留 chromedriver 程序"""
-        cleanup_chromedriver_processes()
-    
     def _step_load_config(self) -> None:
-        """步驟 2: 載入配置檔案"""
+        """步驟 1: 載入配置檔案"""
         self.logger.info("=" * 60)
-        self.logger.info("【步驟 2】載入配置檔案")
+        self.logger.info("【步驟 1】載入配置檔案")
         self.logger.info("=" * 60)
         
         self.config_reader = ConfigReader(logger=self.logger)
@@ -1195,13 +1318,13 @@ class AutoSlotGameAppStarter:
         self.logger.info("")
     
     def _step_determine_browser_count(self) -> int:
-        """步驟 3: 自動決定瀏覽器數量
+        """步驟 2: 自動決定瀏覽器數量
         
         Returns:
             瀏覽器數量
         """
         self.logger.info("=" * 60)
-        self.logger.info("【步驟 3】自動決定瀏覽器數量")
+        self.logger.info("【步驟 2】自動決定瀏覽器數量")
         self.logger.info("=" * 60)
         
         # 根據用戶數量決定瀏覽器數量，最多 MAX_BROWSER_COUNT 個
@@ -1213,7 +1336,7 @@ class AutoSlotGameAppStarter:
         return browser_count
     
     def _step_start_proxy_servers(self, browser_count: int) -> List[Optional[int]]:
-        """步驟 4: 啟動代理中繼伺服器
+        """步驟 3: 啟動代理中繼伺服器
         
         Args:
             browser_count: 瀏覽器數量
@@ -1222,11 +1345,13 @@ class AutoSlotGameAppStarter:
             每個瀏覽器對應的本機代理埠號列表
         """
         self.logger.info("=" * 60)
-        self.logger.info("【步驟 4】啟動代理中繼伺服器")
+        self.logger.info("【步驟 3】啟動代理中繼伺服器")
         self.logger.info("=" * 60)
         
         self.proxy_manager = LocalProxyServerManager(logger=self.logger)
         proxy_ports: List[Optional[int]] = []
+        success_count = 0
+        no_proxy_count = 0
         
         for i in range(browser_count):
             credential = self.credentials[i]
@@ -1237,14 +1362,21 @@ class AutoSlotGameAppStarter:
                     proxy_info = ProxyInfo.from_connection_string(credential.proxy)
                     port = self.proxy_manager.start_proxy_server(proxy_info)
                     proxy_ports.append(port)
-                    self.logger.info(f"  瀏覽器 {i+1}: 代理中繼埠 {port}")
+                    if port:
+                        success_count += 1
                 except Exception as e:
                     self.logger.warning(f"  瀏覽器 {i+1}: 無法解析代理配置 - {e}")
                     proxy_ports.append(None)
             else:
                 # 沒有代理配置
                 proxy_ports.append(None)
-                self.logger.info(f"  瀏覽器 {i+1}: 無代理配置")
+                no_proxy_count += 1
+        
+        # 統一輸出結果
+        if success_count > 0:
+            self.logger.info(f"[成功] 已啟動 {success_count} 個代理中繼伺服器")
+        if no_proxy_count > 0:
+            self.logger.info(f"[資訊] {no_proxy_count} 個瀏覽器無代理配置，將使用本機網路")
         
         self.logger.info("")
         return proxy_ports
@@ -1254,59 +1386,62 @@ class AutoSlotGameAppStarter:
         browser_count: int, 
         proxy_ports: List[Optional[int]]
     ) -> None:
-        """步驟 5: 建立瀏覽器實例
+        """步驟 4: 建立瀏覽器實例（使用專屬執行緒）
+        
+        每個瀏覽器都會啟動自己的專屬執行緒，從建立到關閉的所有操作
+        都在同一個執行緒中執行。
         
         Args:
             browser_count: 瀏覽器數量
             proxy_ports: 代理埠號列表
         """
         self.logger.info("=" * 60)
-        self.logger.info("【步驟 5】建立瀏覽器實例")
+        self.logger.info("【步驟 4】建立瀏覽器實例")
         self.logger.info("=" * 60)
         
         self.browser_manager = BrowserManager(logger=self.logger)
+        self.logger.info(f"正在建立 {browser_count} 個瀏覽器執行緒...")
         
-        def create_browser(index: int) -> Optional[BrowserContext]:
-            """建立單個瀏覽器"""
-            credential = self.credentials[index]
-            proxy_port = proxy_ports[index]
+        # 1. 建立並啟動所有瀏覽器執行緒
+        for i in range(browser_count):
+            credential = self.credentials[i]
+            proxy_port = proxy_ports[i]
             
-            try:
-                driver = self.browser_manager.create_webdriver(
-                    local_proxy_port=proxy_port
-                )
-                
-                context = BrowserContext(
-                    driver=driver,
-                    credential=credential,
-                    index=index + 1,
-                    proxy_port=proxy_port
-                )
-                
-                self.logger.info(f"[成功] 瀏覽器 {index+1}/{browser_count} 已建立")
-                return context
-                
-            except Exception as e:
-                self.logger.error(f"[失敗] 瀏覽器 {index+1}/{browser_count} 建立失敗: {e}")
-                return None
+            thread = BrowserThread(
+                index=i + 1,
+                credential=credential,
+                browser_manager=self.browser_manager,
+                proxy_port=proxy_port,
+                logger=self.logger
+            )
+            thread.start()
+            self.browser_threads.append(thread)
         
-        # 並行建立瀏覽器
-        with ThreadPoolExecutor(max_workers=Constants.MAX_THREAD_WORKERS) as executor:
-            futures = [
-                executor.submit(create_browser, i) 
-                for i in range(browser_count)
+        # 2. 等待所有瀏覽器就緒
+        success_count = 0
+        failed_indices = []
+        
+        for thread in self.browser_threads:
+            if thread.wait_until_ready(timeout=Constants.DEFAULT_TIMEOUT_SECONDS):
+                success_count += 1
+            else:
+                error = thread.get_creation_error()
+                failed_indices.append((thread.index, str(error) if error else "未知錯誤"))
+        
+        # 3. 移除失敗的執行緒
+        if failed_indices:
+            self.browser_threads = [
+                t for t in self.browser_threads if t.context is not None
             ]
-            
-            for future in as_completed(futures):
-                context = future.result()
-                if context:
-                    self.browser_contexts.append(context)
         
-        # 按索引排序
-        self.browser_contexts.sort(key=lambda c: c.index)
+        # 輸出結果
+        if success_count == browser_count:
+            self.logger.info(f"[成功] 全部 {browser_count} 個瀏覽器已建立")
+        else:
+            self.logger.info(f"[完成] 成功建立 {success_count}/{browser_count} 個瀏覽器")
+            for idx, err in failed_indices:
+                self.logger.error(f"  瀏覽器 {idx}: {err}")
         
-        self.logger.info("")
-        self.logger.info(f"[完成] 成功建立 {len(self.browser_contexts)}/{browser_count} 個瀏覽器")
         self.logger.info("")
     
     def cleanup(self) -> None:
@@ -1315,15 +1450,15 @@ class AutoSlotGameAppStarter:
         self.logger.info("【清理資源】")
         self.logger.info("=" * 60)
         
-        # 關閉所有瀏覽器
-        for context in self.browser_contexts:
-            try:
-                context.driver.quit()
-                self.logger.info(f"[成功] 已關閉瀏覽器 {context.index}")
-            except Exception as e:
-                self.logger.warning(f"[警告] 關閉瀏覽器 {context.index} 時發生錯誤: {e}")
+        # 停止所有瀏覽器執行緒（會自動關閉瀏覽器）
+        for thread in self.browser_threads:
+            thread.stop()
         
-        self.browser_contexts.clear()
+        # 等待所有執行緒結束
+        for thread in self.browser_threads:
+            thread.join(timeout=5.0)
+        
+        self.browser_threads.clear()
         
         # 停止所有代理伺服器
         if self.proxy_manager:
@@ -1332,9 +1467,44 @@ class AutoSlotGameAppStarter:
         
         self.logger.info("")
     
+    def get_browser_threads(self) -> List[BrowserThread]:
+        """取得所有瀏覽器執行緒"""
+        return self.browser_threads
+    
     def get_browser_contexts(self) -> List[BrowserContext]:
-        """取得所有瀏覽器上下文"""
-        return self.browser_contexts
+        """取得所有瀏覽器上下文（向後相容）"""
+        return [t.context for t in self.browser_threads if t.context is not None]
+    
+    def execute_on_all_browsers(
+        self, 
+        func: Callable[[BrowserContext], Any],
+        timeout: Optional[float] = None
+    ) -> List[Tuple[int, Any, Optional[Exception]]]:
+        """在所有瀏覽器上執行任務。
+        
+        每個任務都會在對應瀏覽器的專屬執行緒中執行。
+        
+        Args:
+            func: 要執行的函數，接收 BrowserContext 作為參數
+            timeout: 每個任務的超時時間
+            
+        Returns:
+            結果列表，每個元素為 (index, result, error)
+        """
+        results = []
+        
+        for thread in self.browser_threads:
+            if not thread.is_browser_alive():
+                results.append((thread.index, None, RuntimeError("瀏覽器已關閉")))
+                continue
+            
+            try:
+                result = thread.execute_task(func, timeout=timeout)
+                results.append((thread.index, result, None))
+            except Exception as e:
+                results.append((thread.index, None, e))
+        
+        return results
     
     def get_credentials(self) -> List[UserCredential]:
         """取得所有用戶憑證"""
@@ -1366,16 +1536,25 @@ def main():
     try:
         # 執行初始化流程
         if starter.initialize():
+            browser_threads = starter.get_browser_threads()
+            
             logger.info("=" * 60)
             logger.info("【初始化完成】")
             logger.info("=" * 60)
-            logger.info(f"  - 瀏覽器數量: {len(starter.get_browser_contexts())}")
+            logger.info(f"  - 瀏覽器執行緒數量: {len(browser_threads)}")
             logger.info(f"  - 用戶數量: {len(starter.get_credentials())}")
             logger.info(f"  - 規則數量: {len(starter.get_rules())}")
             logger.info("")
             
             # 在這裡可以繼續執行後續流程...
-            # 例如: 導航到登入頁面、執行登入、導航到遊戲頁面等
+            # 例如使用 execute_on_all_browsers() 在所有瀏覽器上執行任務
+            # 
+            # 範例：
+            # def navigate_to_login(context: BrowserContext):
+            #     context.driver.get(Constants.LOGIN_PAGE)
+            #     return True
+            # 
+            # results = starter.execute_on_all_browsers(navigate_to_login)
             
             # 暫時保持程式運行，讓使用者可以看到瀏覽器
             logger.info("按 Enter 鍵結束程式...")
