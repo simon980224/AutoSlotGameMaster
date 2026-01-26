@@ -6,7 +6,7 @@
 功能範圍（對應 main_flow_explanation.md 第 76~92 行）:
 - 清除殘留 chromedriver 程序
 - 載入配置檔案（用戶資料.txt、用戶規則.txt）
-- 自動決定瀏覽器數量
+- 啟動瀏覽器
 - 啟動代理中繼伺服器（為每個瀏覽器建立本地代理）
 - 建立瀏覽器實例（為每個用戶建立 WebDriver）
 
@@ -366,9 +366,8 @@ class BrowserThread(threading.Thread):
         if self.driver:
             try:
                 self.driver.quit()
-                self.logger.info(f"[成功] 已關閉瀏覽器 {self.index}")
-            except Exception as e:
-                self.logger.warning(f"[警告] 關閉瀏覽器 {self.index} 時發生錯誤: {e}")
+            except Exception:
+                pass
             finally:
                 self.driver = None
                 self.context = None
@@ -1242,7 +1241,7 @@ class AutoSlotGameAppStarter:
     實現 main_flow_explanation.md 第 76~92 行描述的流程：
     - 清除殘留 chromedriver 程序
     - 載入配置檔案
-    - 自動決定瀏覽器數量
+    - 啟動瀏覽器
     - 啟動代理中繼伺服器
     - 建立瀏覽器實例（每個瀏覽器使用專屬執行緒）
     
@@ -1269,7 +1268,7 @@ class AutoSlotGameAppStarter:
         
         流程:
         1. 載入配置檔案
-        2. 自動決定瀏覽器數量
+        2. 啟動瀏覽器
         3. 啟動代理中繼伺服器
         4. 建立瀏覽器實例
         
@@ -1280,7 +1279,7 @@ class AutoSlotGameAppStarter:
             # 步驟 1: 載入配置檔案
             self._step_load_config()
             
-            # 步驟 2: 自動決定瀏覽器數量
+            # 步驟 2: 啟動瀏覽器
             browser_count = self._step_determine_browser_count()
             
             if browser_count == 0:
@@ -1318,13 +1317,13 @@ class AutoSlotGameAppStarter:
         self.logger.info("")
     
     def _step_determine_browser_count(self) -> int:
-        """步驟 2: 自動決定瀏覽器數量
+        """步驟 2: 啟動瀏覽器
         
         Returns:
             瀏覽器數量
         """
         self.logger.info("=" * 60)
-        self.logger.info("【步驟 2】自動決定瀏覽器數量")
+        self.logger.info("【步驟 2】啟動瀏覽器")
         self.logger.info("=" * 60)
         
         # 根據用戶數量決定瀏覽器數量，最多 MAX_BROWSER_COUNT 個
@@ -1450,6 +1449,8 @@ class AutoSlotGameAppStarter:
         self.logger.info("【清理資源】")
         self.logger.info("=" * 60)
         
+        browser_count = len(self.browser_threads)
+        
         # 停止所有瀏覽器執行緒（會自動關閉瀏覽器）
         for thread in self.browser_threads:
             thread.stop()
@@ -1459,6 +1460,9 @@ class AutoSlotGameAppStarter:
             thread.join(timeout=5.0)
         
         self.browser_threads.clear()
+        
+        if browser_count > 0:
+            self.logger.info(f"[成功] 已關閉 {browser_count} 個瀏覽器")
         
         # 停止所有代理伺服器
         if self.proxy_manager:
@@ -1524,10 +1528,10 @@ def main():
     logger = LoggerFactory.get_logger()
     
     logger.info("")
-    logger.info("*" * 60)
-    logger.info(f"  {Constants.SYSTEM_NAME}")
+    logger.info("=" * 60)
+    logger.info(f"【{Constants.SYSTEM_NAME}】")
     logger.info(f"  版本: {Constants.VERSION}")
-    logger.info("*" * 60)
+    logger.info("=" * 60)
     logger.info("")
     
     # 建立啟動器
@@ -1541,9 +1545,7 @@ def main():
             logger.info("=" * 60)
             logger.info("【初始化完成】")
             logger.info("=" * 60)
-            logger.info(f"  - 瀏覽器執行緒數量: {len(browser_threads)}")
-            logger.info(f"  - 用戶數量: {len(starter.get_credentials())}")
-            logger.info(f"  - 規則數量: {len(starter.get_rules())}")
+            logger.info(f"[成功] 瀏覽器: {len(browser_threads)} | 用戶: {len(starter.get_credentials())} | 規則: {len(starter.get_rules())}")
             logger.info("")
             
             # 在這裡可以繼續執行後續流程...
@@ -1557,20 +1559,21 @@ def main():
             # results = starter.execute_on_all_browsers(navigate_to_login)
             
             # 暫時保持程式運行，讓使用者可以看到瀏覽器
-            logger.info("按 Enter 鍵結束程式...")
+            logger.info("[資訊] 按 Enter 鍵結束程式...")
             input()
             
         else:
-            logger.error("初始化失敗，程式退出")
+            logger.error("[錯誤] 初始化失敗，程式退出")
             
     except KeyboardInterrupt:
-        logger.info("\n收到中斷信號，正在清理...")
+        logger.info("")
+        logger.info("[資訊] 收到中斷信號，正在清理...")
     except Exception as e:
-        logger.error(f"程式執行時發生錯誤: {e}")
+        logger.error(f"[錯誤] 程式執行時發生錯誤: {e}")
     finally:
         # 清理資源
         starter.cleanup()
-        logger.info("程式已結束")
+        logger.info("[資訊] 程式已結束")
 
 
 if __name__ == "__main__":
