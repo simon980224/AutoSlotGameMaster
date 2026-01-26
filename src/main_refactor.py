@@ -3,15 +3,18 @@
 
 此版本完全獨立運行，不依賴 main.py
 
-功能範圍（對應 main_flow_explanation.md 第 76~92 行）:
-- 清除殘留 chromedriver 程序
+功能範圍（對應 main_flow_explanation.md 第 76~97 行）:
 - 載入配置檔案（用戶資料.txt、用戶規則.txt）
-- 啟動瀏覽器
+- 自動決定瀏覽器數量
 - 啟動代理中繼伺服器（為每個瀏覽器建立本地代理）
 - 建立瀏覽器實例（為每個用戶建立 WebDriver）
+- 導航到登入頁面
+- 執行登入操作
+- 導航到遊戲頁面
+- 調整視窗排列
 
 作者: 凡臻科技
-版本: 1.0.0
+版本: 2.0.0
 Python: 3.8+
 """
 
@@ -35,6 +38,9 @@ from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.webdriver import WebDriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 
 # 圖片處理相關
@@ -50,7 +56,7 @@ from PIL import Image
 class Constants:
     """系統常量"""
     # 版本資訊
-    VERSION = "1.0.0"
+    VERSION = "2.0.0"
     SYSTEM_NAME = "賽特遊戲自動化系統 - 重構版"
     
     # 配置檔案路徑
@@ -85,6 +91,18 @@ class Constants:
     # URL 配置
     LOGIN_PAGE = "https://www.fin88.app/"
     GAME_PAGE = "https://www.fin88.app/"
+    
+    # 登入相關 XPath
+    INITIAL_LOGIN_BUTTON = "//button[contains(@class, 'btn') and contains(@class, 'login') and contains(@class, 'pc') and text()='登入']"
+    USERNAME_INPUT = "//input[@placeholder='請輸入帳號/手機號']"
+    PASSWORD_INPUT = "//input[@placeholder='請輸入您的登入密碼']"
+    LOGIN_BUTTON = "//button[contains(@class, 'custom-button') and @type='submit' and text()='登入遊戲']"
+    
+    # 遊戲頁面相關 XPath
+    SEARCH_BUTTON = "//button[contains(@class, 'search-btn')]"
+    SEARCH_INPUT = "//input[@placeholder='按換行鍵搜索']"
+    GAME_XPATH = "//div[contains(@class, 'game-card-container') and .//div[contains(@style, 'ATG-egyptian-mythology.png')]]"
+    GAME_IFRAME = "//iframe[contains(@class, 'iframe-item')]"
 
 
 # ============================================================================
@@ -322,7 +340,7 @@ class BrowserThread(threading.Thread):
                     self._process_tasks()
             
         except Exception as e:
-            self.logger.error(f"瀏覽器 {self.index} 執行緒異常: {e}")
+            self.logger.error(f"[錯誤] 瀏覽器 {self.index} 執行緒異常: {e}")
         finally:
             # 4. 清理資源
             self._cleanup()
@@ -670,7 +688,7 @@ class ConfigReader:
                 parts = [p.strip() for p in line.split(',')]
                 
                 if len(parts) < 2:
-                    self.logger.warning(f"第 {line_number} 行格式不完整 已跳過 {line}")
+                    self.logger.warning(f"[警告] 第 {line_number} 行格式不完整，已跳過: {line}")
                     continue
                 
                 username = parts[0]
@@ -684,7 +702,7 @@ class ConfigReader:
                 ))  
                 
             except ValueError as e:
-                self.logger.warning(f"第 {line_number} 行資料無效 {e}")
+                self.logger.warning(f"[警告] 第 {line_number} 行資料無效: {e}")
                 continue
         
         return credentials
@@ -708,14 +726,14 @@ class ConfigReader:
                 parts = line.split(':')
                 
                 if len(parts) < 2:
-                    self.logger.warning(f"第 {line_number} 行格式不完整 已跳過 {line}")
+                    self.logger.warning(f"[警告] 第 {line_number} 行格式不完整，已跳過: {line}")
                     continue
                 
                 rule_type = parts[0].strip().lower()
                 
                 if rule_type == 'a':
                     if len(parts) < 3:
-                        self.logger.warning(f"第 {line_number} 行格式不完整 已跳過 {line}")
+                        self.logger.warning(f"[警告] 第 {line_number} 行格式不完整，已跳過: {line}")
                         continue
                     
                     amount = float(parts[1].strip())
@@ -729,7 +747,7 @@ class ConfigReader:
                     
                 elif rule_type == 's':
                     if len(parts) < 5:
-                        self.logger.warning(f"第 {line_number} 行格式不完整 已跳過 {line}")
+                        self.logger.warning(f"[警告] 第 {line_number} 行格式不完整，已跳過: {line}")
                         continue
                     
                     amount = float(parts[1].strip())
@@ -754,11 +772,11 @@ class ConfigReader:
                     ))
                     
                 else:
-                    self.logger.warning(f"第 {line_number} 行無效的規則類型 '{rule_type}' 已跳過")
+                    self.logger.warning(f"[警告] 第 {line_number} 行無效的規則類型 '{rule_type}'，已跳過")
                     continue
                 
             except (ValueError, IndexError) as e:
-                self.logger.warning(f"第 {line_number} 行無法解析 {e}")
+                self.logger.warning(f"[警告] 第 {line_number} 行無法解析: {e}")
                 continue
         
         return rules
@@ -812,11 +830,11 @@ class ProxyConnectionHandler:
                 client_socket.sendall(b'HTTP/1.1 502 Bad Gateway\r\n\r\n')
                 
         except socket.timeout:
-            self.logger.warning("上游代理連接逾時")
+            self.logger.warning("[警告] 上游代理連接逾時")
             with suppress(Exception):
                 client_socket.sendall(b'HTTP/1.1 504 Gateway Timeout\r\n\r\n')
         except Exception as e:
-            self.logger.debug(f"CONNECT 請求處理失敗: {e}")
+            self.logger.debug(f"[除錯] CONNECT 請求處理失敗: {e}")
             with suppress(Exception):
                 client_socket.sendall(b'HTTP/1.1 502 Bad Gateway\r\n\r\n')
         finally:
@@ -854,11 +872,11 @@ class ProxyConnectionHandler:
                 client_socket.sendall(response)
                 
         except socket.timeout:
-            self.logger.warning("上游代理回應逾時")
+            self.logger.warning("[警告] 上游代理回應逾時")
             with suppress(Exception):
                 client_socket.sendall(b'HTTP/1.1 504 Gateway Timeout\r\n\r\n')
         except Exception as e:
-            self.logger.debug(f"HTTP 請求處理失敗: {e}")
+            self.logger.debug(f"[除錯] HTTP 請求處理失敗: {e}")
             with suppress(Exception):
                 client_socket.sendall(b'HTTP/1.1 502 Bad Gateway\r\n\r\n')
         finally:
@@ -935,9 +953,9 @@ class SimpleProxyServer:
                 self.handler.handle_http_request(client_socket, request)
                 
         except socket.timeout:
-            self.logger.debug("客戶端連接逾時")
+            self.logger.debug("[除錯] 客戶端連接逾時")
         except Exception as e:
-            self.logger.debug(f"處理客戶端連接時發生錯誤: {e}")
+            self.logger.debug(f"[除錯] 處理客戶端連接時發生錯誤: {e}")
         finally:
             with suppress(Exception):
                 client_socket.close()
@@ -970,7 +988,7 @@ class SimpleProxyServer:
                     break
                 except Exception as e:
                     if self.running:
-                        self.logger.error(f"接受連接時發生錯誤 {e}")
+                        self.logger.error(f"[錯誤] 接受連接時發生錯誤: {e}")
                     
         except Exception as e:
             raise ProxyServerError(f"代理伺服器啟動失敗: {e}") from e
@@ -1019,7 +1037,7 @@ class LocalProxyServerManager:
                 try:
                     server.start()
                 except Exception as e:
-                    self.logger.error(f"代理伺服器執行失敗 埠 {local_port} {e}")
+                    self.logger.error(f"[錯誤] 代理伺服器執行失敗 (埠 {local_port}): {e}")
             
             server_thread = threading.Thread(target=run_server, daemon=True)
             server_thread.start()
@@ -1033,7 +1051,7 @@ class LocalProxyServerManager:
             return local_port
             
         except Exception as e:
-            self.logger.error(f"啟動本機代理伺服器失敗 {e}")
+            self.logger.error(f"[錯誤] 啟動本機代理伺服器失敗: {e}")
             return None
     
     def stop_proxy_server(self, local_port: int) -> None:
@@ -1048,7 +1066,7 @@ class LocalProxyServerManager:
             try:
                 server.stop()
             except Exception as e:
-                self.logger.debug(f"停止代理伺服器時發生錯誤 ({local_port}): {e}")
+                self.logger.debug(f"[除錯] 停止代理伺服器時發生錯誤 (埠 {local_port}): {e}")
     
     def stop_all_servers(self) -> None:
         """停止所有代理伺服器"""
@@ -1156,14 +1174,14 @@ class BrowserManager:
             
         except Exception as e:
             errors.append(f"WebDriver Manager: {e}")
-            self.logger.warning(f"WebDriver Manager 失敗，嘗試使用本機驅動程式")
+            self.logger.warning(f"[警告] WebDriver Manager 失敗，嘗試使用本機驅動程式")
             
             # 方法 2: 使用本機驅動程式
             try:
                 driver = self._create_webdriver_with_local_driver(chrome_options)
             except Exception as e2:
                 errors.append(f"本機驅動程式: {e2}")
-                self.logger.error(f"本機驅動程式也失敗: {e2}")
+                self.logger.error(f"[錯誤] 本機驅動程式也失敗: {e2}")
         
         if driver is None:
             error_message = "無法建立瀏覽器實例。\n" + "\n".join(f"- {error}" for error in errors)
@@ -1228,7 +1246,7 @@ class BrowserManager:
             if driver:
                 with suppress(Exception):
                     driver.quit()
-                self.logger.debug(f"瀏覽器 #{index} 已關閉")
+                self.logger.debug(f"[除錯] 瀏覽器 #{index} 已關閉")
 
 
 # ============================================================================
@@ -1283,7 +1301,7 @@ class AutoSlotGameAppStarter:
             browser_count = self._step_determine_browser_count()
             
             if browser_count == 0:
-                self.logger.error("沒有可用的用戶帳號，無法繼續")
+                self.logger.error("[錯誤] 沒有可用的用戶帳號，無法繼續")
                 return False
             
             # 步驟 3: 啟動代理中繼伺服器
@@ -1295,7 +1313,7 @@ class AutoSlotGameAppStarter:
             return True
             
         except Exception as e:
-            self.logger.error(f"初始化失敗: {e}")
+            self.logger.error(f"[錯誤] 初始化失敗: {e}")
             return False
     
     def _step_load_config(self) -> None:
@@ -1364,7 +1382,7 @@ class AutoSlotGameAppStarter:
                     if port:
                         success_count += 1
                 except Exception as e:
-                    self.logger.warning(f"  瀏覽器 {i+1}: 無法解析代理配置 - {e}")
+                    self.logger.warning(f"[警告] 瀏覽器 {i+1}: 無法解析代理配置 - {e}")
                     proxy_ports.append(None)
             else:
                 # 沒有代理配置
@@ -1399,7 +1417,7 @@ class AutoSlotGameAppStarter:
         self.logger.info("=" * 60)
         
         self.browser_manager = BrowserManager(logger=self.logger)
-        self.logger.info(f"正在建立 {browser_count} 個瀏覽器執行緒...")
+        self.logger.info(f"[資訊] 正在建立 {browser_count} 個瀏覽器執行緒...")
         
         # 1. 建立並啟動所有瀏覽器執行緒
         for i in range(browser_count):
@@ -1439,7 +1457,7 @@ class AutoSlotGameAppStarter:
         else:
             self.logger.info(f"[完成] 成功建立 {success_count}/{browser_count} 個瀏覽器")
             for idx, err in failed_indices:
-                self.logger.error(f"  瀏覽器 {idx}: {err}")
+                self.logger.error(f"[錯誤] 瀏覽器 {idx}: {err}")
         
         self.logger.info("")
     
@@ -1484,9 +1502,9 @@ class AutoSlotGameAppStarter:
         func: Callable[[BrowserContext], Any],
         timeout: Optional[float] = None
     ) -> List[Tuple[int, Any, Optional[Exception]]]:
-        """在所有瀏覽器上執行任務。
+        """在所有瀏覽器上並行執行任務。
         
-        每個任務都會在對應瀏覽器的專屬執行緒中執行。
+        每個任務都會在對應瀏覽器的專屬執行緒中執行，所有任務同時啟動。
         
         Args:
             func: 要執行的函數，接收 BrowserContext 作為參數
@@ -1495,18 +1513,43 @@ class AutoSlotGameAppStarter:
         Returns:
             結果列表，每個元素為 (index, result, error)
         """
-        results = []
+        results: List[Tuple[int, Any, Optional[Exception]]] = []
+        pending_threads: List[BrowserThread] = []
         
+        # 1. 先將任務分發給所有執行緒
         for thread in self.browser_threads:
             if not thread.is_browser_alive():
                 results.append((thread.index, None, RuntimeError("瀏覽器已關閉")))
                 continue
             
+            # 重置任務完成事件
+            thread._task_done_event.clear()
+            thread._task_result = None
+            
+            # 加入任務佇列
+            with thread._task_lock:
+                thread._task_queue.append((func, (), {}))
+            
+            # 通知執行緒有新任務
+            thread._task_event.set()
+            pending_threads.append(thread)
+        
+        # 2. 等待所有任務完成
+        for thread in pending_threads:
             try:
-                result = thread.execute_task(func, timeout=timeout)
-                results.append((thread.index, result, None))
+                if thread._task_done_event.wait(timeout=timeout):
+                    result = thread._task_result
+                    if isinstance(result, Exception):
+                        results.append((thread.index, None, result))
+                    else:
+                        results.append((thread.index, result, None))
+                else:
+                    results.append((thread.index, None, TimeoutError(f"瀏覽器 {thread.index} 任務執行超時")))
             except Exception as e:
                 results.append((thread.index, None, e))
+        
+        # 3. 按索引排序
+        results.sort(key=lambda x: x[0])
         
         return results
     
@@ -1517,6 +1560,181 @@ class AutoSlotGameAppStarter:
     def get_rules(self) -> List[BetRule]:
         """取得所有下注規則"""
         return self.rules
+    
+    # ========================================================================
+    # 導航與登入相關方法
+    # ========================================================================
+    
+    def navigate_to_login_page(self) -> None:
+        """步驟 5: 導航到登入頁面"""
+        self.logger.info("=" * 60)
+        self.logger.info("【步驟 5】導航到登入頁面")
+        self.logger.info("=" * 60)
+        
+        def navigate_task(context: BrowserContext) -> bool:
+            context.driver.get(Constants.LOGIN_PAGE)
+            return True
+        
+        results = self.execute_on_all_browsers(navigate_task)
+        success_count = sum(1 for _, result, error in results if error is None and result)
+        
+        self.logger.info(f"[成功] {success_count}/{len(self.browser_threads)} 個瀏覽器已導航到登入頁面")
+        self.logger.info("")
+    
+    def perform_login(self) -> None:
+        """步驟 6: 執行登入操作"""
+        self.logger.info("=" * 60)
+        self.logger.info("【步驟 6】執行登入操作")
+        self.logger.info("=" * 60)
+        
+        def login_task(context: BrowserContext) -> bool:
+            driver = context.driver
+            credential = context.credential
+            
+            try:
+                # 1. 等待 loading 遮罩層消失（每 1 秒檢查一次，最多等 10 秒）
+                for _ in range(10):
+                    loading_elements = driver.find_elements(By.CSS_SELECTOR, ".loading-container")
+                    if not loading_elements or not loading_elements[0].is_displayed():
+                        break
+                    time.sleep(1)
+                
+                # 2. 點擊初始登入按鈕
+                initial_login_btn = WebDriverWait(driver, 10).until(
+                    EC.element_to_be_clickable((By.XPATH, Constants.INITIAL_LOGIN_BUTTON))
+                )
+                driver.execute_script("arguments[0].click();", initial_login_btn)
+                time.sleep(3)  # 等待彈窗動畫
+                
+                # 3. 等待登入表單顯示
+                WebDriverWait(driver, 8).until(
+                    EC.visibility_of_element_located((By.CSS_SELECTOR, ".popup-wrap, .popup-account-container"))
+                )
+                
+                # 4. 輸入帳號
+                username_input = WebDriverWait(driver, 15).until(
+                    EC.element_to_be_clickable((By.XPATH, Constants.USERNAME_INPUT))
+                )
+                username_input.clear()
+                time.sleep(1)
+                username_input.send_keys(credential.username)
+                
+                # 5. 輸入密碼
+                password_input = WebDriverWait(driver, 15).until(
+                    EC.element_to_be_clickable((By.XPATH, Constants.PASSWORD_INPUT))
+                )
+                password_input.clear()
+                time.sleep(1)
+                password_input.send_keys(credential.password)
+                
+                # 6. 點擊登入按鈕
+                login_button = WebDriverWait(driver, 15).until(
+                    EC.element_to_be_clickable((By.XPATH, Constants.LOGIN_BUTTON))
+                )
+                driver.execute_script("arguments[0].click();", login_button)
+                
+                time.sleep(3)  # 等待登入完成
+                
+                # 7. 關閉所有彈窗
+                time.sleep(2)
+                driver.execute_script("""
+                    const popups = document.querySelectorAll('.popup-container, .popup-wrap, .popup-account-container');
+                    popups.forEach(popup => {
+                        popup.style.display = 'none';
+                        popup.style.visibility = 'hidden';
+                        popup.remove();
+                    });
+                    const overlays = document.querySelectorAll('[class*="overlay"], [class*="mask"]');
+                    overlays.forEach(overlay => overlay.remove());
+                """)
+                
+                return True
+                
+            except Exception as e:
+                self.logger.warning(f"[警告] 瀏覽器 {context.index} 登入失敗: {e}")
+                return False
+        
+        results = self.execute_on_all_browsers(login_task, timeout=60)
+        success_count = sum(1 for _, result, error in results if error is None and result)
+        
+        self.logger.info(f"[成功] {success_count}/{len(self.browser_threads)} 個瀏覽器已完成登入")
+        self.logger.info("")
+    
+    def navigate_to_game(self) -> None:
+        """步驟 7: 導航到遊戲頁面"""
+        self.logger.info("=" * 60)
+        self.logger.info("【步驟 7】導航到遊戲頁面")
+        self.logger.info("=" * 60)
+        
+        def game_task(context: BrowserContext) -> bool:
+            driver = context.driver
+            
+            try:
+                # 1. 點擊搜尋按鈕
+                search_btn = driver.find_element(By.XPATH, Constants.SEARCH_BUTTON)
+                search_btn.click()
+                time.sleep(1)
+                
+                # 2. 輸入「戰神」
+                search_input = driver.find_element(By.XPATH, Constants.SEARCH_INPUT)
+                search_input.clear()
+                search_input.send_keys('戰神')
+                search_input.send_keys('\n')
+                
+                time.sleep(5)  # 等待搜尋結果載入
+                
+                # 3. 點擊遊戲
+                game_element = driver.find_element(By.XPATH, Constants.GAME_XPATH)
+                game_element.click()
+                
+                time.sleep(5)  # 等待遊戲載入
+                
+                # 4. 切換到 iframe
+                time.sleep(2)
+                iframe = WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((By.XPATH, Constants.GAME_IFRAME))
+                )
+                driver.switch_to.frame(iframe)
+                
+                return True
+                
+            except Exception as e:
+                self.logger.warning(f"[警告] 瀏覽器 {context.index} 進入遊戲失敗: {e}")
+                return False
+        
+        results = self.execute_on_all_browsers(game_task, timeout=60)
+        success_count = sum(1 for _, result, error in results if error is None and result)
+        
+        self.logger.info(f"[成功] {success_count}/{len(self.browser_threads)} 個瀏覽器已進入遊戲")
+        self.logger.info("")
+    
+    def arrange_windows(self) -> None:
+        """步驟 8: 調整視窗排列"""
+        self.logger.info("=" * 60)
+        self.logger.info("【步驟 8】調整視窗排列")
+        self.logger.info("=" * 60)
+        
+        width = Constants.DEFAULT_WINDOW_WIDTH
+        height = Constants.DEFAULT_WINDOW_HEIGHT
+        columns = Constants.DEFAULT_WINDOW_COLUMNS
+        
+        def arrange_task(context: BrowserContext) -> bool:
+            index = context.index
+            row = (index - 1) // columns
+            col = (index - 1) % columns
+            
+            x = col * width
+            y = row * height
+            
+            context.driver.set_window_size(width, height)
+            context.driver.set_window_position(x, y)
+            return True
+        
+        results = self.execute_on_all_browsers(arrange_task)
+        success_count = sum(1 for _, result, error in results if error is None and result)
+        
+        self.logger.info(f"[成功] {success_count}/{len(self.browser_threads)} 個視窗已排列完成 ({columns} 列, {width}x{height})")
+        self.logger.info("")
 
 
 # ============================================================================
@@ -1538,7 +1756,7 @@ def main():
     starter = AutoSlotGameAppStarter(logger=logger)
     
     try:
-        # 執行初始化流程
+        # 執行初始化流程（步驟 1-4）
         if starter.initialize():
             browser_threads = starter.get_browser_threads()
             
@@ -1548,15 +1766,23 @@ def main():
             logger.info(f"[成功] 瀏覽器: {len(browser_threads)} | 用戶: {len(starter.get_credentials())} | 規則: {len(starter.get_rules())}")
             logger.info("")
             
-            # 在這裡可以繼續執行後續流程...
-            # 例如使用 execute_on_all_browsers() 在所有瀏覽器上執行任務
-            # 
-            # 範例：
-            # def navigate_to_login(context: BrowserContext):
-            #     context.driver.get(Constants.LOGIN_PAGE)
-            #     return True
-            # 
-            # results = starter.execute_on_all_browsers(navigate_to_login)
+            # 步驟 5: 導航到登入頁面
+            starter.navigate_to_login_page()
+            
+            # 步驟 6: 執行登入操作
+            starter.perform_login()
+            
+            # 步驟 7: 導航到遊戲頁面
+            starter.navigate_to_game()
+            
+            # 步驟 8: 調整視窗排列
+            starter.arrange_windows()
+            
+            logger.info("=" * 60)
+            logger.info("【啟動完成】")
+            logger.info("=" * 60)
+            logger.info("[成功] 所有瀏覽器已就緒")
+            logger.info("")
             
             # 暫時保持程式運行，讓使用者可以看到瀏覽器
             logger.info("[資訊] 按 Enter 鍵結束程式...")
