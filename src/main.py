@@ -13,10 +13,11 @@
 - 完善的錯誤處理與重試機制
 
 作者: 凡臻科技
-版本: 1.26.1
+版本: 1.27.0
 Python: 3.8+
 
 版本歷史:
+- v1.27.0: 優化 Proxy 配置管理（將 Brightdata proxy 共同配置提取到 Constants，包含 PROXY_HOST、PROXY_PORT、PROXY_USERNAME_BASE、PROXY_PASSWORD；用戶資料檔案簡化為僅存儲出口 IP，程式自動組合完整 proxy 連接字串；提升配置安全性和可維護性，完全隱藏供應商資訊）
 - v1.26.1: 簡化登入後公告處理邏輯（移除複雜的彈窗類型判斷和循環檢測機制，改為登入後直接使用 JavaScript 強制關閉所有彈窗；等待時間從可能超過 30 秒優化為固定 7 秒；避免卡在彈窗檢測循環，提升登入流程穩定性和響應速度）
 - v1.26.0: 移除錯誤訊息自動檢測功能（移除所有 error_message 相關邏輯、常數定義、檢測方法和背景監控執行緒；保留黑屏和 game_return 檢測功能；簡化監控流程，提升系統效能）
 - v1.25.0: 優化登入彈窗檢測邏輯（透過檢查 span 內容和輸入框判斷彈窗類型，區分登入表單與公告彈窗；公告彈窗自動關閉不重試，登入表單才執行重試邏輯；支援多種公告關鍵字識別，避免誤判提升登入成功率）
@@ -259,6 +260,8 @@ class Constants:
     DEFAULT_WINDOW_WIDTH = 600
     DEFAULT_WINDOW_HEIGHT = 400
     DEFAULT_WINDOW_COLUMNS = 4
+    ENLARGED_WINDOW_WIDTH = 1200   # 恢復連線時放大視窗寬度（避免 maximize_window 多瀏覽器衝突）
+    ENLARGED_WINDOW_HEIGHT = 800   # 恢復連線時放大視窗高度
     
     # 下注金額調整按鈕座標
     BETSIZE_INCREASE_BUTTON_X = 0.8     # 增加金額按鈕 X 座標
@@ -1864,12 +1867,32 @@ class SyncBrowserOperator:
                     #         self.logger.warning(f"[{credential.username}] 第 {attempt} 次嘗試打開登入表單")
                     #     else:
                     #         self.logger.debug(f"[{credential.username}] 登入表單不存在，點擊初始登入按鈕")
-                        
+                    
+                    # 2.1 先等待 loading 遮罩層消失（避免點擊被攔截）
+                    try:
+                        WebDriverWait(driver, 10).until(
+                            EC.invisibility_of_element_located((By.CSS_SELECTOR, ".loading-container"))
+                        )
+                        self.logger.debug(f"[{credential.username}] Loading 遮罩層已消失")
+                    except Exception:
+                        # 如果找不到 loading 元素，代表已經消失或不存在，繼續執行
+                        self.logger.debug(f"[{credential.username}] 未檢測到 loading 遮罩層")
+                    
+                    # 2.2 等待登入按鈕可點擊
                     initial_login_btn = WebDriverWait(driver, 10).until(
                         EC.element_to_be_clickable((By.XPATH, Constants.INITIAL_LOGIN_BUTTON))
                     )
-                    initial_login_btn.click()
-                    self.logger.debug(f"[{credential.username}] 已點擊初始登入按鈕")
+                    
+                    # 2.3 使用 JavaScript 點擊（更可靠，避免點擊攔截）
+                    try:
+                        driver.execute_script("arguments[0].click();", initial_login_btn)
+                        self.logger.debug(f"[{credential.username}] 已點擊初始登入按鈕（使用 JavaScript）")
+                    except Exception as js_err:
+                        # JavaScript 點擊失敗，嘗試常規點擊
+                        self.logger.debug(f"[{credential.username}] JavaScript 點擊失敗，嘗試常規點擊")
+                        initial_login_btn.click()
+                        self.logger.debug(f"[{credential.username}] 已點擊初始登入按鈕")
+                    
                     time.sleep(2)  # 等待彈窗動畫
                     
                     # 3. 確認登入表單已完全載入且可見
@@ -1923,12 +1946,25 @@ class SyncBrowserOperator:
                 password_input.send_keys(credential.password)
                 self.logger.debug(f"[{credential.username}] 已輸入密碼")
                 
-                # 點擊登入按鈕 - 等待元素可點擊
+                # 點擊登入按鈕前先等待 loading 消失
+                try:
+                    WebDriverWait(driver, 10).until(
+                        EC.invisibility_of_element_located((By.CSS_SELECTOR, ".loading-container"))
+                    )
+                    self.logger.debug(f"[{credential.username}] Loading 遮罩層已消失")
+                except Exception:
+                    self.logger.debug(f"[{credential.username}] 未檢測到 loading 遮罩層")
+                
+                # 點擊登入按鈕 - 使用 JavaScript 點擊避免被遮擋
                 login_button = WebDriverWait(driver, 15).until(
                     EC.element_to_be_clickable((By.XPATH, Constants.LOGIN_BUTTON))
                 )
-                login_button.click()
-                self.logger.info(f"[{credential.username}] 已點擊登入按鈕，等待登入完成...")
+                try:
+                    driver.execute_script("arguments[0].click();", login_button)
+                    self.logger.info(f"[{credential.username}] 已點擊登入按鈕（使用 JavaScript），等待登入完成...")
+                except Exception:
+                    login_button.click()
+                    self.logger.info(f"[{credential.username}] 已點擊登入按鈕，等待登入完成...")
                 
                 time.sleep(Constants.LOGIN_WAIT_TIME)  # 等待登入完成
                 
@@ -3120,10 +3156,10 @@ class BrowserRecoveryManager:
             
             self.logger.debug(f"瀏覽器 {context.index} 原始大小: {original_width}x{original_height}, 位置: ({original_x}, {original_y})")
             
-            # 2.2 放大視窗到全螢幕
-            driver.maximize_window()
+            # 2.2 放大視窗到固定尺寸（避免 maximize_window 多瀏覽器衝突）
+            driver.set_window_size(Constants.ENLARGED_WINDOW_WIDTH, Constants.ENLARGED_WINDOW_HEIGHT)
             time.sleep(1)  # 等待視窗調整完成
-            self.logger.debug(f"瀏覽器 {context.index} 已放大至全螢幕")
+            self.logger.debug(f"瀏覽器 {context.index} 已放大至 {Constants.ENLARGED_WINDOW_WIDTH}x{Constants.ENLARGED_WINDOW_HEIGHT}")
             
             # 2.2.1 關閉可能出現的公告彈窗
             try:
@@ -3146,12 +3182,26 @@ class BrowserRecoveryManager:
             
             # 2.3 執行導航到遊戲頁面（不切換 iframe）
             try:
-                # 點擊搜尋按鈕
+                # 2.3.1 先等待 loading 遮罩層消失
+                try:
+                    WebDriverWait(driver, 10).until(
+                        EC.invisibility_of_element_located((By.CSS_SELECTOR, ".loading-container"))
+                    )
+                    self.logger.debug(f"瀏覽器 {context.index} Loading 遮罩層已消失")
+                except Exception:
+                    self.logger.debug(f"瀏覽器 {context.index} 未檢測到 loading 遮罩層")
+                
+                # 2.3.2 點擊搜尋按鈕 - 使用 JavaScript 點擊避免被遮擋
                 search_btn = driver.find_element(By.XPATH, Constants.SEARCH_BUTTON)
-                search_btn.click()
+                try:
+                    driver.execute_script("arguments[0].click();", search_btn)
+                    self.logger.debug(f"瀏覽器 {context.index} 已點擊搜尋按鈕（使用 JavaScript）")
+                except Exception:
+                    search_btn.click()
+                    self.logger.debug(f"瀏覽器 {context.index} 已點擊搜尋按鈕")
                 time.sleep(1)
                 
-                # 在搜尋框輸入「戰神」
+                # 2.3.3 在搜尋框輸入「戰神」
                 search_input = driver.find_element(By.XPATH, Constants.SEARCH_INPUT)
                 search_input.clear()
                 search_input.send_keys('戰神')
@@ -3166,7 +3216,7 @@ class BrowserRecoveryManager:
                 # 使用 JavaScript 點擊
                 driver.execute_script("arguments[0].click();", game_element)
                 self.logger.debug(f"瀏覽器 {context.index} 已點擊遊戲（使用 JS 點擊）")
-                time.sleep(5)  # 等待遊戲載入
+                time.sleep(10)  # 等待遊戲載入
                 
             except Exception as e:
                 # 恢復原始大小後返回
@@ -3422,10 +3472,10 @@ class BrowserRecoveryManager:
             
             self.logger.debug(f"瀏覽器 {context.index} 原始大小: {original_width}x{original_height}, 位置: ({original_x}, {original_y})")
             
-            # 步驟 3: 放大視窗到全螢幕
-            driver.maximize_window()
+            # 步驟 3: 放大視窗到固定尺寸（避免 maximize_window 多瀏覽器衝突）
+            driver.set_window_size(Constants.ENLARGED_WINDOW_WIDTH, Constants.ENLARGED_WINDOW_HEIGHT)
             time.sleep(1)  # 等待視窗調整完成
-            self.logger.debug(f"瀏覽器 {context.index} 已放大至全螢幕")
+            self.logger.debug(f"瀏覽器 {context.index} 已放大至 {Constants.ENLARGED_WINDOW_WIDTH}x{Constants.ENLARGED_WINDOW_HEIGHT}")
             
             # 步驟 4: 執行導航到遊戲頁面（不切換 iframe）
             try:
@@ -3434,14 +3484,14 @@ class BrowserRecoveryManager:
                 search_btn.click()
                 time.sleep(1)
                 
-                # 在搜尋框輸入「戰神」
+                # 2.3.3 在搜尋框輸入「戰神」
                 search_input = driver.find_element(By.XPATH, Constants.SEARCH_INPUT)
                 search_input.clear()
                 search_input.send_keys('戰神')
                 search_input.send_keys('\n')
                 time.sleep(5)  # 等待搜尋結果載入
                 
-                # 點擊第一個遊戲圖層 - 使用 JavaScript 點擊避免被其他元素擋住
+                # 2.3.4 點擊第一個遊戲圖層 - 使用 JavaScript 點擊避免被其他元素擋住
                 game_element = driver.find_element(By.XPATH, Constants.GAME_XPATH)
                 # 先滾動到元素可見位置
                 driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", game_element)
@@ -4303,6 +4353,7 @@ class GameControlCenter:
         """黑屏監控循環（每 10 秒檢測一次）。
         
         持續運行直到收到停止信號，用於自動檢測並處理黑屏和 game_return。
+        使用 ThreadPoolExecutor 並行處理多個瀏覽器的恢復流程。
         """
         self.logger.info("[啟動] 黑屏監控功能已啟動（每 10 秒檢測一次）")
         
@@ -4315,6 +4366,9 @@ class GameControlCenter:
                 time.sleep(10)
                 
                 check_count += 1
+                
+                # 收集需要處理黑屏恢復的瀏覽器
+                browsers_to_recover = []
                 
                 # 對所有瀏覽器執行檢測
                 for i, context in enumerate(self.browser_contexts, 1):
@@ -4342,15 +4396,8 @@ class GameControlCenter:
                                 
                                 # 如果黑屏持續超過閾值，才執行重新導航
                                 if elapsed >= Constants.BLACKSCREEN_PERSIST_SECONDS:
-                                    self.logger.warning(f"[檢測] 瀏覽器 {i} 黑屏已持續 {elapsed:.1f} 秒，正在導航到遊戲頁面並重新登入...")
-                                    
-                                    # 導航到遊戲頁面並完成登入流程
-                                    if self.recovery_manager.refresh_and_login(context):
-                                        refresh_count += 1
-                                        self.logger.info(f"[成功] 瀏覽器 {i} 已導航並重新登入完成")
-                                    else:
-                                        self.logger.error(f"[失敗] 瀏覽器 {i} 導航或登入失敗")
-                                    
+                                    self.logger.warning(f"[檢測] 瀏覽器 {i} 黑屏已持續 {elapsed:.1f} 秒，加入恢復佇列...")
+                                    browsers_to_recover.append((i, context))
                                     # 清除時間戳
                                     self._blackscreen_timestamps[i] = None
                                 else:
@@ -4389,6 +4436,40 @@ class GameControlCenter:
                     except Exception as e:
                         # 靜默處理錯誤，避免日誌過多
                         pass
+                
+                # 如果有需要恢復的瀏覽器，使用執行緒池並行處理
+                if browsers_to_recover:
+                    self.logger.info(f"[並行處理] 開始並行處理 {len(browsers_to_recover)} 個瀏覽器的黑屏恢復...")
+                    
+                    def recover_single_browser(browser_info):
+                        """恢復單個瀏覽器"""
+                        i, context = browser_info
+                        try:
+                            self.logger.info(f"[開始] 瀏覽器 {i} 正在導航到遊戲頁面並重新登入...")
+                            if self.recovery_manager.refresh_and_login(context):
+                                self.logger.info(f"[成功] 瀏覽器 {i} 已導航並重新登入完成")
+                                return True
+                            else:
+                                self.logger.error(f"[失敗] 瀏覽器 {i} 導航或登入失敗")
+                                return False
+                        except Exception as e:
+                            self.logger.error(f"[錯誤] 瀏覽器 {i} 恢復過程發生異常: {e}")
+                            return False
+                    
+                    # 使用執行緒池並行處理所有需要恢復的瀏覽器
+                    with ThreadPoolExecutor(max_workers=min(len(browsers_to_recover), Constants.MAX_THREAD_WORKERS)) as executor:
+                        futures = {executor.submit(recover_single_browser, browser_info): browser_info for browser_info in browsers_to_recover}
+                        
+                        for future in as_completed(futures):
+                            browser_info = futures[future]
+                            i, context = browser_info
+                            try:
+                                if future.result():
+                                    refresh_count += 1
+                            except Exception as e:
+                                self.logger.error(f"[異常] 瀏覽器 {i} 執行緒執行異常: {e}")
+                    
+                    self.logger.info(f"[完成] 已完成 {len(browsers_to_recover)} 個瀏覽器的黑屏恢復處理")
                 
                 # 每一段時間顯示一次統計信息（例如每 30 次）
                 if check_count % 30 == 0:
