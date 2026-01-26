@@ -13,10 +13,11 @@
 - 完善的錯誤處理與重試機制
 
 作者: 凡臻科技
-版本: 1.18.0
+版本: 1.19.0
 Python: 3.8+
 
 版本歷史:
+- v1.19.0: 新增 lobby_return 檢測與自動恢復功能（點擊 game_return 後自動檢測 lobby_return，若出現則導航到 GAME_PAGE 並依序點擊 lobby_login、lobby_confirm 完成登入）
 - v1.18.0: 新增 game_return 圖片檢測功能（自動檢測並點擊返回遊戲提示，優化錯誤恢復流程為完整登入流程）
 - v1.17.1: 修正自動跳過點擊功能的時間戳錯誤（將 AUTO_SKIP_CLICK_INTERVAL 從極大值改為 86400 秒，避免 timestamp too large 錯誤）
 - v1.17.0: 優化調整金額功能（每次調整間隔改為3秒，超過最大嘗試次數自動關閉該瀏覽器）
@@ -123,7 +124,7 @@ __all__ = [
 class Constants:
     """系統常量"""
     # 版本資訊
-    VERSION = "1.18.0"
+    VERSION = "1.19.0"
     SYSTEM_NAME = "金富翁遊戲自動化系統"
     
     DEFAULT_LIB_PATH = "lib"
@@ -153,12 +154,16 @@ class Constants:
     LOGIN_BUTTON = "//div[contains(@class, 'login-btn')]//span[text()='立即登入']/.."
     GAME_IFRAME = "gameFrame-0"
     GAME_CANVAS = "GameCanvas"
+    SEARCH_BUTTON = "//button[contains(@class, 'search-btn')]"
+    SEARCH_INPUT = "//input[@placeholder='按換行鍵搜索']"
+    GAME_XPATH = "//div[contains(@class, 'game-card-container') and .//div[contains(@style, 'ATG-egyptian-mythology.png')]]"  # 賽特1（第二個大卡片-戰神埃及神話）
     
     # 圖片檢測配置
     IMAGE_DIR = "img"
     LOBBY_LOGIN = "lobby_login.png"
     LOBBY_CONFIRM = "lobby_confirm.png"
     GAME_RETURN = "game_return.png"  # 遊戲返回模板
+    LOBBY_RETURN = "lobby_return.png"  # 大廳返回模板
     ERROR_MESSAGE_LEFT = "error_message_left.png"  # 左側錯誤訊息模板
     ERROR_MESSAGE_RIGHT = "error_message_right.png"  # 右側錯誤訊息模板
     BLACK_SCREEN = "black_screen.png"  # 黑屏模板
@@ -263,6 +268,12 @@ class Constants:
     GAME_RETURN_CENTER_Y = 195  # 返回遊戲提示中心 Y 座標
     GAME_RETURN_CROP_MARGIN_X = 50  # 返回遊戲提示裁切邊距（左右）
     GAME_RETURN_CROP_MARGIN_Y = 20   # 返回遊戲提示裁切邊距（上下）
+
+    # 大廳返回提示截圖座標
+    LOBBY_RETURN_CENTER_X = 300  # 大廳返回提示中心 X 座標
+    LOBBY_RETURN_CENTER_Y = 200  # 大廳返回提示中心 Y 座標
+    LOBBY_RETURN_CROP_MARGIN_X = 50  # 大廳返回提示裁切邊距（左右）
+    LOBBY_RETURN_CROP_MARGIN_Y = 20  # 大廳返回提示裁切邊距（上下）
 
     # 截圖裁切範圍（像素）
     BETSIZE_CROP_MARGIN_X = 40  # 金額模板水平裁切邊距
@@ -2490,6 +2501,41 @@ class SyncBrowserOperator:
             self.logger.error(f"截取返回遊戲提示模板失敗: {e}")
             return False
 
+    def capture_lobby_return_template(self, driver: WebDriver) -> bool:
+        """截取大廳返回提示模板。
+        
+        參考 lobby_login 的方式，截取整個瀏覽器畫面（不裁切）。
+        
+        Args:
+            driver: WebDriver 實例
+            
+        Returns:
+            bool: 截取成功返回True
+        """
+        try:
+            # 使用輔助函式取得專案根目錄
+            img_dir = get_resource_path("img")
+            img_dir.mkdir(parents=True, exist_ok=True)
+            
+            # 固定檔名
+            filename = "lobby_return.png"
+            output_path = img_dir / filename
+            
+            # 截取整個瀏覽器畫面（與 lobby_login 相同方式）
+            screenshot = driver.get_screenshot_as_png()
+            screenshot_img = Image.open(io.BytesIO(screenshot))
+            
+            # 直接儲存完整截圖（不裁切）
+            screenshot_img.save(output_path)
+            
+            self.logger.info(f"[成功] 大廳返回提示模板已儲存: {filename} (完整瀏覽器截圖)")
+            
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"截取大廳返回提示模板失敗: {e}")
+            return False
+
 
 # ============================================================================
 # 瀏覽器操作輔助類
@@ -3244,8 +3290,77 @@ class BrowserRecoveryManager:
             self.logger.debug(f"game_return 檢測失敗: {e}")
             return False
     
-    def click_game_return(self, context: BrowserContext) -> bool:
-        """點擊 game_return 的返回按鈕（使用專屬的 game_confirm 座標）。
+    def detect_lobby_return(self, driver: WebDriver) -> bool:
+        """檢測瀏覽器中是否出現 lobby_return 圖片。
+        
+        Args:
+            driver: WebDriver 實例
+            
+        Returns:
+            是否檢測到 lobby_return
+        """
+        try:
+            result = self.image_detector.detect_in_browser(driver, Constants.LOBBY_RETURN)
+            return result is not None
+        except Exception as e:
+            self.logger.debug(f"lobby_return 檢測失敗: {e}")
+            return False
+    
+    def _handle_lobby_return_scenario(self, context: BrowserContext) -> bool:
+        """處理 lobby_return 場景：重新導向遊戲頁面並完成登入流程。
+        
+        包含以下步驟：
+        1. 導航到 GAME_PAGE
+        2. 等待並點擊 lobby_login
+        3. 等待並點擊 lobby_confirm
+        
+        Args:
+            context: 瀏覽器上下文
+            
+        Returns:
+            是否成功
+        """
+        try:
+            driver = context.driver
+            
+            # 步驟 1: 導航到 GAME_PAGE
+            self.logger.info(f"瀏覽器 {context.index} 導航到 GAME_PAGE...")
+            driver.get(Constants.GAME_PAGE)
+            time.sleep(Constants.DEFAULT_WAIT_SECONDS)
+            
+            # 步驟 2: 等待並點擊 lobby_login
+            if not self._wait_and_click_template(
+                context,
+                Constants.LOBBY_LOGIN,
+                Constants.LOBBY_LOGIN_BUTTON_X_RATIO,
+                Constants.LOBBY_LOGIN_BUTTON_Y_RATIO,
+                "lobby_login"
+            ):
+                return False
+            
+            # 步驟 3: 等待並點擊 lobby_confirm
+            time.sleep(2)  # 等待畫面穩定
+            
+            if not self._wait_and_click_template(
+                context,
+                Constants.LOBBY_CONFIRM,
+                Constants.LOBBY_CONFIRM_BUTTON_X_RATIO,
+                Constants.LOBBY_CONFIRM_BUTTON_Y_RATIO,
+                "lobby_confirm"
+            ):
+                return False
+            
+            self.logger.info(f"瀏覽器 {context.index} 已完成 lobby_return 恢復流程")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"瀏覽器 {context.index} 處理 lobby_return 場景失敗: {e}")
+            return False
+    
+    def _click_game_return_button_only(self, context: BrowserContext) -> bool:
+        """僅執行點擊 game_return 按鈕，不檢測後續的 lobby_return。
+        
+        用於避免在 _handle_lobby_return_scenario 中遞迴調用。
         
         Args:
             context: 瀏覽器上下文
@@ -3275,12 +3390,65 @@ class BrowserRecoveryManager:
             # 執行點擊
             time.sleep(Constants.TEMPLATE_CAPTURE_WAIT)
             BrowserHelper.execute_cdp_click(context.driver, click_x, click_y)
-            self.logger.debug(f"瀏覽器 {context.index} 已點擊 game_return 返回按鈕")
+            self.logger.debug(f"瀏覽器 {context.index} 已點擊 game_return 按鈕")
             
             # 等待動作完成
             time.sleep(Constants.DEFAULT_WAIT_SECONDS)
             
             return True
+            
+        except Exception as e:
+            self.logger.error(f"瀏覽器 {context.index} 點擊 game_return 按鈕失敗: {e}")
+            return False
+    
+    def click_game_return(self, context: BrowserContext) -> bool:
+        """點擊 game_return 的返回按鈕（使用專屬的 game_confirm 座標）。
+        
+        點擊後檢測是否出現 lobby_return，如果出現則執行完整登入流程。
+        
+        Args:
+            context: 瀏覽器上下文
+            
+        Returns:
+            是否成功
+        """
+        try:
+            # 取得 Canvas 區域
+            try:
+                rect = context.driver.execute_script(f"""
+                    const canvas = document.getElementById('{Constants.GAME_CANVAS}');
+                    const r = canvas.getBoundingClientRect();
+                    return {{x: r.left, y: r.top, w: r.width, h: r.height}};
+                """)
+            except Exception as e:
+                self.logger.error(f"瀏覽器 {context.index} 取得 Canvas 座標失敗: {e}")
+                return False
+            
+            # 計算點擊座標（使用專屬的 game_confirm 按鈕座標）
+            click_x, click_y = BrowserHelper.calculate_click_position(
+                rect,
+                Constants.GAME_CONFIRM_BUTTON_X_RATIO,
+                Constants.GAME_CONFIRM_BUTTON_Y_RATIO
+            )
+            
+            # 執行點擊
+            time.sleep(Constants.TEMPLATE_CAPTURE_WAIT)
+            BrowserHelper.execute_cdp_click(context.driver, click_x, click_y)
+            self.logger.debug(f"瀏覽器 {context.index} 已點擊 game_return 返回按鈕 (座標: {click_x:.0f}, {click_y:.0f})")
+            
+            # 等待動作完成
+            time.sleep(Constants.DEFAULT_WAIT_SECONDS)
+            
+            # === 新增：檢測是否出現 lobby_return ===
+            self.logger.debug(f"瀏覽器 {context.index} 檢測是否出現 lobby_return...")
+            has_lobby_return = self.detect_lobby_return(context.driver)
+            
+            if has_lobby_return:
+                self.logger.info(f"瀏覽器 {context.index} 檢測到 lobby_return，執行完整登入流程...")
+                return self._handle_lobby_return_scenario(context)
+            else:
+                self.logger.debug(f"瀏覽器 {context.index} 未檢測到 lobby_return，直接返回成功")
+                return True
             
         except Exception as e:
             self.logger.error(f"瀏覽器 {context.index} 點擊 game_return 失敗: {e}")
@@ -3512,6 +3680,9 @@ class GameControlCenter:
 
   g                   截取返回遊戲提示模板（座標 300,195，範圍 50px）
                       提示: 選擇單一瀏覽器截取，檔名固定為 game_return.png
+
+  y                   截取大廳返回提示模板（完整瀏覽器截圖）
+                      提示: 選擇單一瀏覽器截取，檔名固定為 lobby_return.png
 
   h                   顯示此幫助信息
 
@@ -5244,6 +5415,49 @@ class GameControlCenter:
                     self.logger.info("退出返回遊戲提示模板工具")
                 except KeyboardInterrupt:
                     self.logger.info("\n退出返回遊戲提示模板工具")
+                except Exception as e:
+                    self.logger.error(f"截取失敗: {e}")
+            
+            elif cmd == 'y':
+                self.logger.info("")
+                self.logger.info("=== 截取大廳返回提示模板工具 ===")
+                self.logger.info("請選擇要截取的瀏覽器:")
+                for i, context in enumerate(self.browser_contexts, 1):
+                    if self._is_browser_alive(context.driver):
+                        username = context.credential.username
+                        self.logger.info(f"  {i}      - 瀏覽器 {i} ({username})")
+                self.logger.info("  q      - 退出")
+                self.logger.info("")
+                
+                try:
+                    print("請輸入編號: ", end="", flush=True)
+                    user_input = input().strip().lower()
+                    
+                    # 檢查是否要退出
+                    if user_input == 'q':
+                        self.logger.info("退出大廳返回提示模板工具")
+                    else:
+                        # 截取指定瀏覽器
+                        try:
+                            browser_index = int(user_input)
+                            if 1 <= browser_index <= len(self.browser_contexts):
+                                context = self.browser_contexts[browser_index - 1]
+                                if self._is_browser_alive(context.driver):
+                                    if self.browser_operator.capture_lobby_return_template(context.driver):
+                                        self.logger.info("[成功] 大廳返回提示模板截取成功")
+                                    else:
+                                        self.logger.error("模板截取失敗")
+                                else:
+                                    self.logger.error(f"瀏覽器 {browser_index} 已關閉")
+                            else:
+                                self.logger.error(f"無效的瀏覽器編號: {browser_index}")
+                        except ValueError:
+                            self.logger.error(f"無效的輸入: {user_input}")
+                            
+                except EOFError:
+                    self.logger.info("退出大廳返回提示模板工具")
+                except KeyboardInterrupt:
+                    self.logger.info("\n退出大廳返回提示模板工具")
                 except Exception as e:
                     self.logger.error(f"截取失敗: {e}")
             
