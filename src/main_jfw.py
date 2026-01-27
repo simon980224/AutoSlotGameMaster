@@ -13,10 +13,11 @@
 - 完善的錯誤處理與重試機制
 
 作者: 凡臻科技
-版本: 1.19.0
+版本: 1.20.0
 Python: 3.8+
 
 版本歷史:
+- v1.20.0: 新增預設自動啟動功能（程式啟動後 60 秒自動執行 'r 4' 命令開始 4 小時規則執行，用戶輸入任意命令可取消）
 - v1.19.0: 新增 lobby_return 檢測與自動恢復功能（點擊 game_return 後自動檢測 lobby_return，若出現則導航到 GAME_PAGE 並依序點擊 lobby_login、lobby_confirm 完成登入）
 - v1.18.0: 新增 game_return 圖片檢測功能（自動檢測並點擊返回遊戲提示，優化錯誤恢復流程為完整登入流程）
 - v1.17.1: 修正自動跳過點擊功能的時間戳錯誤（將 AUTO_SKIP_CLICK_INTERVAL 從極大值改為 86400 秒，避免 timestamp too large 錯誤）
@@ -124,7 +125,7 @@ __all__ = [
 class Constants:
     """系統常量"""
     # 版本資訊
-    VERSION = "1.19.0"
+    VERSION = "1.20.0"
     SYSTEM_NAME = "金富翁遊戲自動化系統"
     
     DEFAULT_LIB_PATH = "lib"
@@ -2004,48 +2005,28 @@ class SyncBrowserOperator:
         timeout: Optional[float] = None,
         silent: bool = False
     ) -> List[OperationResult]:
-        """同步調整所有瀏覽器的下注金額。
+        """同步調整所有瀏覽器的下注金額（無限等待版）。
+        
+        所有瀏覽器會無限等待直到金額調整完成，才會一起進入下一個動作。
         
         Args:
             browser_contexts: 瀏覽器上下文列表
             target_amount: 目標金額
-            timeout: 超時時間
+            timeout: 已棄用，保留參數以維持向後相容
             silent: 是否靜默模式（不輸出詳細日誌）
             
         Returns:
             操作結果列表
         """
-        browsers_to_close = []  # 記錄需要關閉的瀏覽器
-        
         def adjust_operation(context: BrowserContext, index: int, total: int) -> bool:
-            try:
-                return self.adjust_betsize(context.driver, target_amount, silent=silent)
-            except Exception as e:
-                # 調整失敗，記錄需要關閉的瀏覽器
-                self.logger.error(f"瀏覽器 {index} ({context.credential.username}) 金額調整失敗: {e}")
-                browsers_to_close.append((index - 1, context))  # 記錄索引位置（從0開始）
-                return False
+            return self.adjust_betsize(context.driver, target_amount, silent=silent)
         
         results = self.execute_sync(
             browser_contexts,
             adjust_operation,
             f"調整下注金額到 {target_amount}",
-            timeout=timeout
+            timeout=None  # 無超時限制
         )
-        
-        # 關閉並移除失敗的瀏覽器
-        if browsers_to_close:
-            self.logger.warning(f"將關閉 {len(browsers_to_close)} 個調整金額失敗的瀏覽器")
-            # 從後往前關閉，避免索引問題
-            for idx, context in sorted(browsers_to_close, key=lambda x: x[0], reverse=True):
-                try:
-                    username = context.credential.username
-                    self.logger.info(f"關閉瀏覽器 {idx + 1} ({username})...")
-                    context.driver.quit()
-                    browser_contexts.pop(idx)
-                    self.logger.info(f"[成功] 已關閉瀏覽器 {idx + 1} ({username})")
-                except Exception as e:
-                    self.logger.error(f"關閉瀏覽器 {idx + 1} 時發生錯誤: {e}")
         
         return results
     
@@ -2180,20 +2161,17 @@ class SyncBrowserOperator:
         BrowserHelper.execute_cdp_click(driver, actual_x, actual_y)
     
     def adjust_betsize(self, driver: WebDriver, target_amount: float, max_attempts: int = None, silent: bool = False) -> bool:
-        """調整下注金額到目標值（優化版）。
+        """調整下注金額到目標值（無限等待版）。
         
         Args:
             driver: WebDriver 實例
             target_amount: 目標金額
-            max_attempts: 最大嘗試次數（預設使用常數）
+            max_attempts: 已棄用，保留參數以維持向後相容
             silent: 是否靜默模式（不輸出詳細日誌）
             
         Returns:
             bool: 調整成功返回True
         """
-        if max_attempts is None:
-            max_attempts = Constants.BETSIZE_ADJUST_MAX_ATTEMPTS
-        
         try:
             # 檢查目標金額
             if target_amount not in Constants.GAME_BETSIZE:
@@ -2201,12 +2179,16 @@ class SyncBrowserOperator:
                     self.logger.error(f"目標金額 {target_amount} 不在可用金額列表中")
                 return False
             
-            # 取得當前金額
-            current_amount = self.get_current_betsize(driver, silent=silent)
-            if current_amount is None:
-                # 即使在 silent 模式下也要記錄識別失敗，這是關鍵錯誤
-                self.logger.error("[錯誤] 無法識別目前金額，請確認 img/bet_size/ 中有對應的金額模板")
-                return False
+            # 無限等待直到成功取得當前金額
+            attempt = 0
+            current_amount = None
+            while current_amount is None:
+                current_amount = self.get_current_betsize(driver, silent=silent)
+                if current_amount is None:
+                    attempt += 1
+                    if attempt == 1 or attempt % 20 == 0:
+                        self.logger.warning(f"[警告] 無法識別目前金額，持續等待中... (嘗試 {attempt} 次)")
+                    time.sleep(Constants.BETSIZE_ADJUST_RETRY_WAIT)
             
             # 檢查是否已是目標金額
             if current_amount == target_amount:
@@ -2238,14 +2220,16 @@ class SyncBrowserOperator:
             
             time.sleep(Constants.BETSIZE_ADJUST_VERIFY_WAIT)
             
-            # 驗證並微調
-            for attempt in range(max_attempts):
+            # 無限循環驗證並微調，直到達到目標金額
+            attempt = 0
+            while True:
+                attempt += 1
                 current_amount = self.get_current_betsize(driver, silent=silent)
                 
                 if current_amount is None:
-                    # 記錄金額識別失敗（但不要過於頻繁）
-                    if attempt == 0 or attempt % 20 == 0:
-                        self.logger.warning(f"[警告] 金額識別失敗 (嘗試 {attempt + 1}/{max_attempts})")
+                    # 記錄金額識別失敗
+                    if attempt % 20 == 0:
+                        self.logger.warning(f"[警告] 金額識別失敗，持續等待中... (嘗試 {attempt} 次)")
                     time.sleep(Constants.BETSIZE_ADJUST_RETRY_WAIT)
                     continue
                 
@@ -2262,16 +2246,12 @@ class SyncBrowserOperator:
                 
                 time.sleep(Constants.BETSIZE_ADJUST_RETRY_WAIT)
             
-            # 超過最大嘗試次數，拋出異常讓上層處理
-            error_msg = f"金額調整失敗，已達最大嘗試次數 {max_attempts}"
-            if not silent:
-                self.logger.error(f"[錯誤] {error_msg}")
-            raise Exception(error_msg)
-            
         except Exception as e:
             if not silent:
                 self.logger.error(f"[錯誤] 調整過程發生錯誤: {e}")
-            raise
+            # 發生異常時等待後重試
+            time.sleep(1)
+            return self.adjust_betsize(driver, target_amount, silent=silent)
     
     def capture_betsize_template(self, driver: WebDriver, amount: float) -> bool:
         """截取下注金額模板。
@@ -3621,6 +3601,10 @@ class GameControlCenter:
         self.time_monitor_running = False  # 時間監控運行狀態
         self.time_monitor_thread: Optional[threading.Thread] = None  # 時間監控執行緒
         self._time_monitor_stop_event = threading.Event()  # 時間監控停止事件
+        
+        # 自動啟動相關
+        self.user_has_input = False  # 記錄用戶是否有輸入過命令
+        self.auto_start_timer: Optional[threading.Timer] = None  # 自動啟動計時器
         
         # 初始化恢復管理器
         self.image_detector = ImageDetector(logger=self.logger)
@@ -5487,11 +5471,36 @@ class GameControlCenter:
         # 自動顯示幫助訊息
         self.show_help()
         
+        # 啟動60秒自動執行計時器
+        self.logger.info("")
+        self.logger.info("⏰ 將在 60 秒後自動執行 'r 4' 命令（4小時規則執行）")
+        self.logger.info("   如需取消，請輸入任意命令")
+        self.logger.info("")
+        
+        def auto_execute_r4():
+            """60秒後自動執行 r 4 命令"""
+            if not self.user_has_input and self.running:
+                self.logger.info("")
+                self.logger.info("⏰ 60秒已到，自動執行 'r 4' 命令...")
+                self.logger.info("")
+                self.process_command("r 4")
+        
+        self.auto_start_timer = threading.Timer(60.0, auto_execute_r4)
+        self.auto_start_timer.daemon = True
+        self.auto_start_timer.start()
+        
         try:
             while self.running:
                 try:
                     print(">>> ", end="", flush=True)
                     command = input().strip()
+                    
+                    # 記錄用戶已經輸入過命令，取消自動執行
+                    if not self.user_has_input:
+                        self.user_has_input = True
+                        if self.auto_start_timer and self.auto_start_timer.is_alive():
+                            self.auto_start_timer.cancel()
+                            self.logger.info("[提示] 已取消自動執行 'r 4' 命令")
                     
                     if command:
                         if not self.process_command(command):
@@ -5506,6 +5515,10 @@ class GameControlCenter:
                     self.logger.info("\n[警告] 使用者中斷，退出控制中心")
                     break
         finally:
+            # 取消自動執行計時器
+            if self.auto_start_timer and self.auto_start_timer.is_alive():
+                self.auto_start_timer.cancel()
+            
             # 確保停止錯誤監控功能
             if self.error_monitor_running:
                 self._stop_error_monitor()
