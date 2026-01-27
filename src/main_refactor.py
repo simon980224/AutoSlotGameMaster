@@ -1,178 +1,291 @@
 """
-賽特遊戲自動化系統 - 重構版
+賽特遊戲自動化系統 - 重構版。
 
-此版本完全獨立運行，不依賴 main.py
+此模組提供完整的遊戲自動化功能，包含：
+- 多瀏覽器並行管理
+- 圖片識別與自動操作
+- 代理伺服器中繼
+- 互動式控制中心
 
-功能範圍（對應 main_flow_explanation.md 第 76~97 行）:
-- 載入配置檔案（用戶資料.txt、用戶規則.txt）
-- 自動決定瀏覽器數量
-- 啟動代理中繼伺服器（為每個瀏覽器建立本地代理）
-- 建立瀏覽器實例（為每個用戶建立 WebDriver）
-- 導航到登入頁面
-- 執行登入操作
-- 導航到遊戲頁面
-- 調整視窗排列
+Author:
+    凡臻科技
 
-作者: 凡臻科技
-版本: 2.0.0
-Python: 3.8+
+Version:
+    2.0.0
+
+Requirements:
+    Python 3.8+, Selenium 4.25+, OpenCV
+
+Note:
+    此版本完全獨立運行，不依賴 main.py
 """
 
-import logging
-import sys
-import socket
-import select
+# =============================================================================
+# 標準庫
+# =============================================================================
 import base64
-import time
-import subprocess
-from typing import Optional, List, Dict, Tuple, Any, Callable, Protocol, Union
-from pathlib import Path
-from dataclasses import dataclass, field
-from contextlib import contextmanager, suppress
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from enum import Enum
+import io
+import logging
+import select
+import socket
+import sys
 import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager, suppress
+from dataclasses import dataclass
+from enum import Enum
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple, Union
 
-# Selenium WebDriver 相關
+# =============================================================================
+# 第三方庫 - 圖片處理
+# =============================================================================
+import cv2
+import numpy as np
+from PIL import Image
+
+# =============================================================================
+# 第三方庫 - Selenium WebDriver
+# =============================================================================
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.webdriver import WebDriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import WebDriverWait
 from webdriver_manager.chrome import ChromeDriverManager
 
-# 圖片處理相關
-import cv2
-import numpy as np
-from PIL import Image
-import io
 
-
-# ============================================================================
+# =============================================================================
 # 常量定義
-# ============================================================================
+# =============================================================================
 
 class Constants:
-    """系統常量"""
+    """系統常量配置類別。
+    
+    集中管理所有魔法數字和配置值，避免硬編碼。
+    所有常量按功能分組，並提供詳細的註解說明。
+    """
+    
+    # -------------------------------------------------------------------------
     # 版本資訊
-    VERSION = "2.0.0"
-    SYSTEM_NAME = "賽特遊戲自動化系統 - 重構版"
+    # -------------------------------------------------------------------------
+    VERSION: str = "2.0.0"
+    SYSTEM_NAME: str = "賽特遊戲自動化系統 - 重構版"
     
+    # -------------------------------------------------------------------------
     # 配置檔案路徑
-    DEFAULT_LIB_PATH = "lib"
-    DEFAULT_CREDENTIALS_FILE = "用戶資料.txt"
-    DEFAULT_RULES_FILE = "用戶規則.txt"
+    # -------------------------------------------------------------------------
+    DEFAULT_LIB_PATH: str = "lib"
+    DEFAULT_CREDENTIALS_FILE: str = "用戶資料.txt"
+    DEFAULT_RULES_FILE: str = "用戶規則.txt"
     
+    # -------------------------------------------------------------------------
     # 代理伺服器配置
-    DEFAULT_PROXY_START_PORT = 9000
-    PROXY_SERVER_BIND_HOST = "127.0.0.1"
-    PROXY_BUFFER_SIZE = 4096
-    PROXY_SELECT_TIMEOUT = 1.0
-    PROXY_SERVER_START_WAIT = 1  # 代理伺服器啟動等待時間
+    # -------------------------------------------------------------------------
+    DEFAULT_PROXY_START_PORT: int = 9000
+    PROXY_SERVER_BIND_HOST: str = "127.0.0.1"
+    PROXY_BUFFER_SIZE: int = 4096
+    PROXY_SELECT_TIMEOUT: float = 1.0
+    PROXY_SERVER_START_WAIT: float = 1.0
     
-    # 超時配置
-    DEFAULT_TIMEOUT_SECONDS = 30
-    DEFAULT_PAGE_LOAD_TIMEOUT = 600
-    DEFAULT_SCRIPT_TIMEOUT = 600
-    DEFAULT_IMPLICIT_WAIT = 60
-    SERVER_SOCKET_TIMEOUT = 1.0
-    CLEANUP_PROCESS_TIMEOUT = 10
+    # -------------------------------------------------------------------------
+    # 超時配置（單位：秒）
+    # -------------------------------------------------------------------------
+    DEFAULT_TIMEOUT_SECONDS: int = 30
+    DEFAULT_PAGE_LOAD_TIMEOUT: int = 600
+    DEFAULT_SCRIPT_TIMEOUT: int = 600
+    DEFAULT_IMPLICIT_WAIT: int = 60
+    SERVER_SOCKET_TIMEOUT: float = 1.0
+    CLEANUP_PROCESS_TIMEOUT: int = 10
     
-    # 執行緒配置
-    MAX_THREAD_WORKERS = 10
-    MAX_BROWSER_COUNT = 12  # 最大瀏覽器數量
+    # -------------------------------------------------------------------------
+    # 執行緒與瀏覽器配置
+    # -------------------------------------------------------------------------
+    MAX_THREAD_WORKERS: int = 10
+    MAX_BROWSER_COUNT: int = 12
     
+    # -------------------------------------------------------------------------
     # 視窗配置
-    DEFAULT_WINDOW_WIDTH = 600
-    DEFAULT_WINDOW_HEIGHT = 400
-    DEFAULT_WINDOW_COLUMNS = 4
+    # -------------------------------------------------------------------------
+    DEFAULT_WINDOW_WIDTH: int = 600
+    DEFAULT_WINDOW_HEIGHT: int = 400
+    DEFAULT_WINDOW_COLUMNS: int = 4
     
+    # -------------------------------------------------------------------------
     # URL 配置
-    LOGIN_PAGE = "https://www.fin88.app/"
-    GAME_PAGE = "https://www.fin88.app/"
+    # -------------------------------------------------------------------------
+    LOGIN_PAGE: str = "https://www.fin88.app/"
+    GAME_PAGE: str = "https://www.fin88.app/"
     
+    # -------------------------------------------------------------------------
     # 登入相關 XPath
-    INITIAL_LOGIN_BUTTON = "//button[contains(@class, 'btn') and contains(@class, 'login') and contains(@class, 'pc') and text()='登入']"
-    USERNAME_INPUT = "//input[@placeholder='請輸入帳號/手機號']"
-    PASSWORD_INPUT = "//input[@placeholder='請輸入您的登入密碼']"
-    LOGIN_BUTTON = "//button[contains(@class, 'custom-button') and @type='submit' and text()='登入遊戲']"
+    # -------------------------------------------------------------------------
+    INITIAL_LOGIN_BUTTON: str = (
+        "//button[contains(@class, 'btn') and contains(@class, 'login') "
+        "and contains(@class, 'pc') and text()='登入']"
+    )
+    USERNAME_INPUT: str = "//input[@placeholder='請輸入帳號/手機號']"
+    PASSWORD_INPUT: str = "//input[@placeholder='請輸入您的登入密碼']"
+    LOGIN_BUTTON: str = (
+        "//button[contains(@class, 'custom-button') and @type='submit' "
+        "and text()='登入遊戲']"
+    )
     
+    # -------------------------------------------------------------------------
     # 遊戲頁面相關 XPath
-    SEARCH_BUTTON = "//button[contains(@class, 'search-btn')]"
-    SEARCH_INPUT = "//input[@placeholder='按換行鍵搜索']"
-    GAME_XPATH = "//div[contains(@class, 'game-card-container') and .//div[contains(@style, 'ATG-egyptian-mythology.png')]]"
-    GAME_IFRAME = "//iframe[contains(@class, 'iframe-item')]"
-    GAME_CANVAS = "GameCanvas"  # 遊戲 Canvas 元素 ID
+    # -------------------------------------------------------------------------
+    SEARCH_BUTTON: str = "//button[contains(@class, 'search-btn')]"
+    SEARCH_INPUT: str = "//input[@placeholder='按換行鍵搜索']"
+    GAME_XPATH: str = (
+        "//div[contains(@class, 'game-card-container') "
+        "and .//div[contains(@style, 'ATG-egyptian-mythology.png')]]"
+    )
+    GAME_IFRAME: str = "//iframe[contains(@class, 'iframe-item')]"
+    GAME_CANVAS: str = "GameCanvas"
     
+    # -------------------------------------------------------------------------
     # 圖片檢測配置
-    IMAGE_DIR = "img"
-    GAME_LOGIN = "game_login.png"
-    GAME_CONFIRM = "game_confirm.png"
-    MATCH_THRESHOLD = 0.8  # 圖片匹配閾值
-    DETECTION_INTERVAL = 1.0  # 檢測間隔（秒）
-    MAX_DETECTION_ATTEMPTS = 60  # 最大檢測次數
-    DETECTION_PROGRESS_INTERVAL = 20  # 檢測進度顯示間隔
+    # -------------------------------------------------------------------------
+    IMAGE_DIR: str = "img"
+    GAME_LOGIN: str = "遊戲開始.png"
+    GAME_CONFIRM: str = "遊戲確認.png"
+    MATCH_THRESHOLD: float = 0.8
+    DETECTION_INTERVAL: float = 1.0
+    MAX_DETECTION_ATTEMPTS: int = 60
+    DETECTION_PROGRESS_INTERVAL: int = 20
     
-    # Canvas 動態計算比例（用於點擊座標）
-    GAME_LOGIN_BUTTON_X_RATIO = 0.5   # game_login 開始遊戲按鈕 X 座標比例
-    GAME_LOGIN_BUTTON_Y_RATIO = 0.9   # game_login 開始遊戲按鈕 Y 座標比例
-    GAME_CONFIRM_BUTTON_X_RATIO = 0.74  # game_confirm 確認按鈕 X 座標比例
-    GAME_CONFIRM_BUTTON_Y_RATIO = 0.85  # game_confirm 確認按鈕 Y 座標比例
+    # -------------------------------------------------------------------------
+    # Canvas 點擊座標比例
+    # -------------------------------------------------------------------------
+    GAME_LOGIN_BUTTON_X_RATIO: float = 0.5
+    GAME_LOGIN_BUTTON_Y_RATIO: float = 0.9
+    GAME_CONFIRM_BUTTON_X_RATIO: float = 0.74
+    GAME_CONFIRM_BUTTON_Y_RATIO: float = 0.85
     
+    # -------------------------------------------------------------------------
     # 控制中心配置
-    AUTO_SKIP_CLICK_INTERVAL = 30  # 自動跳過點擊間隔（秒）
+    # -------------------------------------------------------------------------
+    AUTO_SKIP_CLICK_INTERVAL: int = 30
+    
+    # -------------------------------------------------------------------------
+    # 金額模板配置
+    # -------------------------------------------------------------------------
+    BETSIZE_DISPLAY_X: float = 0.72
+    BETSIZE_DISPLAY_Y: float = 0.89
+    BETSIZE_CROP_MARGIN_X: int = 40
+    BETSIZE_CROP_MARGIN_Y: int = 10
+    
+    # -------------------------------------------------------------------------
+    # 黑屏檢測模板配置
+    # -------------------------------------------------------------------------
+    BLACK_SCREEN: str = "黑屏提示.png"
+    BLACKSCREEN_CENTER_X: float = 0.5
+    BLACKSCREEN_CENTER_Y: float = 0.5
+    BLACKSCREEN_CROP_MARGIN_X: int = 100
+    BLACKSCREEN_CROP_MARGIN_Y: int = 50
+    
+    # -------------------------------------------------------------------------
+    # 錯誤提醒模板配置
+    # -------------------------------------------------------------------------
+    ERROR_REMIND: str = "錯誤訊息.png"
+    ERROR_REMIND_CENTER_X: float = 0.5
+    ERROR_REMIND_CENTER_Y: float = 0.55
+    ERROR_REMIND_CROP_MARGIN_X: int = 50
+    ERROR_REMIND_CROP_MARGIN_Y: int = 10
+    
+    # -------------------------------------------------------------------------
+    # 大廳返回模板配置
+    # -------------------------------------------------------------------------
+    LOBBY_RETURN: str = "返回大廳.png"
+    
+    # -------------------------------------------------------------------------
+    # 模板顯示名稱對應表
+    # -------------------------------------------------------------------------
+    TEMPLATE_DISPLAY_NAMES: Dict[str, str] = {
+        "遊戲開始.png": "遊戲開始",
+        "遊戲確認.png": "遊戲確認",
+        "黑屏提示.png": "黑屏提示",
+        "錯誤訊息.png": "錯誤訊息",
+        "返回大廳.png": "返回大廳",
+    }
+    
+    # -------------------------------------------------------------------------
+    # 遊戲金額配置
+    # -------------------------------------------------------------------------
+    GAME_BETSIZE: frozenset = frozenset((
+        2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40,
+        48, 56, 60, 64, 72, 80, 96, 100, 120, 140, 160, 180, 200,
+        240, 280, 300, 320, 360, 400, 420, 480, 500, 540, 560, 600,
+        640, 700, 720, 800, 840, 900, 960, 980, 1000, 1080, 1120,
+        1200, 1260, 1280, 1400, 1440, 1500, 1600, 1800, 2000, 2100,
+        2400, 2700, 3000
+    ))
 
 
-# ============================================================================
+# =============================================================================
 # 例外類別
-# ============================================================================
+# =============================================================================
 
 class AutoSlotGameError(Exception):
-    """基礎例外類別"""
-    pass
+    """基礎例外類別。
+    
+    所有自定義例外皆繼承自此類別。
+    """
 
 
 class ConfigurationError(AutoSlotGameError):
-    """配置相關錯誤"""
-    pass
+    """配置相關錯誤。
+    
+    當配置檔案不存在、格式錯誤或讀取失敗時拋出。
+    """
 
 
 class BrowserCreationError(AutoSlotGameError):
-    """瀏覽器建立錯誤"""
-    pass
+    """瀏覽器建立錯誤。
+    
+    當 WebDriver 初始化失敗或瀏覽器無法啟動時拋出。
+    """
 
 
 class ProxyServerError(AutoSlotGameError):
-    """代理伺服器錯誤"""
-    pass
+    """代理伺服器錯誤。
+    
+    當代理伺服器啟動失敗或連線異常時拋出。
+    """
 
 
 class ImageDetectionError(AutoSlotGameError):
-    """圖片檢測錯誤"""
-    pass
+    """圖片檢測錯誤。
+    
+    當截圖失敗、模板不存在或圖片比對異常時拋出。
+    """
 
 
-# ============================================================================
+# =============================================================================
 # 資料類別
-# ============================================================================
+# =============================================================================
 
 @dataclass(frozen=True)
 class UserCredential:
     """使用者憑證資料結構（不可變）。
     
     Attributes:
-        username: 使用者名稱
-        password: 密碼
-        proxy: 代理出口 IP（可選）
+        username: 使用者帳號
+        password: 登入密碼
+        proxy: 代理出口 IP，格式為 "host:port:username:password"
+    
+    Raises:
+        ValueError: 當帳號或密碼為空時
     """
     username: str
     password: str
     proxy: Optional[str] = None
     
     def __post_init__(self) -> None:
-        """驗證資料完整性"""
+        """驗證資料完整性。"""
         if not self.username or not self.password:
             raise ValueError("使用者名稱和密碼不能為空")
 
@@ -181,20 +294,31 @@ class UserCredential:
 class BetRule:
     """下注規則資料結構（不可變）。
     
-    支援三種類型:
-    - 'a' (自動旋轉): amount, spin_count
-    - 's' (標準規則): amount, duration, min_seconds, max_seconds
-    - 'f' (購買免費遊戲): amount
+    支援三種規則類型：
+    - 'a' (自動旋轉): 指定金額和旋轉次數
+    - 's' (標準規則): 指定金額、持續時間、最小/最大間隔
+    - 'f' (購買免費遊戲): 僅指定金額
+    
+    Attributes:
+        rule_type: 規則類型 ('a', 's', 'f')
+        amount: 下注金額
+        spin_count: 自動旋轉次數 (僅 'a' 類型使用)
+        duration: 持續時間，分鐘 (僅 's' 類型使用)
+        min_seconds: 最小間隔秒數 (僅 's' 類型使用)
+        max_seconds: 最大間隔秒數 (僅 's' 類型使用)
+    
+    Raises:
+        ValueError: 當規則參數無效時
     """
-    rule_type: str  # 'a'、's' 或 'f'
+    rule_type: str
     amount: float
-    spin_count: Optional[int] = None  # 'a' 類型使用
-    duration: Optional[int] = None  # 's' 類型使用（分鐘）
-    min_seconds: Optional[float] = None  # 's' 類型使用
-    max_seconds: Optional[float] = None  # 's' 類型使用
+    spin_count: Optional[int] = None
+    duration: Optional[int] = None
+    min_seconds: Optional[float] = None
+    max_seconds: Optional[float] = None
     
     def __post_init__(self) -> None:
-        """驗證資料完整性"""
+        """驗證資料完整性。"""
         if self.amount <= 0:
             raise ValueError(f"下注金額必須大於 0: {self.amount}")
         
@@ -227,10 +351,13 @@ class ProxyInfo:
     """代理伺服器資訊資料結構（不可變）。
     
     Attributes:
-        host: 代理主機
+        host: 代理主機位址
         port: 代理埠號
         username: 認證使用者名稱
         password: 認證密碼
+    
+    Raises:
+        ValueError: 當參數無效時
     """
     host: str
     port: int
@@ -238,7 +365,7 @@ class ProxyInfo:
     password: str
     
     def __post_init__(self) -> None:
-        """驗證資料完整性"""
+        """驗證資料完整性。"""
         if not self.host:
             raise ValueError("代理主機不能為空")
         if not (0 < self.port < 65536):
@@ -281,23 +408,30 @@ class ProxyInfo:
 class BrowserContext:
     """瀏覽器上下文資訊。
     
+    儲存單一瀏覽器實例的相關資訊，包含驅動程式、憑證和狀態。
+    
     Attributes:
         driver: WebDriver 實例
         credential: 使用者憑證
         index: 瀏覽器索引（從 1 開始）
-        proxy_port: 代理埠號（可選）
-        created_at: 建立時間戳
+        proxy_port: 代理埠號（無代理時為 None）
+        created_at: 建立時間戳（秒）
     """
     driver: WebDriver
     credential: UserCredential
     index: int
-    proxy_port: Optional[int] = None  # 代理埠號（可選）
-    created_at: float = field(default_factory=time.time)
+    proxy_port: Optional[int] = None
+    created_at: Optional[float] = None
+    
+    def __post_init__(self) -> None:
+        """初始化後設定預設值。"""
+        if self.created_at is None:
+            self.created_at = time.time()
     
     @property
     def age_in_seconds(self) -> float:
-        """取得瀏覽器實例的存活時間（秒）"""
-        return time.time() - self.created_at
+        """取得瀏覽器實例的存活時間（秒）。"""
+        return time.time() - (self.created_at or time.time())
 
 
 class BrowserThread(threading.Thread):
@@ -309,10 +443,21 @@ class BrowserThread(threading.Thread):
     Attributes:
         index: 瀏覽器索引（從 1 開始）
         credential: 使用者憑證
-        proxy_port: 代理埠號（可選）
-        browser_manager: 瀏覽器管理器
+        proxy_port: 代理埠號（無代理時為 None）
+        browser_manager: 瀏覽器管理器實例
         context: 瀏覽器上下文（建立後填充）
-    """
+        driver: WebDriver 實例
+    
+    Example:
+        >>> thread = BrowserThread(
+        ...     index=1,
+        ...     credential=credential,
+        ...     browser_manager=browser_manager
+        ... )
+        >>> thread.start()
+        >>> thread.wait_until_ready(timeout=30)
+        >>> thread.execute_task(lambda ctx: ctx.driver.get(url))
+    """""
     
     def __init__(
         self,
@@ -371,7 +516,11 @@ class BrowserThread(threading.Thread):
             self._cleanup()
     
     def _create_browser(self) -> None:
-        """在執行緒中建立瀏覽器。"""
+        """在執行緒中建立瀏覽器。
+        
+        建立 WebDriver 實例並初始化 BrowserContext。
+        若建立失敗，將错誤儲存到 _creation_error。
+        """
         try:
             self.driver = self.browser_manager.create_webdriver(
                 local_proxy_port=self.proxy_port
@@ -386,10 +535,13 @@ class BrowserThread(threading.Thread):
             
         except Exception as e:
             self._creation_error = e
-            self._ready_event.set()  # 即使失敗也要通知
+            self._ready_event.set()
     
     def _process_tasks(self) -> None:
-        """處理任務佇列中的所有任務。"""
+        """處理任務佇列中的所有任務。
+        
+        依序執行佇列中的任務，並將結果儲存到 _task_result。
+        """
         while True:
             with self._task_lock:
                 if not self._task_queue:
@@ -489,13 +641,20 @@ class BrowserThread(threading.Thread):
 
 
 class OperationResult:
-    """操作結果封裝。
+    """操作結果封裝類別。
+    
+    統一封裝操作的執行結果，支援布林轉換和字串表示。
     
     Attributes:
         success: 操作是否成功
         data: 操作返回的資料
         error: 發生的例外（如果有）
-        message: 額外的訊息
+        message: 額外的訊息說明
+    
+    Example:
+        >>> result = OperationResult(success=True, data={"count": 5})
+        >>> if result:
+        ...     print(result.data)
     """
     def __init__(
         self, 
@@ -517,12 +676,15 @@ class OperationResult:
         return f"OperationResult({status}, {self.message})"
 
 
-# ============================================================================
+# =============================================================================
 # 日誌系統
-# ============================================================================
+# =============================================================================
 
 class LogLevel(Enum):
-    """日誌等級"""
+    """日誌等級列舉。
+    
+    提供與 logging 模組相容的日誌等級定義。
+    """
     DEBUG = logging.DEBUG
     INFO = logging.INFO
     WARNING = logging.WARNING
@@ -531,7 +693,14 @@ class LogLevel(Enum):
 
 
 class ColoredFormatter(logging.Formatter):
-    """帶顏色的日誌格式化器。"""
+    """帶顏色的日誌格式化器。
+    
+    根據日誌等級為輸出添加不同的 ANSI 顏色代碼。
+    
+    Attributes:
+        COLORS: 顏色代碼對應表
+        formatters: 各日誌等級的格式化器
+    """
     
     COLORS = {
         'RESET': "\033[0m",
@@ -569,9 +738,14 @@ class ColoredFormatter(logging.Formatter):
 
 
 class FlushingStreamHandler(logging.StreamHandler):
-    """自動刷新的 StreamHandler，解決多執行緒環境下的緩衝阻塞問題。"""
+    """自動刷新的 StreamHandler。
+    
+    解決多執行緒環境下的緩衝阻塞問題，
+    每次輸出後立即刷新緩衝區。
+    """
     
     def emit(self, record: logging.LogRecord) -> None:
+        """輸出日誌記錄並強制刷新緩衝區。"""
         try:
             super().emit(record)
             self.flush()
@@ -580,7 +754,15 @@ class FlushingStreamHandler(logging.StreamHandler):
 
 
 class LoggerFactory:
-    """Logger 工廠類別 - 使用單例模式"""
+    """日誌記錄器工廠類別。
+    
+    使用單例模式管理 logger 實例，確保執行緒安全。
+    
+    Attributes:
+        _loggers: logger 實例緩存
+        _lock: 執行緒鎖
+        _formatter: 共享的格式化器實例
+    """
     
     _loggers: Dict[str, logging.Logger] = {}
     _lock = threading.RLock()
@@ -592,7 +774,17 @@ class LoggerFactory:
         name: str = "AutoSlotGame",
         level: LogLevel = LogLevel.INFO
     ) -> logging.Logger:
-        """取得或建立 logger 實例（執行緒安全）。"""
+        """取得或建立 logger 實例。
+        
+        使用雙重檢查鎖定模式確保執行緒安全。
+        
+        Args:
+            name: logger 名稱
+            level: 日誌等級
+            
+        Returns:
+            配置完成的 logger 實例
+        """
         if name in cls._loggers:
             return cls._loggers[name]
         
@@ -617,15 +809,22 @@ class LoggerFactory:
             return logger
 
 
-# ============================================================================
+# =============================================================================
 # 輔助函式
-# ============================================================================
+# =============================================================================
 
 def get_resource_path(relative_path: str = "") -> Path:
     """取得資源檔案的絕對路徑。
     
-    在開發環境中，返回專案根目錄的路徑。
-    在打包後的環境中，返回 exe 所在目錄的路徑。
+    根據執行環境自動判斷基礎路徑：
+    - 開發環境：返回專案根目錄
+    - 打包環境：返回可執行檔所在目錄
+    
+    Args:
+        relative_path: 相對路徑（可選）
+        
+    Returns:
+        完整的絕對路徑
     """
     if getattr(sys, 'frozen', False):
         base_path = Path(sys.executable).resolve().parent
@@ -684,24 +883,38 @@ def cv2_imread_unicode(file_path: Union[str, Path], flags: int = cv2.IMREAD_COLO
         return None
 
 
-# ============================================================================
+# =============================================================================
 # 配置讀取器
-# ============================================================================
+# =============================================================================
 
 class ConfigReaderProtocol(Protocol):
-    """配置讀取器協議"""
+    """配置讀取器協議。
+    
+    定義配置讀取器必須實現的方法介面。
+    """
     
     def read_user_credentials(self, filename: str) -> List[UserCredential]:
+        """ 讀取使用者憑證檔案。"""
         ...
     
     def read_bet_rules(self, filename: str) -> List[BetRule]:
+        """讀取下注規則檔案。"""
         ...
 
 
 class ConfigReader:
     """配置檔案讀取器。
     
-    讀取並解析系統所需的各種配置檔案。
+    讀取並解析系統所需的各種配置檔案，包含：
+    - 用戶資料.txt: 使用者憑證
+    - 用戶規則.txt: 下注規則
+    
+    Attributes:
+        lib_path: 配置檔案目錄路徑
+        logger: 日誌記錄器
+    
+    Raises:
+        ConfigurationError: 當配置目錄不存在時
     """
     
     def __init__(
@@ -854,12 +1067,20 @@ class ConfigReader:
         return rules
 
 
-# ============================================================================
+# =============================================================================
 # 代理伺服器
-# ============================================================================
+# =============================================================================
 
 class ProxyConnectionHandler:
-    """代理連接處理器"""
+    """代理連接處理器。
+    
+    處理 HTTP/HTTPS 請求並轉發到上游代理伺服器。
+    自動添加代理認證標頭。
+    
+    Attributes:
+        upstream_proxy: 上游代理伺服器資訊
+        logger: 日誌記錄器
+    """
     
     def __init__(
         self, 
@@ -993,6 +1214,14 @@ class SimpleProxyServer:
     """簡易 HTTP 代理伺服器。
     
     將帶認證的遠端代理轉換為本地無需認證的代理。
+    每個客戶端連接都在獨立的執行緒中處理。
+    
+    Attributes:
+        local_port: 本地監聽埠號
+        upstream_proxy: 上游代理伺服器資訊
+        running: 伺服器是否運行中
+        server_socket: 伺服器 socket
+        handler: 連接處理器實例
     """
     
     def __init__(
@@ -1079,8 +1308,20 @@ class SimpleProxyServer:
 class LocalProxyServerManager:
     """本機代理中繼伺服器管理器。
     
-    為每個瀏覽器建立獨立的本機代理埠。
-    """
+    為每個瀏覽器建立獨立的本機代理埠，支援上下文管理器協議。
+    
+    Attributes:
+        _proxy_servers: 代理伺服器實例字典 (埠號 -> 伺服器)
+        _proxy_threads: 代理執行緒字典 (埠號 -> 執行緒)
+        _next_port: 下一個可用埠號
+        _lock: 執行緒鎖
+    
+    Example:
+        >>> with LocalProxyServerManager() as manager:
+        ...     port = manager.start_proxy_server(proxy_info)
+        ...     # 使用代理...
+        # 自動清理所有代理伺服器
+    """""
     
     def __init__(self, logger: Optional[logging.Logger] = None):
         self.logger = logger or LoggerFactory.get_logger()
@@ -1157,15 +1398,18 @@ class LocalProxyServerManager:
         return False
 
 
-# ============================================================================
+# =============================================================================
 # 瀏覽器輔助工具
-# ============================================================================
+# =============================================================================
 
 class BrowserHelper:
     """瀏覽器操作輔助類別。
     
-    提供常用的瀏覽器操作方法，避免程式碼重複。
-    包括座標計算、按鍵模擬等。
+    提供常用的瀏覽器操作方法，主要包含：
+    - CDP 按鍵模擬
+    - 點擊座標計算
+    
+    所有方法皆為靜態方法，無需實例化。
     """
     
     @staticmethod
@@ -1213,20 +1457,26 @@ class BrowserHelper:
         return x, y
 
 
-# ============================================================================
+# =============================================================================
 # 圖片檢測器
-# ============================================================================
+# =============================================================================
 
 class ImageDetector:
     """圖片檢測器。
     
     提供螢幕截圖、圖片比對和座標定位功能。
-    使用 OpenCV 進行模板匹配，支援多種圖片格式。
+    使用 OpenCV 的 TM_CCOEFF_NORMED 方法進行模板匹配。
     
     Attributes:
         logger: 日誌記錄器
-        project_root: 專案根目錄
-        image_dir: 圖片目錄
+        project_root: 專案根目錄路徑
+        image_dir: 圖片目錄路徑
+    
+    Example:
+        >>> detector = ImageDetector()
+        >>> result = detector.detect_in_browser(driver, "遊戲開始.png")
+        >>> if result:
+        ...     x, y, confidence = result
     """
     
     def __init__(self, logger: Optional[logging.Logger] = None):
@@ -1383,16 +1633,220 @@ class ImageDetector:
         except Exception as e:
             self.logger.error(f"[錯誤] 瀏覽器圖片檢測失敗: {e}")
             return None
+    
+    def _capture_cropped_template(
+        self,
+        driver: WebDriver,
+        center_x_ratio: float,
+        center_y_ratio: float,
+        margin_x: int,
+        margin_y: int,
+        filename: str,
+        output_dir: Optional[Path] = None
+    ) -> bool:
+        """通用的裁切模板截取方法。
+        
+        Args:
+            driver: WebDriver 實例
+            center_x_ratio: 中心點 X 座標比例 (0-1)
+            center_y_ratio: 中心點 Y 座標比例 (0-1)
+            margin_x: 水平裁切邊距（像素）
+            margin_y: 垂直裁切邊距（像素）
+            filename: 輸出檔名
+            output_dir: 輸出目錄（預設為 img/）
+            
+        Returns:
+            截取成功返回 True
+        """
+        try:
+            # 截取整個瀏覽器畫面
+            screenshot = driver.get_screenshot_as_png()
+            screenshot_img = Image.open(io.BytesIO(screenshot))
+            
+            # 獲取實際截圖尺寸
+            image_width, image_height = screenshot_img.size
+            
+            # 使用比例計算實際中心座標
+            center_x = int(image_width * center_x_ratio)
+            center_y = int(image_height * center_y_ratio)
+            
+            # 計算裁切範圍
+            crop_left = max(0, center_x - margin_x)
+            crop_top = max(0, center_y - margin_y)
+            crop_right = min(image_width, center_x + margin_x)
+            crop_bottom = min(image_height, center_y + margin_y)
+            
+            # 裁切圖片
+            cropped_img = screenshot_img.crop((crop_left, crop_top, crop_right, crop_bottom))
+            
+            # 決定輸出目錄
+            if output_dir is None:
+                output_dir = get_resource_path("img")
+            output_dir.mkdir(parents=True, exist_ok=True)
+            
+            # 儲存圖片
+            output_path = output_dir / filename
+            cropped_img.save(output_path)
+            
+            # 取得顯示名稱
+            display_name = Constants.TEMPLATE_DISPLAY_NAMES.get(filename, filename)
+            self.logger.info(f"[成功] 模板已儲存: {display_name}")
+            
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"[錯誤] 截取模板失敗: {e}")
+            return False
+    
+    def capture_betsize_template(self, driver: WebDriver, amount: float) -> bool:
+        """截取下注金額模板。
+        
+        Args:
+            driver: WebDriver 實例
+            amount: 下注金額
+            
+        Returns:
+            截取成功返回 True
+        """
+        try:
+            # 使用常數定義：金額顯示位置比例和裁切邊距
+            center_x_ratio = Constants.BETSIZE_DISPLAY_X
+            center_y_ratio = Constants.BETSIZE_DISPLAY_Y
+            margin_x = Constants.BETSIZE_CROP_MARGIN_X
+            margin_y = Constants.BETSIZE_CROP_MARGIN_Y
+            
+            # 截取整個瀏覽器畫面
+            screenshot = driver.get_screenshot_as_png()
+            screenshot_img = Image.open(io.BytesIO(screenshot))
+            
+            # 獲取實際截圖尺寸
+            image_width, image_height = screenshot_img.size
+            
+            # 使用比例計算實際中心座標
+            center_x = int(image_width * center_x_ratio)
+            center_y = int(image_height * center_y_ratio)
+            
+            # 計算裁切範圍
+            crop_left = max(0, center_x - margin_x)
+            crop_top = max(0, center_y - margin_y)
+            crop_right = min(image_width, center_x + margin_x)
+            crop_bottom = min(image_height, center_y + margin_y)
+            
+            # 裁切圖片
+            cropped_img = screenshot_img.crop((crop_left, crop_top, crop_right, crop_bottom))
+            
+            # 使用輔助函式取得專案根目錄
+            bet_size_dir = get_resource_path("img") / "bet_size"
+            bet_size_dir.mkdir(parents=True, exist_ok=True)
+            
+            # 檔名使用金額（整數去掉 .0，小數保留）
+            if amount == int(amount):
+                filename = f"{int(amount)}.png"
+            else:
+                filename = f"{amount}.png"
+            
+            output_path = bet_size_dir / filename
+            cropped_img.save(output_path)
+            
+            self.logger.info(f"[成功] 模板已儲存: {filename}")
+            
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"截取金額模板失敗: {e}")
+            return False
+
+    def capture_blackscreen_template(self, driver: WebDriver) -> bool:
+        """截取黑屏區域模板。
+        
+        使用 Constants 定義的座標和裁切範圍。
+        
+        Args:
+            driver: WebDriver 實例
+            
+        Returns:
+            截取成功返回 True
+        """
+        return self._capture_cropped_template(
+            driver=driver,
+            center_x_ratio=Constants.BLACKSCREEN_CENTER_X,
+            center_y_ratio=Constants.BLACKSCREEN_CENTER_Y,
+            margin_x=Constants.BLACKSCREEN_CROP_MARGIN_X,
+            margin_y=Constants.BLACKSCREEN_CROP_MARGIN_Y,
+            filename=Constants.BLACK_SCREEN
+        )
+
+    def capture_error_remind_template(self, driver: WebDriver) -> bool:
+        """截取錯誤提醒區域模板。
+        
+        使用 Constants 定義的座標和裁切範圍。
+        
+        Args:
+            driver: WebDriver 實例
+            
+        Returns:
+            截取成功返回 True
+        """
+        return self._capture_cropped_template(
+            driver=driver,
+            center_x_ratio=Constants.ERROR_REMIND_CENTER_X,
+            center_y_ratio=Constants.ERROR_REMIND_CENTER_Y,
+            margin_x=Constants.ERROR_REMIND_CROP_MARGIN_X,
+            margin_y=Constants.ERROR_REMIND_CROP_MARGIN_Y,
+            filename=Constants.ERROR_REMIND
+        )
+
+    def capture_lobby_return_template(self, driver: WebDriver) -> bool:
+        """截取大廳返回提示模板。
+        
+        截取整個瀏覽器畫面（不裁切）。
+        
+        Args:
+            driver: WebDriver 實例
+            
+        Returns:
+            截取成功返回 True
+        """
+        try:
+            # 使用輔助函式取得專案根目錄
+            img_dir = get_resource_path("img")
+            img_dir.mkdir(parents=True, exist_ok=True)
+            
+            # 使用常數定義的檔名
+            filename = Constants.LOBBY_RETURN
+            display_name = Constants.TEMPLATE_DISPLAY_NAMES.get(filename, filename)
+            output_path = img_dir / filename
+            
+            # 截取整個瀏覽器畫面（與 lobby_login 相同方式）
+            screenshot = driver.get_screenshot_as_png()
+            screenshot_img = Image.open(io.BytesIO(screenshot))
+            
+            # 直接儲存完整截圖（不裁切）
+            screenshot_img.save(output_path)
+            
+            self.logger.info(f"[成功] 模板已儲存: {display_name}")
+            
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"截取大廳返回提示模板失敗: {e}")
+            return False
 
 
-# ============================================================================
+# =============================================================================
 # 瀏覽器管理器
-# ============================================================================
+# =============================================================================
 
 class BrowserManager:
     """瀏覽器管理器。
     
-    提供 WebDriver 建立和配置功能。
+    提供 WebDriver 建立和配置功能，包含：
+    - Chrome 選項配置
+    - 代理伺服器設定
+    - 效能優化參數
+    
+    Attributes:
+        logger: 日誌記錄器
     """
     
     def __init__(self, logger: Optional[logging.Logger] = None):
@@ -1549,20 +2003,26 @@ class BrowserManager:
                 self.logger.debug(f"[除錯] 瀏覽器 #{index} 已關閉")
 
 
-# ============================================================================
+# =============================================================================
 # 遊戲控制中心
-# ============================================================================
+# =============================================================================
 
 class GameControlCenter:
     """遊戲控制中心。
     
     提供互動式命令列介面來控制多個瀏覽器，功能包括：
-    - 自動按鍵（每個瀏覽器獨立執行緒）
+    - 自動按鍵：每個瀏覽器獨立執行緒
     - 暫停/繼續操作
     - 調整下注金額
     - 購買免費遊戲
-    - 關閉瀏覽器
+    - 截取各種模板圖片
     
+    Attributes:
+        browser_threads: 瀏覽器執行緒列表
+        bet_rules: 下注規則列表
+        canvas_rect: Canvas 區域資訊
+        running: 控制中心是否運行中
+        auto_press_running: 自動按鍵是否運行中
     """
     
     def __init__(
@@ -1608,7 +2068,7 @@ class GameControlCenter:
             driver: WebDriver 實例
             
         Returns:
-            bool: True 表示瀏覽器有效，False 表示已關閉
+            True 表示瀏覽器有效，False 表示已關閉
         """
         try:
             _ = driver.current_url
@@ -1625,9 +2085,9 @@ class GameControlCenter:
 
 【自動操作】
   s <最小>,<最大>     開始自動按鍵（設定隨機間隔秒數）
-                      範例: s 1,2  → 每次間隔 1~2 秒按空白鍵
+                      範例: s 1,2  → 每次間隔 1~2 秒下注
                    
-  p                   暫停目前運行的自動操作
+  p                   暫停所有目前運行的自動操作
 
 【金額與遊戲】  
   b <金額>            調整所有瀏覽器的下注金額
@@ -1637,10 +2097,16 @@ class GameControlCenter:
                       f 0      → 所有瀏覽器
                       f 1      → 第 1 個瀏覽器
 
+【截圖工具】
+  t                   截取金額模板（進入互動模式）
+  d                   截取黑屏提示模板
+  e                   截取錯誤訊息模板
+  l                   截取返回大廳模板
+
 【系統指令】
   h                   顯示此幫助信息
 
-  q <編號>            關閉指定瀏覽器
+  q <編號>             關閉指定瀏覽器
                       q 0      → 關閉所有瀏覽器並退出程式
                       q 1      → 關閉第 1 個瀏覽器
 
@@ -1799,6 +2265,22 @@ class GameControlCenter:
                 # 購買免費遊戲（簡化版 - 尚未實作完整邏輯）
                 self.logger.info("[提示] 購買免費遊戲功能尚未完整實作")
             
+            elif cmd == 't':
+                # 截取金額模板 (template)
+                self._handle_capture_betsize_command()
+            
+            elif cmd == 'd':
+                # 截取黑屏模板 (dark)
+                self._handle_capture_blackscreen_command()
+            
+            elif cmd == 'e':
+                # 截取錯誤提醒模板 (error)
+                self._handle_capture_error_remind_command()
+            
+            elif cmd == 'l':
+                # 截取大廳返回提示模板 (lobby)
+                self._handle_capture_lobby_return_command()
+            
             else:
                 self.logger.warning(f"[警告] 未知指令: {cmd}")
                 self.logger.info("   輸入 'h' 查看指令說明")
@@ -1933,6 +2415,193 @@ class GameControlCenter:
         
         return True
     
+    def _select_browser_for_capture(self, display_name: str) -> Optional['BrowserThread']:
+        """統一的瀏覽器選擇邏輯（參照 _prompt_capture_template 風格）。
+        
+        Args:
+            display_name: 顯示名稱（用於提示訊息）
+            
+        Returns:
+            選中的 BrowserThread，取消則返回 None
+        """
+        self.logger.info("")
+        self.logger.info("=" * 60)
+        self.logger.info(f"【截取模板】{display_name}")
+        self.logger.info("=" * 60)
+        self.logger.info("")
+        self.logger.info(f"[提示] 需要擷取 {display_name} 的參考圖片")
+        self.logger.info("   請確保目標瀏覽器的遊戲畫面已顯示目標內容")
+        self.logger.info("")
+        
+        # 取得可用的瀏覽器
+        active_browsers = self._get_active_browsers()
+        
+        if not active_browsers:
+            self.logger.error("[錯誤] 沒有可用的瀏覽器")
+            return None
+        
+        # 顯示可選擇的瀏覽器列表
+        self.logger.info("請選擇要擷取的瀏覽器:")
+        for bt in active_browsers:
+            if bt.context:
+                username = bt.context.credential.username
+                self.logger.info(f"  {bt.index}  - 瀏覽器 {bt.index} ({username})")
+        
+        self.logger.info("  q  - 取消")
+        self.logger.info("")
+        
+        try:
+            print("請輸入編號: ", end="", flush=True)
+            sys.stdout.flush()
+            user_input = input().strip().lower()
+            
+            # 檢查是否要取消
+            if user_input == 'q':
+                self.logger.info("[提示] 使用者取消擷取")
+                return None
+            
+            # 解析瀏覽器編號
+            try:
+                browser_index = int(user_input)
+                
+                # 尋找對應的瀏覽器
+                for bt in active_browsers:
+                    if bt.index == browser_index:
+                        if bt.is_browser_alive() and bt.context:
+                            return bt
+                        else:
+                            self.logger.error(f"[錯誤] 瀏覽器 {browser_index} 已關閉")
+                            return None
+                
+                self.logger.error(f"[錯誤] 無效的瀏覽器編號: {browser_index}")
+                return None
+                
+            except ValueError:
+                self.logger.error(f"[錯誤] 無效的輸入: {user_input}")
+                return None
+                
+        except (EOFError, KeyboardInterrupt):
+            self.logger.info("")
+            self.logger.info("[提示] 使用者取消擷取")
+            return None
+    
+    def _handle_capture_betsize_command(self) -> None:
+        """處理截取金額模板指令。"""
+        # 1. 先選擇瀏覽器
+        selected_browser = self._select_browser_for_capture("金額模板")
+        
+        if selected_browser is None:
+            return
+        
+        # 2. 進入金額輸入模式
+        self.logger.info("")
+        self.logger.info("[提示] 請輸入目前遊戲顯示的金額（例: 2, 10, 100）")
+        self.logger.info("   輸入 q 退出")
+        self.logger.info("")
+        
+        image_detector = ImageDetector(self.logger)
+        
+        while True:
+            try:
+                print("金額: ", end="", flush=True)
+                amount_input = input().strip().lower()
+                
+                # 輸入 q 則退出
+                if amount_input == 'q':
+                    self.logger.info("[提示] 退出金額模板工具")
+                    break
+                
+                # 空白輸入則提示
+                if not amount_input:
+                    self.logger.warning("[警告] 請輸入金額或輸入 q 退出")
+                    continue
+                
+                amount = float(amount_input)
+                
+                # 使用 Constants.GAME_BETSIZE 驗證金額
+                if amount not in Constants.GAME_BETSIZE:
+                    self.logger.warning(f"[警告] 金額 {amount} 不在標準列表中，但仍會建立模板")
+                
+                # 檢查瀏覽器是否仍然有效
+                if not selected_browser.is_browser_alive():
+                    self.logger.error("[錯誤] 選中的瀏覽器已關閉")
+                    break
+                
+                # 擷取模板
+                if image_detector.capture_betsize_template(selected_browser.context.driver, amount):
+                    self.logger.info("")
+                else:
+                    self.logger.error("[錯誤] 模板截取失敗")
+                    
+            except ValueError:
+                self.logger.error("[錯誤] 金額格式錯誤，請輸入有效數字（例如: 2, 10, 100）")
+            except (EOFError, KeyboardInterrupt):
+                self.logger.info("")
+                self.logger.info("[提示] 退出金額模板工具")
+                break
+            except Exception as e:
+                self.logger.error(f"[錯誤] 截取失敗: {e}")
+    
+    def _handle_capture_blackscreen_command(self) -> None:
+        """處理截取黑屏模板指令。"""
+        # 選擇瀏覽器
+        display_name = Constants.TEMPLATE_DISPLAY_NAMES.get(Constants.BLACK_SCREEN, Constants.BLACK_SCREEN)
+        selected_browser = self._select_browser_for_capture(display_name)
+        
+        if selected_browser is None:
+            return
+        
+        # 擷取模板
+        try:
+            image_detector = ImageDetector(self.logger)
+            
+            if image_detector.capture_blackscreen_template(selected_browser.context.driver):
+                self.logger.info("")
+            else:
+                self.logger.error("[錯誤] 模板截取失敗")
+        except Exception as e:
+            self.logger.error(f"[錯誤] 截取失敗: {e}")
+    
+    def _handle_capture_error_remind_command(self) -> None:
+        """處理截取錯誤提醒模板指令。"""
+        # 選擇瀏覽器
+        display_name = Constants.TEMPLATE_DISPLAY_NAMES.get(Constants.ERROR_REMIND, Constants.ERROR_REMIND)
+        selected_browser = self._select_browser_for_capture(display_name)
+        
+        if selected_browser is None:
+            return
+        
+        # 擷取模板
+        try:
+            image_detector = ImageDetector(self.logger)
+            
+            if image_detector.capture_error_remind_template(selected_browser.context.driver):
+                self.logger.info("")
+            else:
+                self.logger.error("[錯誤] 模板截取失敗")
+        except Exception as e:
+            self.logger.error(f"[錯誤] 截取失敗: {e}")
+    
+    def _handle_capture_lobby_return_command(self) -> None:
+        """處理截取大廳返回提示模板指令。"""
+        # 選擇瀏覽器
+        display_name = Constants.TEMPLATE_DISPLAY_NAMES.get(Constants.LOBBY_RETURN, Constants.LOBBY_RETURN)
+        selected_browser = self._select_browser_for_capture(display_name)
+        
+        if selected_browser is None:
+            return
+        
+        # 擷取模板
+        try:
+            image_detector = ImageDetector(self.logger)
+            
+            if image_detector.capture_lobby_return_template(selected_browser.context.driver):
+                self.logger.info("")
+            else:
+                self.logger.error("[錯誤] 模板截取失敗")
+        except Exception as e:
+            self.logger.error(f"[錯誤] 截取失敗: {e}")
+    
     def start(self) -> None:
         """啟動控制中心。"""
         self.running = True
@@ -1984,24 +2653,35 @@ class GameControlCenter:
             self._stop_auto_press()
 
 
-# ============================================================================
+# =============================================================================
 # 應用程式啟動器
-# ============================================================================
+# =============================================================================
 
 class AutoSlotGameAppStarter:
     """應用程式啟動器。
     
-    實現 main_flow_explanation.md 第 76~92 行描述的流程：
-    - 清除殘留 chromedriver 程序
+    統一管理應用程式的初始化與啟動流程，包含：
     - 載入配置檔案
-    - 啟動瀏覽器
     - 啟動代理中繼伺服器
     - 建立瀏覽器實例（每個瀏覽器使用專屬執行緒）
+    - 執行登入與導航流程
+    - 圖片檢測與點擊
+    - 啟動控制中心
     
-    架構特點：
-    - 每個瀏覽器都有自己的專屬執行緒 (BrowserThread)
-    - 從建立到關閉的所有操作都在同一執行緒中執行
-    - 透過 execute_task() 方法在瀏覽器執行緒中執行任務
+    Attributes:
+        browser_threads: 瀏覽器執行緒列表
+        credentials: 使用者憑證列表
+        rules: 下注規則列表
+        proxy_manager: 代理伺服器管理器
+        browser_manager: 瀏覽器管理器
+    
+    Example:
+        >>> starter = AutoSlotGameAppStarter()
+        >>> if starter.initialize():
+        ...     starter.navigate_to_login_page()
+        ...     starter.perform_login()
+        ...     starter.start_control_center()
+        >>> starter.cleanup()
     """
     
     def __init__(self, logger: Optional[logging.Logger] = None):
@@ -2526,7 +3206,7 @@ class AutoSlotGameAppStarter:
             image_detector: 圖片檢測器實例
         """
         template_name = Constants.GAME_LOGIN
-        display_name = "game_login"
+        display_name = Constants.TEMPLATE_DISPLAY_NAMES.get(template_name, template_name)
         
         # 1. 檢查模板是否存在，若不存在則引導用戶擷取
         if not image_detector.template_exists(template_name):
@@ -2587,7 +3267,7 @@ class AutoSlotGameAppStarter:
             image_detector: 圖片檢測器實例
         """
         template_name = Constants.GAME_CONFIRM
-        display_name = "game_confirm"
+        display_name = Constants.TEMPLATE_DISPLAY_NAMES.get(template_name, template_name)
         
         # 1. 檢查模板是否存在，若不存在則引導用戶擷取
         if not image_detector.template_exists(template_name):
@@ -2825,7 +3505,6 @@ class AutoSlotGameAppStarter:
         """步驟 10: 啟動遊戲控制中心
         
         建立並啟動 GameControlCenter 實例，提供互動式命令列介面。
-        對應 main_flow_explanation.md 第 105 行:
         ClickLobbyConfirm --> StartControlCenter[啟動遊戲控制中心]
         """
         self.logger.info("=" * 60)
@@ -2868,12 +3547,24 @@ class AutoSlotGameAppStarter:
         control_center.start()
 
 
-# ============================================================================
+# =============================================================================
 # 主程式入口
-# ============================================================================
+# =============================================================================
 
-def main():
-    """主程式入口點"""
+def main() -> None:
+    """主程式入口點。
+    
+    執行應用程式的完整流程：
+    1. 初始化（載入配置、啟動代理、建立瀏覽器）
+    2. 導航到登入頁面
+    3. 執行登入操作
+    4. 導航到遊戲頁面
+    5. 調整視窗排列
+    6. 執行圖片檢測流程
+    7. 啟動遊戲控制中心
+    
+    程式結束時自動清理所有資源。
+    """
     logger = LoggerFactory.get_logger()
     
     logger.info("")
