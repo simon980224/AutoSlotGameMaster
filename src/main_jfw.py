@@ -146,8 +146,8 @@ class Constants:
     # URL 配置
     # LOGIN_PAGE = "https://m.jfw-win.com/#/login?redirect=%2Fhome%2Fpage"
     LOGIN_PAGE = "https://www.sf-16888.com/#/login?redirect=%2Fhome%2Fpage"
-    # GAME_PAGE = "https://www.sf-16888.com/#/home/loding?game_code=egyptian-mythology&factory_code=ATG&state=true&name=%E6%88%B0%E7%A5%9E%E8%B3%BD%E7%89%B9"
-    GAME_PAGE = "https://www.sf-16888.com/#/home/loding?game_code=golden-seth&factory_code=ATG&state=true&name=戰神賽特2%20覺醒之力"
+    GAME_PAGE = "https://www.sf-16888.com/#/home/loding?game_code=egyptian-mythology&factory_code=ATG&state=true&name=%E6%88%B0%E7%A5%9E%E8%B3%BD%E7%89%B9"
+    # GAME_PAGE = "https://www.sf-16888.com/#/home/loding?game_code=golden-seth&factory_code=ATG&state=true&name=戰神賽特2%20覺醒之力"
     
     # 頁面元素選擇器
     USERNAME_INPUT = "//input[@placeholder='請輸入帳號']"
