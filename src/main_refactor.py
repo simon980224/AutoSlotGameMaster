@@ -118,7 +118,6 @@ class Constants:
     # URL 配置
     # -------------------------------------------------------------------------
     LOGIN_PAGE: str = "https://www.fin88.app/"
-    GAME_PAGE: str = "https://www.fin88.app/"
     
     # -------------------------------------------------------------------------
     # 登入相關 XPath
@@ -150,8 +149,8 @@ class Constants:
     # 圖片檢測配置
     # -------------------------------------------------------------------------
     IMAGE_DIR: str = "img"
-    GAME_LOGIN: str = "遊戲開始.png"
-    GAME_CONFIRM: str = "遊戲確認.png"
+    GAME_LOGIN: str = "遊戲登入.png"
+    GAME_CONFIRM: str = "遊戲開始.png"
     MATCH_THRESHOLD: float = 0.8
     DETECTION_INTERVAL: float = 1.0
     MAX_DETECTION_ATTEMPTS: int = 60
@@ -169,6 +168,7 @@ class Constants:
     # 控制中心配置
     # -------------------------------------------------------------------------
     AUTO_SKIP_CLICK_INTERVAL: int = 30
+    ERROR_MONITOR_INTERVAL: float = 5.0  # 錯誤訊息監控間隔（秒）
     
     # -------------------------------------------------------------------------
     # 金額模板配置
@@ -196,6 +196,10 @@ class Constants:
     ERROR_REMIND_CROP_MARGIN_X: int = 50
     ERROR_REMIND_CROP_MARGIN_Y: int = 10
     
+    # 錯誤訊息確認按鈕座標比例
+    ERROR_CONFIRM_BUTTON_X_RATIO: float = 0.5
+    ERROR_CONFIRM_BUTTON_Y_RATIO: float = 0.55
+    
     # -------------------------------------------------------------------------
     # 大廳返回模板配置
     # -------------------------------------------------------------------------
@@ -205,8 +209,8 @@ class Constants:
     # 模板顯示名稱對應表
     # -------------------------------------------------------------------------
     TEMPLATE_DISPLAY_NAMES: Dict[str, str] = {
+        "遊戲登入.png": "遊戲登入",
         "遊戲開始.png": "遊戲開始",
-        "遊戲確認.png": "遊戲確認",
         "黑屏提示.png": "黑屏提示",
         "錯誤訊息.png": "錯誤訊息",
         "返回大廳.png": "返回大廳",
@@ -1297,7 +1301,7 @@ class SimpleProxyServer:
             self.stop()
     
     def stop(self) -> None:
-        """停止代理伺服器"""
+        """停止代理伺服器。"""
         self.running = False
         if self.server_socket:
             with suppress(Exception):
@@ -1321,7 +1325,7 @@ class LocalProxyServerManager:
         ...     port = manager.start_proxy_server(proxy_info)
         ...     # 使用代理...
         # 自動清理所有代理伺服器
-    """""
+    """
     
     def __init__(self, logger: Optional[logging.Logger] = None):
         self.logger = logger or LoggerFactory.get_logger()
@@ -1474,7 +1478,7 @@ class ImageDetector:
     
     Example:
         >>> detector = ImageDetector()
-        >>> result = detector.detect_in_browser(driver, "遊戲開始.png")
+        >>> result = detector.detect_in_browser(driver, "遊戲登入.png")
         >>> if result:
         ...     x, y, confidence = result
     """
@@ -2048,10 +2052,16 @@ class GameControlCenter:
         # 控制狀態
         self.running = False
         self.auto_press_running = False
+        self.error_monitor_running = False
         
         # 執行緒控制
         self._stop_event = threading.Event()
+        self._error_monitor_stop_event = threading.Event()
         self.auto_press_threads: Dict[int, threading.Thread] = {}
+        self._error_monitor_thread: Optional[threading.Thread] = None
+        
+        # 圖片檢測器
+        self._image_detector = ImageDetector(self.logger)
     
     def _get_active_browsers(self) -> List['BrowserThread']:
         """取得所有活躍的瀏覽器執行緒。
@@ -2061,20 +2071,178 @@ class GameControlCenter:
         """
         return [bt for bt in self.browser_threads if bt.is_browser_alive()]
     
-    def _is_browser_alive(self, driver: WebDriver) -> bool:
-        """檢查瀏覽器是否仍然有效。
+    # -------------------------------------------------------------------------
+    # 錯誤訊息監控功能
+    # -------------------------------------------------------------------------
+    
+    def _error_monitor_loop(self) -> None:
+        """錯誤訊息監控循環。
+        
+        在背景持續運行，每隔固定時間檢測所有瀏覽器的錯誤訊息。
+        當偵測到「錯誤訊息.png」時，自動導航到 LOGIN_PAGE。
+        """
+        self.logger.info("[監控] 錯誤訊息監控已啟動")
+        
+        # 檢查模板是否存在
+        if not self._image_detector.template_exists(Constants.ERROR_REMIND):
+            self.logger.warning(f"[監控] 錯誤訊息模板 '{Constants.ERROR_REMIND}' 不存在")
+            self.logger.info("[監控] 請使用 'e' 命令截取錯誤訊息模板")
+            self.logger.info("[監控] 監控功能將持續運行，等待模板建立後自動生效")
+        
+        while not self._error_monitor_stop_event.is_set():
+            try:
+                # 取得所有活躍的瀏覽器
+                active_browsers = self._get_active_browsers()
+                
+                if not active_browsers:
+                    # 沒有活躍的瀏覽器，等待後繼續
+                    self._error_monitor_stop_event.wait(timeout=Constants.ERROR_MONITOR_INTERVAL)
+                    continue
+                
+                # 檢查模板是否存在（每次循環都檢查，以支援動態建立模板）
+                if not self._image_detector.template_exists(Constants.ERROR_REMIND):
+                    self._error_monitor_stop_event.wait(timeout=Constants.ERROR_MONITOR_INTERVAL)
+                    continue
+                
+                # 檢測每個瀏覽器
+                for bt in active_browsers:
+                    if self._error_monitor_stop_event.is_set():
+                        break
+                    
+                    if not bt.is_browser_alive() or not bt.context:
+                        continue
+                    
+                    try:
+                        # 執行圖片檢測任務
+                        def detect_error_task(context: BrowserContext) -> Optional[Tuple[int, int, float]]:
+                            return self._image_detector.detect_in_browser(
+                                context.driver, 
+                                Constants.ERROR_REMIND
+                            )
+                        
+                        result = bt.execute_task(detect_error_task)
+                        
+                        if result:
+                            username = bt.context.credential.username
+                            confidence = result[2]
+                            self.logger.warning(
+                                f"[監控] 瀏覽器 {bt.index} ({username}) 偵測到錯誤訊息 "
+                                f"(信心度: {confidence:.2f})，準備重新連線..."
+                            )
+                            
+                            # 導航到 LOGIN_PAGE
+                            self._handle_error_recovery(bt)
+                            
+                    except Exception as e:
+                        self.logger.debug(f"[監控] 瀏覽器 {bt.index} 檢測時發生錯誤: {e}")
+                
+                # 等待下一次檢測
+                self._error_monitor_stop_event.wait(timeout=Constants.ERROR_MONITOR_INTERVAL)
+                
+            except Exception as e:
+                self.logger.error(f"[監控] 錯誤訊息監控發生錯誤: {e}")
+                self._error_monitor_stop_event.wait(timeout=Constants.ERROR_MONITOR_INTERVAL)
+        
+        self.logger.info("[監控] 錯誤訊息監控已停止")
+    
+    def _handle_error_recovery(self, bt: 'BrowserThread') -> None:
+        """處理錯誤恢復流程。
+        
+        當偵測到錯誤訊息時，切換到 iframe 並點擊確認按鈕座標。
         
         Args:
-            driver: WebDriver 實例
-            
-        Returns:
-            True 表示瀏覽器有效，False 表示已關閉
+            bt: 發生錯誤的 BrowserThread 實例
         """
+        username = bt.context.credential.username if bt.context else "Unknown"
+        
         try:
-            _ = driver.current_url
-            return True
-        except Exception:
-            return False
+            def click_error_confirm_task(context: BrowserContext) -> bool:
+                """點擊錯誤訊息確認按鈕。"""
+                driver = context.driver
+                
+                # 切換到 iframe（Canvas 在 iframe 內）
+                driver.switch_to.default_content()
+                iframe = WebDriverWait(driver, 3).until(
+                    EC.presence_of_element_located((By.XPATH, Constants.GAME_IFRAME))
+                )
+                driver.switch_to.frame(iframe)
+                time.sleep(0.5)
+                
+                # 取得 Canvas 區域
+                rect = driver.execute_script(f"""
+                    const canvas = document.getElementById('{Constants.GAME_CANVAS}');
+                    if (canvas) {{
+                        const r = canvas.getBoundingClientRect();
+                        return {{x: r.left, y: r.top, w: r.width, h: r.height}};
+                    }}
+                    return null;
+                """)
+                
+                if not rect:
+                    return False
+                
+                # 使用 calculate_click_position 計算點擊座標
+                click_x, click_y = BrowserHelper.calculate_click_position(
+                    rect,
+                    Constants.ERROR_CONFIRM_BUTTON_X_RATIO,
+                    Constants.ERROR_CONFIRM_BUTTON_Y_RATIO
+                )
+                
+                time.sleep(0.5)
+                
+                # 執行 CDP 點擊
+                for event_type in ["mousePressed", "mouseReleased"]:
+                    driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
+                        "type": event_type,
+                        "x": click_x,
+                        "y": click_y,
+                        "button": "left",
+                        "clickCount": 1
+                    })
+                return True
+            
+            result = bt.execute_task(click_error_confirm_task)
+            
+            if result:
+                self.logger.info(
+                    f"[監控] 瀏覽器 {bt.index} ({username}) 已點擊錯誤訊息確認按鈕"
+                )
+            else:
+                self.logger.warning(f"[監控] 瀏覽器 {bt.index} ({username}) 無法找到 Canvas 元素")
+                
+        except Exception as e:
+            self.logger.error(f"[監控] 瀏覽器 {bt.index} ({username}) 恢復流程失敗: {e}")
+    
+    def _start_error_monitor(self) -> None:
+        """啟動錯誤訊息監控執行緒。"""
+        if self.error_monitor_running:
+            self.logger.warning("[監控] 錯誤訊息監控已在運行中")
+            return
+        
+        self._error_monitor_stop_event.clear()
+        self._error_monitor_thread = threading.Thread(
+            target=self._error_monitor_loop,
+            daemon=True,
+            name="ErrorMonitorThread"
+        )
+        self._error_monitor_thread.start()
+        self.error_monitor_running = True
+    
+    def _stop_error_monitor(self) -> None:
+        """停止錯誤訊息監控執行緒。"""
+        if not self.error_monitor_running:
+            return
+        
+        self._error_monitor_stop_event.set()
+        
+        if self._error_monitor_thread and self._error_monitor_thread.is_alive():
+            self._error_monitor_thread.join(timeout=2.0)
+            
+            if self._error_monitor_thread.is_alive():
+                self.logger.warning("[監控] 錯誤訊息監控執行緒未能正常結束")
+        
+        self._error_monitor_thread = None
+        self.error_monitor_running = False
     
     def show_help(self) -> None:
         """顯示指令說明。"""
@@ -2090,7 +2258,7 @@ class GameControlCenter:
   p                   暫停所有目前運行的自動操作
 
 【金額與遊戲】  
-  b <金額>            調整所有瀏覽器的下注金額
+  b <金額>            調整下注金額
                       範例: b 2, b 4, b 10, b 100
   
   f <編號>            購買免費遊戲
@@ -2099,8 +2267,11 @@ class GameControlCenter:
 
 【截圖工具】
   t                   截取金額模板（進入互動模式）
+
   d                   截取黑屏提示模板
+
   e                   截取錯誤訊息模板
+
   l                   截取返回大廳模板
 
 【系統指令】
@@ -2499,8 +2670,6 @@ class GameControlCenter:
         self.logger.info("   輸入 q 退出")
         self.logger.info("")
         
-        image_detector = ImageDetector(self.logger)
-        
         while True:
             try:
                 print("金額: ", end="", flush=True)
@@ -2527,8 +2696,8 @@ class GameControlCenter:
                     self.logger.error("[錯誤] 選中的瀏覽器已關閉")
                     break
                 
-                # 擷取模板
-                if image_detector.capture_betsize_template(selected_browser.context.driver, amount):
+                # 擷取模板（使用 self._image_detector）
+                if self._image_detector.capture_betsize_template(selected_browser.context.driver, amount):
                     self.logger.info("")
                 else:
                     self.logger.error("[錯誤] 模板截取失敗")
@@ -2553,9 +2722,7 @@ class GameControlCenter:
         
         # 擷取模板
         try:
-            image_detector = ImageDetector(self.logger)
-            
-            if image_detector.capture_blackscreen_template(selected_browser.context.driver):
+            if self._image_detector.capture_blackscreen_template(selected_browser.context.driver):
                 self.logger.info("")
             else:
                 self.logger.error("[錯誤] 模板截取失敗")
@@ -2573,9 +2740,7 @@ class GameControlCenter:
         
         # 擷取模板
         try:
-            image_detector = ImageDetector(self.logger)
-            
-            if image_detector.capture_error_remind_template(selected_browser.context.driver):
+            if self._image_detector.capture_error_remind_template(selected_browser.context.driver):
                 self.logger.info("")
             else:
                 self.logger.error("[錯誤] 模板截取失敗")
@@ -2593,9 +2758,7 @@ class GameControlCenter:
         
         # 擷取模板
         try:
-            image_detector = ImageDetector(self.logger)
-            
-            if image_detector.capture_lobby_return_template(selected_browser.context.driver):
+            if self._image_detector.capture_lobby_return_template(selected_browser.context.driver):
                 self.logger.info("")
             else:
                 self.logger.error("[錯誤] 模板截取失敗")
@@ -2614,6 +2777,9 @@ class GameControlCenter:
         active_count = len(self._get_active_browsers())
         self.logger.info(f"[成功] 已連接 {active_count} 個瀏覽器")
         self.logger.info("")
+        
+        # 啟動錯誤訊息監控（步驟 10 後開始監控）
+        self._start_error_monitor()
         
         # 自動顯示幫助訊息
         self.show_help()
@@ -2641,6 +2807,9 @@ class GameControlCenter:
             if self.auto_press_running:
                 self._stop_auto_press()
             
+            # 停止錯誤訊息監控
+            self._stop_error_monitor()
+            
             self.running = False
             self.logger.info("[成功] 控制中心已關閉")
     
@@ -2651,6 +2820,9 @@ class GameControlCenter:
         # 確保停止自動按鍵
         if self.auto_press_running:
             self._stop_auto_press()
+        
+        # 停止錯誤訊息監控
+        self._stop_error_monitor()
 
 
 # =============================================================================
@@ -3185,27 +3357,57 @@ class AutoSlotGameAppStarter:
         # 初始化圖片檢測器
         image_detector = ImageDetector(logger=self.logger)
         
-        # 階段 1: 處理 game_login
+        # 階段 1: 處理 遊戲登入
         self.logger.info("")
-        self.logger.info("【階段 1】檢測 game_login 畫面")
-        self._handle_game_login(image_detector)
+        self.logger.info("【階段 1】檢測 遊戲登入 畫面")
+        self._handle_image_detection_and_click(
+            image_detector=image_detector,
+            template_name=Constants.GAME_LOGIN,
+            x_ratio=Constants.GAME_LOGIN_BUTTON_X_RATIO,
+            y_ratio=Constants.GAME_LOGIN_BUTTON_Y_RATIO
+        )
         
-        # 階段 2: 處理 game_confirm
+        # 階段 2: 處理 遊戲開始
         self.logger.info("")
-        self.logger.info("【階段 2】檢測 game_confirm 畫面")
-        self._handle_game_confirm(image_detector)
+        self.logger.info("【階段 2】檢測 遊戲開始 畫面")
+        self._handle_image_detection_and_click(
+            image_detector=image_detector,
+            template_name=Constants.GAME_CONFIRM,
+            x_ratio=Constants.GAME_CONFIRM_BUTTON_X_RATIO,
+            y_ratio=Constants.GAME_CONFIRM_BUTTON_Y_RATIO,
+            post_click_wait=3.0,
+            post_click_message="[成功] 所有瀏覽器已準備就緒"
+        )
         
         self.logger.info("")
         self.logger.info("[成功] 圖片檢測與初始化完成")
         self.logger.info("")
     
-    def _handle_game_login(self, image_detector: ImageDetector) -> None:
-        """處理 game_login 的檢測與點擊。
+    def _handle_image_detection_and_click(
+        self,
+        image_detector: ImageDetector,
+        template_name: str,
+        x_ratio: float,
+        y_ratio: float,
+        post_click_wait: float = 0.0,
+        post_click_message: Optional[str] = None
+    ) -> None:
+        """通用的圖片檢測與點擊處理流程。
+        
+        此方法整合了以下步驟：
+        1. 檢查模板是否存在，若不存在則引導用戶擷取
+        2. 持續檢測直到所有瀏覽器都找到圖片
+        3. 使用 Canvas 比例計算座標並點擊
+        4. 等待圖片消失
         
         Args:
             image_detector: 圖片檢測器實例
+            template_name: 模板圖片檔名
+            x_ratio: 點擊座標 X 比例
+            y_ratio: 點擊座標 Y 比例
+            post_click_wait: 點擊後額外等待時間（秒）
+            post_click_message: 點擊後顯示的訊息（可選）
         """
-        template_name = Constants.GAME_LOGIN
         display_name = Constants.TEMPLATE_DISPLAY_NAMES.get(template_name, template_name)
         
         # 1. 檢查模板是否存在，若不存在則引導用戶擷取
@@ -3219,7 +3421,7 @@ class AutoSlotGameAppStarter:
         time.sleep(1)
         
         # 4. 使用 Canvas 比例計算座標並點擊
-        def click_game_login(context: BrowserContext) -> bool:
+        def click_canvas_button(context: BrowserContext) -> bool:
             try:
                 driver = context.driver
                 
@@ -3232,9 +3434,7 @@ class AutoSlotGameAppStarter:
                 
                 # 使用 calculate_click_position 計算點擊座標
                 click_x, click_y = BrowserHelper.calculate_click_position(
-                    rect,
-                    Constants.GAME_LOGIN_BUTTON_X_RATIO,
-                    Constants.GAME_LOGIN_BUTTON_Y_RATIO
+                    rect, x_ratio, y_ratio
                 )
                 
                 # 執行 CDP 點擊
@@ -3246,84 +3446,28 @@ class AutoSlotGameAppStarter:
                         "button": "left",
                         "clickCount": 1
                     })
-                self.logger.debug(f"[除錯] 瀏覽器 {context.index} 已點擊 {display_name} (座標: {click_x:.0f}, {click_y:.0f})")
-                return True
-                
-            except Exception as e:
-                self.logger.error(f"[錯誤] 瀏覽器 {context.index} 點擊 {display_name} 失敗: {e}")
-                return False
-        
-        results = self.execute_on_all_browsers(click_game_login)
-        success_count = sum(1 for _, result, error in results if error is None and result)
-        self.logger.info(f"[成功] {success_count}/{len(self.browser_threads)} 個瀏覽器已點擊 {display_name}")
-        
-        # 5. 等待圖片消失
-        self._wait_for_image_disappear(image_detector, template_name)
-    
-    def _handle_game_confirm(self, image_detector: ImageDetector) -> None:
-        """處理 game_confirm 的檢測與點擊。
-        
-        Args:
-            image_detector: 圖片檢測器實例
-        """
-        template_name = Constants.GAME_CONFIRM
-        display_name = Constants.TEMPLATE_DISPLAY_NAMES.get(template_name, template_name)
-        
-        # 1. 檢查模板是否存在，若不存在則引導用戶擷取
-        if not image_detector.template_exists(template_name):
-            self._prompt_capture_template(image_detector, template_name, display_name)
-        
-        # 2. 持續檢測直到所有瀏覽器都找到圖片
-        self._continuous_detect_until_found(image_detector, template_name, display_name)
-        
-        # 3. 等待一下後點擊
-        time.sleep(1)
-        
-        # 4. 使用 Canvas 比例計算座標並點擊
-        def click_game_confirm(context: BrowserContext) -> bool:
-            try:
-                driver = context.driver
-                
-                # 取得 Canvas 區域
-                rect = driver.execute_script(f"""
-                    const canvas = document.getElementById('{Constants.GAME_CANVAS}');
-                    const r = canvas.getBoundingClientRect();
-                    return {{x: r.left, y: r.top, w: r.width, h: r.height}};
-                """)
-                
-                # 使用 calculate_click_position 計算點擊座標
-                click_x, click_y = BrowserHelper.calculate_click_position(
-                    rect,
-                    Constants.GAME_CONFIRM_BUTTON_X_RATIO,
-                    Constants.GAME_CONFIRM_BUTTON_Y_RATIO
+                self.logger.debug(
+                    f"[除錯] 瀏覽器 {context.index} 已點擊 {display_name} "
+                    f"(座標: {click_x:.0f}, {click_y:.0f})"
                 )
-                
-                # 執行 CDP 點擊
-                for event_type in ["mousePressed", "mouseReleased"]:
-                    driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
-                        "type": event_type,
-                        "x": click_x,
-                        "y": click_y,
-                        "button": "left",
-                        "clickCount": 1
-                    })
-                self.logger.debug(f"[除錯] 瀏覽器 {context.index} 已點擊 {display_name} (座標: {click_x:.0f}, {click_y:.0f})")
                 return True
                 
             except Exception as e:
                 self.logger.error(f"[錯誤] 瀏覽器 {context.index} 點擊 {display_name} 失敗: {e}")
                 return False
         
-        results = self.execute_on_all_browsers(click_game_confirm)
+        results = self.execute_on_all_browsers(click_canvas_button)
         success_count = sum(1 for _, result, error in results if error is None and result)
         self.logger.info(f"[成功] {success_count}/{len(self.browser_threads)} 個瀏覽器已點擊 {display_name}")
         
         # 5. 等待圖片消失
         self._wait_for_image_disappear(image_detector, template_name)
         
-        # 6. 等待遊戲完全載入
-        time.sleep(3)
-        self.logger.info("[成功] 所有瀏覽器已準備就緒")
+        # 6. 可選的額外等待和訊息
+        if post_click_wait > 0:
+            time.sleep(post_click_wait)
+        if post_click_message:
+            self.logger.info(post_click_message)
     
     def _continuous_detect_until_found(
         self, 
