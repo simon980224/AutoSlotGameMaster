@@ -172,7 +172,7 @@ class Constants:
     INITIAL_LOGIN_BUTTON = "//button[contains(@class, 'btn') and contains(@class, 'login') and contains(@class, 'pc') and text()='登入']"
     USERNAME_INPUT = "//input[@placeholder='請輸入帳號/手機號']"
     PASSWORD_INPUT = "//input[@placeholder='請輸入您的登入密碼']"
-    LOGIN_BUTTON = "//button[contains(@class, 'custom-button') and @type='submit' and text()='登入遊戲']"
+    LOGIN_BUTTON = "//button[contains(@class, 'custom-button') and @type='submit' and contains(., '登入遊戲')]"
     POPUP_CLOSE_BUTTON = "//button[contains(@class, 'btn-close')]"
     SEARCH_BUTTON = "//button[contains(@class, 'search-btn')]"
     SEARCH_INPUT = "//input[@placeholder='按換行鍵搜索']"
