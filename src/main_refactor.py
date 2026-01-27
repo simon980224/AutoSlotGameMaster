@@ -102,6 +102,26 @@ class Constants:
     CLEANUP_PROCESS_TIMEOUT: int = 10
     
     # -------------------------------------------------------------------------
+    # 網路容錯配置
+    # -------------------------------------------------------------------------
+    # 元素等待超時（網路慢時需要更長時間）
+    ELEMENT_WAIT_TIMEOUT: int = 30
+    ELEMENT_WAIT_TIMEOUT_LONG: int = 60
+    # 操作重試次數
+    MAX_RETRY_ATTEMPTS: int = 5
+    # 重試間隔（秒）
+    RETRY_INTERVAL: float = 3.0
+    # 頁面載入等待時間（網路慢時需要更長）
+    PAGE_LOAD_WAIT: float = 5.0
+    PAGE_LOAD_WAIT_LONG: float = 10.0
+    # Loading 遮罩最大等待時間
+    LOADING_MAX_WAIT: int = 30
+    # 登入流程超時
+    LOGIN_TASK_TIMEOUT: int = 120
+    # 導航到遊戲超時
+    GAME_NAVIGATION_TIMEOUT: int = 120
+    
+    # -------------------------------------------------------------------------
     # 執行緒與瀏覽器配置
     # -------------------------------------------------------------------------
     MAX_THREAD_WORKERS: int = 10
@@ -2126,8 +2146,7 @@ class GameControlCenter:
                             username = bt.context.credential.username
                             confidence = result[2]
                             self.logger.warning(
-                                f"[監控] 瀏覽器 {bt.index} ({username}) 偵測到錯誤訊息 "
-                                f"(信心度: {confidence:.2f})，準備重新連線..."
+                                f"[監控] 瀏覽器 {bt.index} ({username}) 偵測到錯誤訊息，準備重新連線..."
                             )
                             
                             # 導航到 LOGIN_PAGE
@@ -2149,69 +2168,92 @@ class GameControlCenter:
         """處理錯誤恢復流程。
         
         當偵測到錯誤訊息時，切換到 iframe 並點擊確認按鈕座標。
+        包含網路容錯機制，失敗時自動重試。
         
         Args:
             bt: 發生錯誤的 BrowserThread 實例
         """
         username = bt.context.credential.username if bt.context else "Unknown"
         
-        try:
-            def click_error_confirm_task(context: BrowserContext) -> bool:
-                """點擊錯誤訊息確認按鈕。"""
-                driver = context.driver
+        # 最多重試 MAX_RETRY_ATTEMPTS 次
+        for attempt in range(Constants.MAX_RETRY_ATTEMPTS):
+            try:
+                if attempt > 0:
+                    self.logger.debug(f"[監控] 瀏覽器 {bt.index} 恢復流程重試第 {attempt + 1} 次...")
+                    time.sleep(Constants.RETRY_INTERVAL)
                 
-                # 切換到 iframe（Canvas 在 iframe 內）
-                driver.switch_to.default_content()
-                iframe = WebDriverWait(driver, 3).until(
-                    EC.presence_of_element_located((By.XPATH, Constants.GAME_IFRAME))
-                )
-                driver.switch_to.frame(iframe)
-                time.sleep(0.5)
+                def click_error_confirm_task(context: BrowserContext) -> bool:
+                    """點擊錯誤訊息確認按鈕。"""
+                    driver = context.driver
+                    
+                    # 切換到 iframe（Canvas 在 iframe 內），使用較長超時
+                    driver.switch_to.default_content()
+                    iframe = WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
+                        EC.presence_of_element_located((By.XPATH, Constants.GAME_IFRAME))
+                    )
+                    driver.switch_to.frame(iframe)
+                    time.sleep(1)
+                    
+                    # 取得 Canvas 區域（使用重試機制）
+                    rect = None
+                    for _ in range(3):
+                        rect = driver.execute_script(f"""
+                            const canvas = document.getElementById('{Constants.GAME_CANVAS}');
+                            if (canvas) {{
+                                const r = canvas.getBoundingClientRect();
+                                return {{x: r.left, y: r.top, w: r.width, h: r.height}};
+                            }}
+                            return null;
+                        """)
+                        if rect:
+                            break
+                        time.sleep(1)
+                    
+                    if not rect:
+                        return False
+                    
+                    # 使用 calculate_click_position 計算點擊座標
+                    click_x, click_y = BrowserHelper.calculate_click_position(
+                        rect,
+                        Constants.ERROR_CONFIRM_BUTTON_X_RATIO,
+                        Constants.ERROR_CONFIRM_BUTTON_Y_RATIO
+                    )
+                    
+                    time.sleep(0.5)
+                    
+                    # 執行 CDP 點擊
+                    for event_type in ["mousePressed", "mouseReleased"]:
+                        driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
+                            "type": event_type,
+                            "x": click_x,
+                            "y": click_y,
+                            "button": "left",
+                            "clickCount": 1
+                        })
+                    return True
                 
-                # 取得 Canvas 區域
-                rect = driver.execute_script(f"""
-                    const canvas = document.getElementById('{Constants.GAME_CANVAS}');
-                    if (canvas) {{
-                        const r = canvas.getBoundingClientRect();
-                        return {{x: r.left, y: r.top, w: r.width, h: r.height}};
-                    }}
-                    return null;
-                """)
+                result = bt.execute_task(click_error_confirm_task)
                 
-                if not rect:
-                    return False
+                if result:
+                    self.logger.info(
+                        f"[監控] 瀏覽器 {bt.index} ({username}) 已點擊錯誤訊息確認按鈕"
+                    )
+                    return  # 成功，退出重試循環
+                else:
+                    self.logger.warning(f"[監控] 瀏覽器 {bt.index} ({username}) 無法找到 Canvas 元素")
+                    
+            except Exception as e:
+                error_msg = str(e)
+                is_network_error = any(keyword in error_msg.lower() for keyword in [
+                    'timeout', 'timed out', 'connection', 'network', 'stale'
+                ])
                 
-                # 使用 calculate_click_position 計算點擊座標
-                click_x, click_y = BrowserHelper.calculate_click_position(
-                    rect,
-                    Constants.ERROR_CONFIRM_BUTTON_X_RATIO,
-                    Constants.ERROR_CONFIRM_BUTTON_Y_RATIO
-                )
-                
-                time.sleep(0.5)
-                
-                # 執行 CDP 點擊
-                for event_type in ["mousePressed", "mouseReleased"]:
-                    driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
-                        "type": event_type,
-                        "x": click_x,
-                        "y": click_y,
-                        "button": "left",
-                        "clickCount": 1
-                    })
-                return True
-            
-            result = bt.execute_task(click_error_confirm_task)
-            
-            if result:
-                self.logger.info(
-                    f"[監控] 瀏覽器 {bt.index} ({username}) 已點擊錯誤訊息確認按鈕"
-                )
-            else:
-                self.logger.warning(f"[監控] 瀏覽器 {bt.index} ({username}) 無法找到 Canvas 元素")
-                
-        except Exception as e:
-            self.logger.error(f"[監控] 瀏覽器 {bt.index} ({username}) 恢復流程失敗: {e}")
+                if attempt < Constants.MAX_RETRY_ATTEMPTS - 1 and is_network_error:
+                    self.logger.warning(f"[監控] 瀏覽器 {bt.index} ({username}) 恢復流程超時，準備重試...")
+                    continue
+                else:
+                    self.logger.error(f"[監控] 瀏覽器 {bt.index} ({username}) 恢復流程失敗: {e}")
+                    return
     
     def _start_error_monitor(self) -> None:
         """啟動錯誤訊息監控執行緒。"""
@@ -3153,23 +3195,68 @@ class AutoSlotGameAppStarter:
     # ========================================================================
     
     def navigate_to_login_page(self) -> None:
-        """步驟 5: 導航到登入頁面"""
+        """步驟 5: 導航到登入頁面
+        
+        包含網路容錯機制：
+        - 頁面載入失敗時自動重試
+        - 驗證頁面是否正確載入
+        """
         self.logger.info("=" * 60)
         self.logger.info("【步驟 5】導航到登入頁面")
         self.logger.info("=" * 60)
         
         def navigate_task(context: BrowserContext) -> bool:
-            context.driver.get(Constants.LOGIN_PAGE)
-            return True
+            driver = context.driver
+            
+            # 最多重試 MAX_RETRY_ATTEMPTS 次
+            for attempt in range(Constants.MAX_RETRY_ATTEMPTS):
+                try:
+                    if attempt > 0:
+                        self.logger.info(f"[重試] 瀏覽器 {context.index} 導航第 {attempt + 1} 次嘗試...")
+                        time.sleep(Constants.RETRY_INTERVAL)
+                    
+                    # 導航到登入頁面
+                    driver.get(Constants.LOGIN_PAGE)
+                    
+                    # 等待頁面載入（檢查是否有關鍵元素）
+                    WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT_LONG).until(
+                        lambda d: d.execute_script("return document.readyState") == "complete"
+                    )
+                    
+                    # 額外等待讓頁面元素完全渲染
+                    time.sleep(Constants.PAGE_LOAD_WAIT)
+                    
+                    return True
+                    
+                except Exception as e:
+                    error_msg = str(e)
+                    is_network_error = any(keyword in error_msg.lower() for keyword in [
+                        'timeout', 'timed out', 'connection', 'network', 'err_'
+                    ])
+                    
+                    if attempt < Constants.MAX_RETRY_ATTEMPTS - 1 and is_network_error:
+                        self.logger.warning(f"[警告] 瀏覽器 {context.index} 頁面載入超時，準備重試...")
+                        continue
+                    else:
+                        self.logger.warning(f"[警告] 瀏覽器 {context.index} 導航失敗: {e}")
+                        return False
+            
+            return False
         
-        results = self.execute_on_all_browsers(navigate_task)
+        results = self.execute_on_all_browsers(navigate_task, timeout=Constants.ELEMENT_WAIT_TIMEOUT_LONG * 2)
         success_count = sum(1 for _, result, error in results if error is None and result)
         
         self.logger.info(f"[成功] {success_count}/{len(self.browser_threads)} 個瀏覽器已導航到登入頁面")
         self.logger.info("")
     
     def perform_login(self) -> None:
-        """步驟 6: 執行登入操作"""
+        """步驟 6: 執行登入操作
+        
+        包含網路容錯機制：
+        - 延長元素等待超時時間
+        - Loading 遮罩等待時間增加
+        - 關鍵步驟失敗時自動重試
+        """
         self.logger.info("=" * 60)
         self.logger.info("【步驟 6】執行登入操作")
         self.logger.info("=" * 60)
@@ -3178,75 +3265,101 @@ class AutoSlotGameAppStarter:
             driver = context.driver
             credential = context.credential
             
-            try:
-                # 1. 等待 loading 遮罩層消失（每 1 秒檢查一次，最多等 10 秒）
-                for _ in range(10):
-                    loading_elements = driver.find_elements(By.CSS_SELECTOR, ".loading-container")
-                    if not loading_elements or not loading_elements[0].is_displayed():
-                        break
+            # 最多重試 MAX_RETRY_ATTEMPTS 次
+            for attempt in range(Constants.MAX_RETRY_ATTEMPTS):
+                try:
+                    if attempt > 0:
+                        self.logger.info(f"[重試] 瀏覽器 {context.index} 登入第 {attempt + 1} 次嘗試...")
+                        time.sleep(Constants.RETRY_INTERVAL)
+                    
+                    # 1. 等待 loading 遮罩層消失（延長等待時間以適應慢網路）
+                    for wait_count in range(Constants.LOADING_MAX_WAIT):
+                        loading_elements = driver.find_elements(By.CSS_SELECTOR, ".loading-container")
+                        if not loading_elements or not loading_elements[0].is_displayed():
+                            break
+                        if wait_count > 0 and wait_count % 10 == 0:
+                            self.logger.debug(f"[除錯] 瀏覽器 {context.index} 等待 loading 消失... ({wait_count}s)")
+                        time.sleep(1)
+                    
+                    # 2. 點擊初始登入按鈕（使用較長超時）
+                    initial_login_btn = WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
+                        EC.element_to_be_clickable((By.XPATH, Constants.INITIAL_LOGIN_BUTTON))
+                    )
+                    driver.execute_script("arguments[0].click();", initial_login_btn)
+                    time.sleep(Constants.PAGE_LOAD_WAIT)  # 等待彈窗動畫
+                    
+                    # 3. 等待登入表單顯示（使用較長超時）
+                    WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
+                        EC.visibility_of_element_located((By.CSS_SELECTOR, ".popup-wrap, .popup-account-container"))
+                    )
+                    
+                    # 4. 輸入帳號（使用較長超時）
+                    username_input = WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
+                        EC.element_to_be_clickable((By.XPATH, Constants.USERNAME_INPUT))
+                    )
+                    username_input.clear()
                     time.sleep(1)
-                
-                # 2. 點擊初始登入按鈕
-                initial_login_btn = WebDriverWait(driver, 10).until(
-                    EC.element_to_be_clickable((By.XPATH, Constants.INITIAL_LOGIN_BUTTON))
-                )
-                driver.execute_script("arguments[0].click();", initial_login_btn)
-                time.sleep(3)  # 等待彈窗動畫
-                
-                # 3. 等待登入表單顯示
-                WebDriverWait(driver, 8).until(
-                    EC.visibility_of_element_located((By.CSS_SELECTOR, ".popup-wrap, .popup-account-container"))
-                )
-                
-                # 4. 輸入帳號
-                username_input = WebDriverWait(driver, 15).until(
-                    EC.element_to_be_clickable((By.XPATH, Constants.USERNAME_INPUT))
-                )
-                username_input.clear()
-                time.sleep(1)
-                username_input.send_keys(credential.username)
-                
-                # 5. 輸入密碼
-                password_input = WebDriverWait(driver, 15).until(
-                    EC.element_to_be_clickable((By.XPATH, Constants.PASSWORD_INPUT))
-                )
-                password_input.clear()
-                time.sleep(1)
-                password_input.send_keys(credential.password)
-                
-                # 6. 點擊登入按鈕
-                login_button = WebDriverWait(driver, 15).until(
-                    EC.element_to_be_clickable((By.XPATH, Constants.LOGIN_BUTTON))
-                )
-                driver.execute_script("arguments[0].click();", login_button)        
-                time.sleep(3)  # 等待登入完成
-                
-                # 7. 關閉所有彈窗
-                driver.execute_script("""
-                    const popups = document.querySelectorAll('.popup-container, .popup-wrap, .popup-account-container');
-                    popups.forEach(popup => {
-                        popup.style.display = 'none';
-                        popup.style.visibility = 'hidden';
-                        popup.remove();
-                    });
-                    const overlays = document.querySelectorAll('[class*="overlay"], [class*="mask"]');
-                    overlays.forEach(overlay => overlay.remove());
-                """)
-                
-                return True
-                
-            except Exception as e:
-                self.logger.warning(f"[警告] 瀏覽器 {context.index} 登入失敗: {e}")
-                return False
+                    username_input.send_keys(credential.username)
+                    
+                    # 5. 輸入密碼
+                    password_input = WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
+                        EC.element_to_be_clickable((By.XPATH, Constants.PASSWORD_INPUT))
+                    )
+                    password_input.clear()
+                    time.sleep(1)
+                    password_input.send_keys(credential.password)
+                    
+                    # 6. 點擊登入按鈕
+                    login_button = WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
+                        EC.element_to_be_clickable((By.XPATH, Constants.LOGIN_BUTTON))
+                    )
+                    driver.execute_script("arguments[0].click();", login_button)
+                    time.sleep(Constants.PAGE_LOAD_WAIT)  # 等待登入完成
+                    
+                    # 7. 關閉所有彈窗
+                    driver.execute_script("""
+                        const popups = document.querySelectorAll('.popup-container, .popup-wrap, .popup-account-container');
+                        popups.forEach(popup => {
+                            popup.style.display = 'none';
+                            popup.style.visibility = 'hidden';
+                            popup.remove();
+                        });
+                        const overlays = document.querySelectorAll('[class*="overlay"], [class*="mask"]');
+                        overlays.forEach(overlay => overlay.remove());
+                    """)
+                    
+                    return True
+                    
+                except Exception as e:
+                    error_msg = str(e)
+                    # 判斷是否為網路相關錯誤（可重試）
+                    is_network_error = any(keyword in error_msg.lower() for keyword in [
+                        'timeout', 'timed out', 'connection', 'network', 'loading'
+                    ])
+                    
+                    if attempt < Constants.MAX_RETRY_ATTEMPTS - 1 and is_network_error:
+                        self.logger.warning(f"[警告] 瀏覽器 {context.index} 登入超時，準備重試...")
+                        continue
+                    else:
+                        self.logger.warning(f"[警告] 瀏覽器 {context.index} 登入失敗: {e}")
+                        return False
+            
+            return False
         
-        results = self.execute_on_all_browsers(login_task, timeout=60)
+        results = self.execute_on_all_browsers(login_task, timeout=Constants.LOGIN_TASK_TIMEOUT)
         success_count = sum(1 for _, result, error in results if error is None and result)
         
         self.logger.info(f"[成功] {success_count}/{len(self.browser_threads)} 個瀏覽器已完成登入")
         self.logger.info("")
     
     def navigate_to_game(self) -> None:
-        """步驟 7: 導航到遊戲頁面"""
+        """步驟 7: 導航到遊戲頁面
+        
+        包含網路容錯機制：
+        - 使用 WebDriverWait 取代 find_element
+        - 延長搜尋結果載入時間
+        - 關鍵步驟失敗時自動重試
+        """
         self.logger.info("=" * 60)
         self.logger.info("【步驟 7】導航到遊戲頁面")
         self.logger.info("=" * 60)
@@ -3254,57 +3367,88 @@ class AutoSlotGameAppStarter:
         def game_task(context: BrowserContext) -> bool:
             driver = context.driver
             
-            try:
-                # 1. 關閉可能出現的公告彈窗
+            # 最多重試 MAX_RETRY_ATTEMPTS 次
+            for attempt in range(Constants.MAX_RETRY_ATTEMPTS):
                 try:
-                    driver.execute_script("""
-                        // 隱藏所有彈窗容器
-                        const popups = document.querySelectorAll('.popup-container, .popup-wrap, .popup-account-container');
-                        popups.forEach(popup => {
-                            popup.style.display = 'none';
-                            popup.style.visibility = 'hidden';
-                            popup.remove();
-                        });
-                        
-                        // 移除遮罩層
-                        const overlays = document.querySelectorAll('[class*="overlay"], [class*="mask"]');
-                        overlays.forEach(overlay => overlay.remove());
-                    """)
-                    time.sleep(0.5)
-                except Exception:
-                    pass  # 沒有彈窗也沒關係
-                
-                # 2. 點擊搜尋按鈕
-                search_btn = driver.find_element(By.XPATH, Constants.SEARCH_BUTTON)
-                search_btn.click()
-                time.sleep(3)  # 等待搜尋輸入框顯示
-                
-                # 3. 輸入「戰神」
-                search_input = driver.find_element(By.XPATH, Constants.SEARCH_INPUT)
-                search_input.clear()
-                search_input.send_keys('戰神')
-                search_input.send_keys('\n')
-                time.sleep(5)  # 等待搜尋結果載入
-                
-                # 4. 點擊遊戲
-                game_element = driver.find_element(By.XPATH, Constants.GAME_XPATH)
-                game_element.click()
-                time.sleep(5)  # 等待遊戲載入
-                
-                # 5. 切換到 iframe
-                time.sleep(3)  # 等待 iframe 載入
-                iframe = WebDriverWait(driver, 10).until(
-                    EC.presence_of_element_located((By.XPATH, Constants.GAME_IFRAME))
-                )
-                driver.switch_to.frame(iframe)
-                
-                return True
-                
-            except Exception as e:
-                self.logger.warning(f"[警告] 瀏覽器 {context.index} 進入遊戲失敗: {e}")
-                return False
+                    if attempt > 0:
+                        self.logger.info(f"[重試] 瀏覽器 {context.index} 進入遊戲第 {attempt + 1} 次嘗試...")
+                        # 重試前刷新頁面
+                        driver.refresh()
+                        time.sleep(Constants.PAGE_LOAD_WAIT_LONG)
+                    
+                    # 1. 關閉可能出現的公告彈窗
+                    try:
+                        driver.execute_script("""
+                            // 隱藏所有彈窗容器
+                            const popups = document.querySelectorAll('.popup-container, .popup-wrap, .popup-account-container');
+                            popups.forEach(popup => {
+                                popup.style.display = 'none';
+                                popup.style.visibility = 'hidden';
+                                popup.remove();
+                            });
+                            
+                            // 移除遮罩層
+                            const overlays = document.querySelectorAll('[class*="overlay"], [class*="mask"]');
+                            overlays.forEach(overlay => overlay.remove());
+                        """)
+                        time.sleep(1)
+                    except Exception:
+                        pass  # 沒有彈窗也沒關係
+                    
+                    # 2. 點擊搜尋按鈕（使用 WebDriverWait 確保元素可點擊）
+                    search_btn = WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
+                        EC.element_to_be_clickable((By.XPATH, Constants.SEARCH_BUTTON))
+                    )
+                    search_btn.click()
+                    time.sleep(Constants.PAGE_LOAD_WAIT)  # 等待搜尋輸入框顯示
+                    
+                    # 3. 輸入「戰神」（使用 WebDriverWait 確保輸入框可用）
+                    search_input = WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
+                        EC.element_to_be_clickable((By.XPATH, Constants.SEARCH_INPUT))
+                    )
+                    search_input.clear()
+                    search_input.send_keys('戰神')
+                    search_input.send_keys('\n')
+                    time.sleep(Constants.PAGE_LOAD_WAIT_LONG)  # 等待搜尋結果載入（網路慢時需要更長時間）
+                    
+                    # 4. 點擊遊戲（使用 WebDriverWait 確保遊戲卡片載入完成）
+                    game_element = WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT_LONG).until(
+                        EC.element_to_be_clickable((By.XPATH, Constants.GAME_XPATH))
+                    )
+                    game_element.click()
+                    time.sleep(Constants.PAGE_LOAD_WAIT_LONG)  # 等待遊戲載入
+                    
+                    # 5. 切換到 iframe（使用較長超時等待 iframe 載入）
+                    time.sleep(Constants.PAGE_LOAD_WAIT)  # 額外等待 iframe 載入
+                    iframe = WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT_LONG).until(
+                        EC.presence_of_element_located((By.XPATH, Constants.GAME_IFRAME))
+                    )
+                    driver.switch_to.frame(iframe)
+                    
+                    # 6. 驗證是否成功進入遊戲（檢查 Canvas 是否存在）
+                    WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
+                        lambda d: d.execute_script(f"return document.getElementById('{Constants.GAME_CANVAS}') !== null;")
+                    )
+                    
+                    return True
+                    
+                except Exception as e:
+                    error_msg = str(e)
+                    # 判斷是否為網路相關錯誤（可重試）
+                    is_network_error = any(keyword in error_msg.lower() for keyword in [
+                        'timeout', 'timed out', 'connection', 'network', 'loading', 'stale'
+                    ])
+                    
+                    if attempt < Constants.MAX_RETRY_ATTEMPTS - 1 and is_network_error:
+                        self.logger.warning(f"[警告] 瀏覽器 {context.index} 進入遊戲超時，準備重試...")
+                        continue
+                    else:
+                        self.logger.warning(f"[警告] 瀏覽器 {context.index} 進入遊戲失敗: {e}")
+                        return False
+            
+            return False
         
-        results = self.execute_on_all_browsers(game_task, timeout=60)
+        results = self.execute_on_all_browsers(game_task, timeout=Constants.GAME_NAVIGATION_TIMEOUT)
         success_count = sum(1 for _, result, error in results if error is None and result)
         
         self.logger.info(f"[成功] {success_count}/{len(self.browser_threads)} 個瀏覽器已進入遊戲")
@@ -3420,41 +3564,69 @@ class AutoSlotGameAppStarter:
         # 3. 等待一下後點擊
         time.sleep(1)
         
-        # 4. 使用 Canvas 比例計算座標並點擊
+        # 4. 使用 Canvas 比例計算座標並點擊（包含重試機制）
         def click_canvas_button(context: BrowserContext) -> bool:
-            try:
-                driver = context.driver
-                
-                # 取得 Canvas 區域
-                rect = driver.execute_script(f"""
-                    const canvas = document.getElementById('{Constants.GAME_CANVAS}');
-                    const r = canvas.getBoundingClientRect();
-                    return {{x: r.left, y: r.top, w: r.width, h: r.height}};
-                """)
-                
-                # 使用 calculate_click_position 計算點擊座標
-                click_x, click_y = BrowserHelper.calculate_click_position(
-                    rect, x_ratio, y_ratio
-                )
-                
-                # 執行 CDP 點擊
-                for event_type in ["mousePressed", "mouseReleased"]:
-                    driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
-                        "type": event_type,
-                        "x": click_x,
-                        "y": click_y,
-                        "button": "left",
-                        "clickCount": 1
-                    })
-                self.logger.debug(
-                    f"[除錯] 瀏覽器 {context.index} 已點擊 {display_name} "
-                    f"(座標: {click_x:.0f}, {click_y:.0f})"
-                )
-                return True
-                
-            except Exception as e:
-                self.logger.error(f"[錯誤] 瀏覽器 {context.index} 點擊 {display_name} 失敗: {e}")
-                return False
+            # 最多重試 MAX_RETRY_ATTEMPTS 次
+            for attempt in range(Constants.MAX_RETRY_ATTEMPTS):
+                try:
+                    if attempt > 0:
+                        time.sleep(Constants.RETRY_INTERVAL)
+                    
+                    driver = context.driver
+                    
+                    # 取得 Canvas 區域（使用重試機制）
+                    rect = None
+                    for rect_attempt in range(3):
+                        rect = driver.execute_script(f"""
+                            const canvas = document.getElementById('{Constants.GAME_CANVAS}');
+                            if (canvas) {{
+                                const r = canvas.getBoundingClientRect();
+                                return {{x: r.left, y: r.top, w: r.width, h: r.height}};
+                            }}
+                            return null;
+                        """)
+                        if rect:
+                            break
+                        time.sleep(1)
+                    
+                    if not rect:
+                        if attempt < Constants.MAX_RETRY_ATTEMPTS - 1:
+                            continue
+                        return False
+                    
+                    # 使用 calculate_click_position 計算點擊座標
+                    click_x, click_y = BrowserHelper.calculate_click_position(
+                        rect, x_ratio, y_ratio
+                    )
+                    
+                    # 執行 CDP 點擊
+                    for event_type in ["mousePressed", "mouseReleased"]:
+                        driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
+                            "type": event_type,
+                            "x": click_x,
+                            "y": click_y,
+                            "button": "left",
+                            "clickCount": 1
+                        })
+                    self.logger.debug(
+                        f"[除錯] 瀏覽器 {context.index} 已點擊 {display_name} "
+                        f"(座標: {click_x:.0f}, {click_y:.0f})"
+                    )
+                    return True
+                    
+                except Exception as e:
+                    error_msg = str(e)
+                    is_network_error = any(keyword in error_msg.lower() for keyword in [
+                        'timeout', 'timed out', 'connection', 'network', 'stale'
+                    ])
+                    
+                    if attempt < Constants.MAX_RETRY_ATTEMPTS - 1 and is_network_error:
+                        continue
+                    else:
+                        self.logger.error(f"[錯誤] 瀏覽器 {context.index} 點擊 {display_name} 失敗: {e}")
+                        return False
+            
+            return False
         
         results = self.execute_on_all_browsers(click_canvas_button)
         success_count = sum(1 for _, result, error in results if error is None and result)
