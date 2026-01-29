@@ -17,6 +17,7 @@
 Python: 3.8+
 
 版本歷史:
+- v1.30.1: 修正規則執行中按 'p' 暫停後金額調整卡住的問題（adjust_betsize 方法新增 stop_event 參數支援，規則執行中的金額調整操作現在可以立即響應停止信號，避免無限等待導致程式無法正常暫停）
 - v1.30.0: 新增規則前綴控制功能（帶 '-' 前綴的規則只執行一次，如 -a:2:10；不帶前綴的規則循環執行；'a' 類型規則現在也支援循環執行；規則執行邏輯重構為先執行所有單次規則，再循環執行剩餘規則）
 - v1.29.0: 新增賽特二免費遊戲類別選擇功能（支援兩種類別：1=免費遊戲、2=覺醒之力；'f' 命令和規則執行時提示用戶選擇類別；規則格式更新為 f:金額:類別；自動偵測遊戲版本決定是否需要選擇類別）
 - v1.28.0: 優化金額調整機制（改為無限等待模式，移除最大嘗試次數限制和關閉瀏覽器邏輯；所有瀏覽器會持續嘗試調整金額直到成功，確保全部完成後才進入下一個動作；避免因暫時性識別失敗導致瀏覽器被關閉）
@@ -140,7 +141,7 @@ __all__ = [
 class Constants:
     """系統常量"""
     # 版本資訊
-    VERSION = "1.30.0"
+    VERSION = "1.30.1"
     SYSTEM_NAME = "賽特遊戲自動化系統"
     
     DEFAULT_LIB_PATH = "lib"
@@ -165,10 +166,14 @@ class Constants:
     # FIN
     LOGIN_PAGE = "https://www.fin88.app"
     GAME_PAGE = "https://www.fin88.app"
+    GAME_XPATH = "//div[contains(@class, 'game-card-container') and .//div[contains(@style, 'ATG-egyptian-mythology.png')]]" # 賽特1（第二個大卡片-戰神埃及神話）
+    # GAME_XPATH = "//div[contains(@class, 'game-card-container') and contains(@class, 'big')]" # 賽特2（第一個大卡片）勿刪除
 
     # FPD 勿刪除
     # LOGIN_PAGE = "https://richpanda.vip"
     # GAME_PAGE = "https://richpanda.vip"
+    # GAME_XPATH = "//div[contains(@class, 'game-img') and contains(@class, 'square') and contains(@style, 'ATG-egyptian-mythology.png')]"  # 賽一
+    # GAME_XPATH = "//div[contains(@class, 'game-img') and contains(@class, 'square') and contains(@style, 'af48d779dc07d08d07a526d0076db801')]"  # 賽二
 
     # 頁面元素選擇器
     INITIAL_LOGIN_BUTTON = "//button[contains(@class, 'btn') and contains(@class, 'login') and contains(@class, 'pc') and text()='登入']"
@@ -178,8 +183,6 @@ class Constants:
     POPUP_CLOSE_BUTTON = "//button[contains(@class, 'btn-close')]"
     SEARCH_BUTTON = "//button[contains(@class, 'search-btn')]"
     SEARCH_INPUT = "//input[@placeholder='按換行鍵搜索']"
-    GAME_XPATH = "//div[contains(@class, 'game-card-container') and .//div[contains(@style, 'ATG-egyptian-mythology.png')]]" # 賽特1（第二個大卡片-戰神埃及神話）
-    GAME_XPATH = "//div[contains(@class, 'game-card-container') and contains(@class, 'big')]" # 賽特2（第一個大卡片）勿刪除
     GAME_IFRAME = "//iframe[contains(@class, 'iframe-item')]"
     GAME_CANVAS = "GameCanvas"
     
@@ -2292,7 +2295,8 @@ class SyncBrowserOperator:
         browser_contexts: List[BrowserContext],
         target_amount: float,
         timeout: Optional[float] = None,
-        silent: bool = False
+        silent: bool = False,
+        stop_event: Optional[threading.Event] = None
     ) -> List[OperationResult]:
         """同步調整所有瀏覽器的下注金額（無限等待版）。
         
@@ -2303,12 +2307,13 @@ class SyncBrowserOperator:
             target_amount: 目標金額
             timeout: 已棄用，保留參數以維持向後相容
             silent: 是否靜默模式（不輸出詳細日誌）
+            stop_event: 可選的停止事件，用於控制中斷操作
             
         Returns:
             操作結果列表
         """
         def adjust_operation(context: BrowserContext, index: int, total: int) -> bool:
-            return self.adjust_betsize(context.driver, target_amount, silent=silent)
+            return self.adjust_betsize(context.driver, target_amount, silent=silent, stop_event=stop_event)
         
         results = self.execute_sync(
             browser_contexts,
@@ -2447,7 +2452,7 @@ class SyncBrowserOperator:
         # 執行點擊
         BrowserHelper.execute_cdp_click(driver, actual_x, actual_y)
     
-    def adjust_betsize(self, driver: WebDriver, target_amount: float, max_attempts: int = None, silent: bool = False) -> bool:
+    def adjust_betsize(self, driver: WebDriver, target_amount: float, max_attempts: int = None, silent: bool = False, stop_event: Optional[threading.Event] = None) -> bool:
         """調整下注金額到目標值（無限等待版）。
         
         Args:
@@ -2455,9 +2460,10 @@ class SyncBrowserOperator:
             target_amount: 目標金額
             max_attempts: 已棄用，保留參數以維持向後相容
             silent: 是否靜默模式（不輸出詳細日誌）
+            stop_event: 可選的停止事件，用於控制中斷操作
             
         Returns:
-            bool: 調整成功返回True
+            bool: 調整成功返回True，被中斷返回False
         """
         try:
             # 檢查目標金額
@@ -2470,6 +2476,12 @@ class SyncBrowserOperator:
             attempt = 0
             current_amount = None
             while current_amount is None:
+                # 檢查停止事件
+                if stop_event is not None and stop_event.is_set():
+                    if not silent:
+                        self.logger.info("[中斷] 金額調整已被停止")
+                    return False
+                
                 current_amount = self.get_current_betsize(driver, silent=silent)
                 if current_amount is None:
                     attempt += 1
@@ -2503,6 +2515,12 @@ class SyncBrowserOperator:
             # 無限循環調整，直到達到目標金額
             attempt = 0
             while True:
+                # 檢查停止事件
+                if stop_event is not None and stop_event.is_set():
+                    if not silent:
+                        self.logger.info("[中斷] 金額調整已被停止")
+                    return False
+                
                 attempt += 1
                 
                 # 先檢查當前金額
@@ -2530,9 +2548,12 @@ class SyncBrowserOperator:
         except Exception as e:
             if not silent:
                 self.logger.error(f"[錯誤] 調整過程發生錯誤: {e}")
+            # 檢查停止事件
+            if stop_event is not None and stop_event.is_set():
+                return False
             # 發生異常時等待後重試
             time.sleep(1)
-            return self.adjust_betsize(driver, target_amount, silent=silent)
+            return self.adjust_betsize(driver, target_amount, silent=silent, stop_event=stop_event)
     
     def capture_betsize_template(self, driver: WebDriver, amount: float) -> bool:
         """截取下注金額模板。
@@ -4667,8 +4688,14 @@ class GameControlCenter:
         results = self.browser_operator.adjust_betsize_all(
             self.browser_contexts,
             rule.amount,
-            silent=True
+            silent=True,
+            stop_event=self._stop_event
         )
+        
+        # 檢查是否被中斷
+        if self._stop_event.is_set():
+            self.logger.info("[中斷] 金額調整已被停止")
+            return
         
         success_count = sum(1 for r in results if r.success)
         active_browsers = len([ctx for ctx in self.browser_contexts if self._is_browser_alive(ctx.driver)])
@@ -4780,8 +4807,14 @@ class GameControlCenter:
         results = self.browser_operator.adjust_betsize_all(
             self.browser_contexts,
             rule.amount,
-            silent=True
+            silent=True,
+            stop_event=self._stop_event
         )
+        
+        # 檢查是否被中斷
+        if self._stop_event.is_set():
+            self.logger.info("[中斷] 金額調整已被停止")
+            return
         
         # 統計結果
         success_count = sum(1 for r in results if r.success)
@@ -4907,8 +4940,14 @@ class GameControlCenter:
         results = self.browser_operator.adjust_betsize_all(
             self.browser_contexts,
             rule.amount,
-            silent=True
+            silent=True,
+            stop_event=self._stop_event
         )
+        
+        # 檢查是否被中斷
+        if self._stop_event.is_set():
+            self.logger.info("[中斷] 金額調整已被停止")
+            return
         
         # 統計結果
         success_count = sum(1 for r in results if r.success)
