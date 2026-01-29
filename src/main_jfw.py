@@ -13,10 +13,11 @@
 - 完善的錯誤處理與重試機制
 
 作者: 凡臻科技
-版本: 1.20.0
+版本: 1.21.0
 Python: 3.8+
 
 版本歷史:
+- v1.21.0: 新增賽特二免費遊戲類別選擇功能（支援兩種類別：1=免費遊戲、2=覺醒之力；自動偵測遊戲版本：賽特一不需要選擇類別，賽特二需要選擇類別；'f' 命令和規則執行時根據遊戲版本自動處理；規則格式支援 f:金額 或 f:金額:類別）
 - v1.20.0: 新增預設自動啟動功能（程式啟動後 60 秒自動執行 'r 4' 命令開始 4 小時規則執行，用戶輸入任意命令可取消）
 - v1.19.0: 新增 lobby_return 檢測與自動恢復功能（點擊 game_return 後自動檢測 lobby_return，若出現則導航到 GAME_PAGE 並依序點擊 lobby_login、lobby_confirm 完成登入）
 - v1.18.0: 新增 game_return 圖片檢測功能（自動檢測並點擊返回遊戲提示，優化錯誤恢復流程為完整登入流程）
@@ -125,7 +126,7 @@ __all__ = [
 class Constants:
     """系統常量"""
     # 版本資訊
-    VERSION = "1.20.0"
+    VERSION = "1.21.0"
     SYSTEM_NAME = "金富翁遊戲自動化系統"
     
     DEFAULT_LIB_PATH = "lib"
@@ -185,9 +186,18 @@ class Constants:
     # 購買免費遊戲按鈕座標比例
     BUY_FREE_GAME_BUTTON_X_RATIO = 0.23  # 免費遊戲區域按鈕 X 座標比例
     BUY_FREE_GAME_BUTTON_Y_RATIO = 1.05  # 免費遊戲區域按鈕 Y 座標比例
-    BUY_FREE_GAME_CONFIRM_X_RATIO = 0.65  # 免費遊戲確認按鈕 X 座標比例
-    BUY_FREE_GAME_CONFIRM_Y_RATIO = 1.2   # 免費遊戲確認按鈕 Y 座標比例
+    BUY_FREE_GAME_CONFIRM_X_RATIO = 0.65  # 免費遊戲確認按鈕 X 座標比例（賽特一）
+    BUY_FREE_GAME_CONFIRM_Y_RATIO = 1.2   # 免費遊戲確認按鈕 Y 座標比例（賽特一）
+    # 賽特二免費遊戲類別座標 - 免費遊戲 (類別 1)
+    BUY_FREE_GAME_ONLY_FREEGAME_X_RATIO = 0.47   # 免費遊戲 X 座標比例
+    BUY_FREE_GAME_ONLY_FREEGAME_Y_RATIO = 1.15  # 免費遊戲 Y 座標比例
+    # 賽特二免費遊戲類別座標 - 覚醒之力 (類別 2)
+    BUY_FREE_GAME_AWAKE_POWER_X_RATIO = 0.66    # 覚醒之力 X 座標比例
+    BUY_FREE_GAME_AWAKE_POWER_Y_RATIO = 1.15    # 覚醒之力 Y 座標比例
     BUY_FREE_GAME_WAIT_SECONDS = 10  # 購買後等待秒數
+    
+    # 遊戲版本判斷關鍵字
+    GAME_SETH2_KEYWORD = "golden-seth"  # 賽特二的 URL 關鍵字
     
     # game_return 返回確認按鈕座標比例
     GAME_CONFIRM_BUTTON_X_RATIO = 0.54  # game_return 確認按鈕 X 座標比例
@@ -450,7 +460,13 @@ class BetRule:
     支援三種類型:
     - 'a' (自動旋轉): amount, spin_count
     - 's' (標準規則): amount, duration, min_seconds, max_seconds
-    - 'f' (購買免費遊戲): amount
+    - 'f' (購買免費遊戲): amount, free_game_type
+        - 賽特一：不需要指定類別，程式自動處理
+        - 賽特二：必須指定類別 (1=免費遊戲, 2=覺醒之力)
+    
+    前綴說明:
+    - 帶 '-' 前綴（如 -a:2:10）: 只執行一次
+    - 不帶前綴（如 a:2:10）: 循環執行
     """
     rule_type: str  # 'a'、's' 或 'f'
     amount: float
@@ -458,6 +474,8 @@ class BetRule:
     duration: Optional[int] = None  # 's' 類型使用（分鐘）
     min_seconds: Optional[float] = None  # 's' 類型使用
     max_seconds: Optional[float] = None  # 's' 類型使用
+    free_game_type: Optional[int] = None  # 'f' 類型使用，賽特二必須指定 (1=免費遊戲, 2=覺醒之力)
+    once_only: bool = False  # 是否只執行一次（帶 '-' 前綴的規則）
     
     def __post_init__(self) -> None:
         """驗證資料完整性"""
@@ -483,8 +501,9 @@ class BetRule:
                 raise ValueError(f"最小間隔不能大於最大間隔: {self.min_seconds} > {self.max_seconds}")
         
         elif self.rule_type == 'f':
-            # 購買免費遊戲規則驗證（只需要金額）
-            pass
+            # 購買免費遊戲規則驗證（賽特二時需要指定類別 1 或 2，賽特一可不指定）
+            if self.free_game_type is not None and self.free_game_type not in [1, 2]:
+                raise ValueError(f"免費遊戲類別必須是 1(免費遊戲) 或 2(覺醒之力): {self.free_game_type}")
         
         else:
             raise ValueError(f"無效的規則類型: {self.rule_type}，必須是 'a'、's' 或 'f'")
@@ -903,6 +922,10 @@ class ConfigReader:
         - s:金額:時間(分鐘):最小(秒數):最大(秒數) (標準規則)
         - f:金額 (購買免費遊戲)
         
+        前綴說明:
+        - 帶 '-' 前綴（如 -a:2:10）: 只執行一次
+        - 不帶前綴（如 a:2:10）: 循環執行
+        
         Args:
             filename: 檔案名稱
             
@@ -923,7 +946,10 @@ class ConfigReader:
                     self.logger.warning(f"第 {line_number} 行格式不完整 已跳過 {line}")
                     continue
                 
-                rule_type = parts[0].strip().lower()
+                # 檢查是否帶有 '-' 前綴（只執行一次）
+                rule_type_raw = parts[0].strip().lower()
+                once_only = rule_type_raw.startswith('-')
+                rule_type = rule_type_raw.lstrip('-')
                 
                 if rule_type == 'a':
                     # 自動旋轉規則: a:金額:次數
@@ -937,7 +963,8 @@ class ConfigReader:
                     rules.append(BetRule(
                         rule_type='a',
                         amount=amount,
-                        spin_count=spin_count
+                        spin_count=spin_count,
+                        once_only=once_only
                     ))
                     
                 elif rule_type == 's':
@@ -956,16 +983,25 @@ class ConfigReader:
                         amount=amount,
                         duration=duration,
                         min_seconds=min_seconds,
-                        max_seconds=max_seconds
+                        max_seconds=max_seconds,
+                        once_only=once_only
                     ))
                     
                 elif rule_type == 'f':
-                    # 購買免費遊戲規則: f:金額
+                    # 購買免費遊戲規則: f:金額 或 f:金額:類別
+                    # 賽特一: f:金額 (不需類別)
+                    # 賽特二: f:金額:類別 (1=免費遊戲, 2=覺醒之力)
                     amount = float(parts[1].strip())
+                    free_game_type = None  # 賽特一不需要類別
+                    
+                    if len(parts) >= 3:
+                        free_game_type = int(parts[2].strip())
                     
                     rules.append(BetRule(
                         rule_type='f',
-                        amount=amount
+                        amount=amount,
+                        free_game_type=free_game_type,
+                        once_only=once_only
                     ))
                     
                 else:
@@ -1825,13 +1861,18 @@ class SyncBrowserOperator:
     def buy_free_game_single(
         self,
         context: BrowserContext,
-        canvas_rect: Dict[str, float]
+        canvas_rect: Dict[str, float],
+        free_game_type: Optional[int] = None
     ) -> bool:
         """在單個瀏覽器中購買免費遊戲。
         
         Args:
             context: 瀏覽器上下文
             canvas_rect: Canvas 區域資訊 {"x", "y", "w", "h"}
+            free_game_type: 免費遊戲類別
+                - None: 賽特一（使用預設座標）
+                - 1: 賽特二 - 免費遊戲
+                - 2: 賽特二 - 覺醒之力
             
         Returns:
             是否成功
@@ -1852,13 +1893,30 @@ class SyncBrowserOperator:
             time.sleep(Constants.FREE_GAME_CLICK_WAIT)
             
             # === 第二次點擊（確認按鈕） ===
+            # 根據類別選擇座標
+            if free_game_type == 1:
+                # 賽特二 - 免費遊戲
+                confirm_x_ratio = Constants.BUY_FREE_GAME_ONLY_FREEGAME_X_RATIO
+                confirm_y_ratio = Constants.BUY_FREE_GAME_ONLY_FREEGAME_Y_RATIO
+                type_name = "免費遊戲"
+            elif free_game_type == 2:
+                # 賽特二 - 覺醒之力
+                confirm_x_ratio = Constants.BUY_FREE_GAME_AWAKE_POWER_X_RATIO
+                confirm_y_ratio = Constants.BUY_FREE_GAME_AWAKE_POWER_Y_RATIO
+                type_name = "覺醒之力"
+            else:
+                # 賽特一
+                confirm_x_ratio = Constants.BUY_FREE_GAME_CONFIRM_X_RATIO
+                confirm_y_ratio = Constants.BUY_FREE_GAME_CONFIRM_Y_RATIO
+                type_name = "賽特一"
+            
             confirm_x, confirm_y = BrowserHelper.calculate_click_position(
                 canvas_rect,
-                Constants.BUY_FREE_GAME_CONFIRM_X_RATIO,
-                Constants.BUY_FREE_GAME_CONFIRM_Y_RATIO
+                confirm_x_ratio,
+                confirm_y_ratio
             )
             
-            self.logger.info(f"[{username}] 點擊確認按鈕 ({confirm_x:.1f}, {confirm_y:.1f})...")
+            self.logger.info(f"[{username}] 點擊確認按鈕 [{type_name}] ({confirm_x:.1f}, {confirm_y:.1f})...")
             BrowserHelper.execute_cdp_click(driver, confirm_x, confirm_y)
             
             # === 購買完成後等待並自動按空白鍵 ===
@@ -1879,6 +1937,7 @@ class SyncBrowserOperator:
         self,
         browser_contexts: List[BrowserContext],
         canvas_rect: Dict[str, float],
+        free_game_type: Optional[int] = None,
         timeout: Optional[float] = None
     ) -> List[OperationResult]:
         """同步在所有瀏覽器中購買免費遊戲。
@@ -1886,6 +1945,10 @@ class SyncBrowserOperator:
         Args:
             browser_contexts: 瀏覽器上下文列表
             canvas_rect: Canvas 區域資訊
+            free_game_type: 免費遊戲類別
+                - None: 賽特一（使用預設座標）
+                - 1: 賽特二 - 免費遊戲
+                - 2: 賽特二 - 覺醒之力
             timeout: 超時時間
             
         Returns:
@@ -1908,10 +1971,24 @@ class SyncBrowserOperator:
                 time.sleep(Constants.FREE_GAME_CLICK_WAIT)
                 
                 # === 第二次點擊（確認按鈕） ===
+                # 根據類別選擇座標
+                if free_game_type == 1:
+                    # 賽特二 - 免費遊戲
+                    confirm_x_ratio = Constants.BUY_FREE_GAME_ONLY_FREEGAME_X_RATIO
+                    confirm_y_ratio = Constants.BUY_FREE_GAME_ONLY_FREEGAME_Y_RATIO
+                elif free_game_type == 2:
+                    # 賽特二 - 覺醒之力
+                    confirm_x_ratio = Constants.BUY_FREE_GAME_AWAKE_POWER_X_RATIO
+                    confirm_y_ratio = Constants.BUY_FREE_GAME_AWAKE_POWER_Y_RATIO
+                else:
+                    # 賽特一
+                    confirm_x_ratio = Constants.BUY_FREE_GAME_CONFIRM_X_RATIO
+                    confirm_y_ratio = Constants.BUY_FREE_GAME_CONFIRM_Y_RATIO
+                
                 confirm_x, confirm_y = BrowserHelper.calculate_click_position(
                     canvas_rect,
-                    Constants.BUY_FREE_GAME_CONFIRM_X_RATIO,
-                    Constants.BUY_FREE_GAME_CONFIRM_Y_RATIO
+                    confirm_x_ratio,
+                    confirm_y_ratio
                 )
                 
                 BrowserHelper.execute_cdp_click(driver, confirm_x, confirm_y)
@@ -2003,7 +2080,8 @@ class SyncBrowserOperator:
         browser_contexts: List[BrowserContext],
         target_amount: float,
         timeout: Optional[float] = None,
-        silent: bool = False
+        silent: bool = False,
+        stop_event: Optional[threading.Event] = None
     ) -> List[OperationResult]:
         """同步調整所有瀏覽器的下注金額（無限等待版）。
         
@@ -2014,12 +2092,13 @@ class SyncBrowserOperator:
             target_amount: 目標金額
             timeout: 已棄用，保留參數以維持向後相容
             silent: 是否靜默模式（不輸出詳細日誌）
+            stop_event: 可選的停止事件，用於控制中斷操作
             
         Returns:
             操作結果列表
         """
         def adjust_operation(context: BrowserContext, index: int, total: int) -> bool:
-            return self.adjust_betsize(context.driver, target_amount, silent=silent)
+            return self.adjust_betsize(context.driver, target_amount, silent=silent, stop_event=stop_event)
         
         results = self.execute_sync(
             browser_contexts,
@@ -2160,7 +2239,7 @@ class SyncBrowserOperator:
         # 執行點擊
         BrowserHelper.execute_cdp_click(driver, actual_x, actual_y)
     
-    def adjust_betsize(self, driver: WebDriver, target_amount: float, max_attempts: int = None, silent: bool = False) -> bool:
+    def adjust_betsize(self, driver: WebDriver, target_amount: float, max_attempts: int = None, silent: bool = False, stop_event: Optional[threading.Event] = None) -> bool:
         """調整下注金額到目標值（無限等待版）。
         
         Args:
@@ -2168,9 +2247,10 @@ class SyncBrowserOperator:
             target_amount: 目標金額
             max_attempts: 已棄用，保留參數以維持向後相容
             silent: 是否靜默模式（不輸出詳細日誌）
+            stop_event: 可選的停止事件，用於控制中斷操作
             
         Returns:
-            bool: 調整成功返回True
+            bool: 調整成功返回True，被中斷返回False
         """
         try:
             # 檢查目標金額
@@ -2183,6 +2263,12 @@ class SyncBrowserOperator:
             attempt = 0
             current_amount = None
             while current_amount is None:
+                # 檢查停止事件
+                if stop_event is not None and stop_event.is_set():
+                    if not silent:
+                        self.logger.info("[中斷] 金額調整已被停止")
+                    return False
+                
                 current_amount = self.get_current_betsize(driver, silent=silent)
                 if current_amount is None:
                     attempt += 1
@@ -2215,6 +2301,12 @@ class SyncBrowserOperator:
             
             # 開始調整
             for i in range(estimated_steps):
+                # 檢查停止事件
+                if stop_event is not None and stop_event.is_set():
+                    if not silent:
+                        self.logger.info("[中斷] 金額調整已被停止")
+                    return False
+                
                 self._click_betsize_button(driver, click_x, click_y)
                 time.sleep(Constants.BETSIZE_ADJUST_STEP_WAIT)
             
@@ -2223,6 +2315,12 @@ class SyncBrowserOperator:
             # 無限循環驗證並微調，直到達到目標金額
             attempt = 0
             while True:
+                # 檢查停止事件
+                if stop_event is not None and stop_event.is_set():
+                    if not silent:
+                        self.logger.info("[中斷] 金額調整已被停止")
+                    return False
+                
                 attempt += 1
                 current_amount = self.get_current_betsize(driver, silent=silent)
                 
@@ -2249,9 +2347,12 @@ class SyncBrowserOperator:
         except Exception as e:
             if not silent:
                 self.logger.error(f"[錯誤] 調整過程發生錯誤: {e}")
+            # 檢查停止事件
+            if stop_event is not None and stop_event.is_set():
+                return False
             # 發生異常時等待後重試
             time.sleep(1)
-            return self.adjust_betsize(driver, target_amount, silent=silent)
+            return self.adjust_betsize(driver, target_amount, silent=silent, stop_event=stop_event)
     
     def capture_betsize_template(self, driver: WebDriver, amount: float) -> bool:
         """截取下注金額模板。
@@ -4163,8 +4264,12 @@ class GameControlCenter:
         """規則執行主循環（在獨立執行緒中運行）。
         
         執行邏輯:
-        1. 如果有 'a' 規則，先執行一次
-        2. 然後循環執行所有 's' 和 'f' 規則
+        1. 先執行所有帶 '-' 前綴的規則（once_only=True）
+        2. 然後循環執行所有不帶 '-' 前綴的規則（once_only=False）
+        
+        前綴說明:
+        - 帶 '-' 前綴（如 -a:2:10）: 只執行一次
+        - 不帶前綴（如 a:2:10）: 循環執行
         """
         if not self.bet_rules:
             self.logger.error("沒有可執行的規則")
@@ -4172,35 +4277,41 @@ class GameControlCenter:
         
         self.logger.info(f"開始執行規則，共 {len(self.bet_rules)} 條")
         
-        # 分離 'a' 規則和其他規則（'s' 和 'f'）
-        a_rules = [r for r in self.bet_rules if r.rule_type == 'a']
-        loop_rules = [r for r in self.bet_rules if r.rule_type in ['s', 'f']]
+        # 分離只執行一次的規則和需要循環的規則
+        once_rules = [r for r in self.bet_rules if r.once_only]
+        loop_rules = [r for r in self.bet_rules if not r.once_only]
         
-        # === 第一階段: 執行所有 'a' 規則（只執行一次）===
-        if a_rules:
-            self.logger.info(f"[階段 1] 執行 {len(a_rules)} 條自動旋轉規則...")
+        # === 第一階段: 執行所有帶 '-' 前綴的規則（只執行一次）===
+        if once_rules:
+            self.logger.info(f"[階段 1] 執行 {len(once_rules)} 條單次規則（帶 '-' 前綴）...")
             
-            for rule_index, a_rule in enumerate(a_rules):
+            for rule_index, rule in enumerate(once_rules):
                 if self._stop_event.is_set():
                     self.logger.info("收到停止信號")
                     break
                 
                 try:
-                    self._execute_auto_spin_rule(a_rule, rule_index + 1, len(a_rules))
+                    # 根據規則類型執行對應的操作
+                    if rule.rule_type == 'a':
+                        self._execute_auto_spin_rule(rule, rule_index + 1, len(once_rules))
+                    elif rule.rule_type == 's':
+                        self._execute_standard_rule(rule, rule_index + 1, len(once_rules))
+                    elif rule.rule_type == 'f':
+                        self._execute_free_game_rule(rule, rule_index + 1, len(once_rules))
                 except Exception as e:
-                    self.logger.error(f"執行自動旋轉規則時發生錯誤: {e}")
+                    self.logger.error(f"執行單次規則時發生錯誤: {e}")
                     continue
                 
                 # 規則之間短暫暫停
-                if rule_index < len(a_rules) - 1:
+                if rule_index < len(once_rules) - 1:
                     time.sleep(Constants.RULE_SWITCH_WAIT)
             
-            self.logger.info("[階段 1 完成] 所有自動旋轉規則已執行")
+            self.logger.info("[階段 1 完成] 所有單次規則已執行")
             time.sleep(Constants.RULE_SWITCH_WAIT)
         
-        # === 第二階段: 循環執行 's' 和 'f' 規則 ===
+        # === 第二階段: 循環執行不帶 '-' 前綴的規則 ===
         if not loop_rules:
-            self.logger.warning("沒有循環規則 ('s' 或 'f')，規則執行結束")
+            self.logger.warning("沒有循環規則（不帶 '-' 前綴），規則執行結束")
             self.rule_running = False
             return
         
@@ -4212,7 +4323,9 @@ class GameControlCenter:
                 current_rule = loop_rules[rule_index]
                 
                 # 根據規則類型執行對應的操作
-                if current_rule.rule_type == 's':
+                if current_rule.rule_type == 'a':
+                    self._execute_auto_spin_rule(current_rule, rule_index + 1, len(loop_rules))
+                elif current_rule.rule_type == 's':
                     self._execute_standard_rule(current_rule, rule_index + 1, len(loop_rules))
                 elif current_rule.rule_type == 'f':
                     self._execute_free_game_rule(current_rule, rule_index + 1, len(loop_rules))
@@ -4288,8 +4401,14 @@ class GameControlCenter:
         results = self.browser_operator.adjust_betsize_all(
             self.browser_contexts,
             rule.amount,
-            silent=True
+            silent=True,
+            stop_event=self._stop_event
         )
+        
+        # 檢查是否被中斷
+        if self._stop_event.is_set():
+            self.logger.info("[中斷] 金額調整已被停止")
+            return
         
         success_count = sum(1 for r in results if r.success)
         active_browsers = len([ctx for ctx in self.browser_contexts if self._is_browser_alive(ctx.driver)])
@@ -4401,8 +4520,14 @@ class GameControlCenter:
         results = self.browser_operator.adjust_betsize_all(
             self.browser_contexts,
             rule.amount,
-            silent=True
+            silent=True,
+            stop_event=self._stop_event
         )
+        
+        # 檢查是否被中斷
+        if self._stop_event.is_set():
+            self.logger.info("[中斷] 金額調整已被停止")
+            return
         
         # 統計結果
         success_count = sum(1 for r in results if r.success)
@@ -4507,15 +4632,29 @@ class GameControlCenter:
             # 清除停止事件，讓主循環可以繼續執行
             self._stop_event.clear()
         
+        # 判斷遊戲版本
+        is_seth2 = Constants.GAME_SETH2_KEYWORD in Constants.GAME_PAGE
+        
         # 顯示規則資訊
-        self.logger.info("")
-        self.logger.info("=" * 60)
-        self.logger.info(
-            f"【免費遊戲規則 {rule_num}/{total_rules}】"
-            f"金額 {rule.amount}"
-        )
-        self.logger.info("=" * 60)
-        self.logger.info("")
+        if is_seth2:
+            type_name = "免費遊戲" if rule.free_game_type == 1 else "覺醒之力"
+            self.logger.info("")
+            self.logger.info("=" * 60)
+            self.logger.info(
+                f"【免費遊戲規則 {rule_num}/{total_rules}】"
+                f"金額 {rule.amount} | 類別: {type_name}"
+            )
+            self.logger.info("=" * 60)
+            self.logger.info("")
+        else:
+            self.logger.info("")
+            self.logger.info("=" * 60)
+            self.logger.info(
+                f"【免費遊戲規則 {rule_num}/{total_rules}】"
+                f"金額 {rule.amount}"
+            )
+            self.logger.info("=" * 60)
+            self.logger.info("")
         
         # 在金額調整前檢查停止標記
         if self._stop_event.is_set():
@@ -4527,8 +4666,14 @@ class GameControlCenter:
         results = self.browser_operator.adjust_betsize_all(
             self.browser_contexts,
             rule.amount,
-            silent=True
+            silent=True,
+            stop_event=self._stop_event
         )
+        
+        # 檢查是否被中斷
+        if self._stop_event.is_set():
+            self.logger.info("[中斷] 金額調整已被停止")
+            return
         
         # 統計結果
         success_count = sum(1 for r in results if r.success)
@@ -4559,9 +4704,18 @@ class GameControlCenter:
         
         # 使用 buy_free_game_all 方法購買免費遊戲
         try:
+            # 根據遊戲版本決定 free_game_type
+            if is_seth2:
+                # 賽特二：使用規則中指定的類別（預設為 1）
+                actual_free_game_type = rule.free_game_type if rule.free_game_type in [1, 2] else 1
+            else:
+                # 賽特一：不需要類別
+                actual_free_game_type = None
+            
             results = self.browser_operator.buy_free_game_all(
                 self.browser_contexts,
-                self.browser_operator.last_canvas_rect
+                self.browser_operator.last_canvas_rect,
+                actual_free_game_type
             )
             
             success_count = sum(1 for r in results if r.success)
@@ -5045,10 +5199,44 @@ class GameControlCenter:
                         self.logger.error("沒有有效的瀏覽器可執行操作")
                         return True
                     
+                    # 判斷遊戲版本，決定是否需要選擇類別
+                    is_seth2 = Constants.GAME_SETH2_KEYWORD in Constants.GAME_PAGE
+                    
+                    if is_seth2:
+                        # 賽特二：需要選擇類別
+                        self.logger.info("請選擇免費遊戲類別:")
+                        self.logger.info("  1 - 免費遊戲")
+                        self.logger.info("  2 - 覺醒之力")
+                        
+                        try:
+                            print("請輸入類別 (1 或 2) > ", end="", flush=True)
+                            type_input = input().strip()
+                            
+                            if type_input == '1':
+                                free_game_type = 1
+                                type_name = "免費遊戲"
+                            elif type_input == '2':
+                                free_game_type = 2
+                                type_name = "覺醒之力"
+                            else:
+                                self.logger.error(f"無效的類別: {type_input}，請輸入 1 或 2")
+                                return True
+                            
+                            self.logger.info(f"已選擇: {type_name}")
+                            
+                        except (EOFError, KeyboardInterrupt):
+                            self.logger.info("已取消操作")
+                            return True
+                    else:
+                        # 賽特一：不需要選擇類別
+                        free_game_type = None
+                        self.logger.info("遊戲版本: 賽特一")
+                    
                     # 使用同步方式執行購買
                     results = self.browser_operator.buy_free_game_all(
                         target_contexts,
-                        self.browser_operator.last_canvas_rect
+                        self.browser_operator.last_canvas_rect,
+                        free_game_type
                     )
                     
                     # 統計結果
