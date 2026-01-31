@@ -13,10 +13,11 @@
 - 完善的錯誤處理與重試機制
 
 作者: 凡臻科技
-版本: 1.29.0
+版本: 1.31.0
 Python: 3.8+
 
 版本歷史:
+- v1.31.0: 新增 richpanda 網站廣告彈窗處理功能（自動檢測 ads-container 和 close-btn-container 元素，登入後自動點擊關閉按鈕；更新 richpanda 網站的 GAME_XPATH 選擇器配置）
 - v1.30.1: 修正規則執行中按 'p' 暫停後金額調整卡住的問題（adjust_betsize 方法新增 stop_event 參數支援，規則執行中的金額調整操作現在可以立即響應停止信號，避免無限等待導致程式無法正常暫停）
 - v1.30.0: 新增規則前綴控制功能（帶 '-' 前綴的規則只執行一次，如 -a:2:10；不帶前綴的規則循環執行；'a' 類型規則現在也支援循環執行；規則執行邏輯重構為先執行所有單次規則，再循環執行剩餘規則）
 - v1.29.0: 新增賽特二免費遊戲類別選擇功能（支援兩種類別：1=免費遊戲、2=覺醒之力；'f' 命令和規則執行時提示用戶選擇類別；規則格式更新為 f:金額:類別；自動偵測遊戲版本決定是否需要選擇類別）
@@ -172,8 +173,8 @@ class Constants:
     # FPD 勿刪除
     # LOGIN_PAGE = "https://richpanda.vip"
     # GAME_PAGE = "https://richpanda.vip"
-    # GAME_XPATH = "//div[contains(@class, 'game-img') and contains(@class, 'square') and contains(@style, 'ATG-egyptian-mythology.png')]"  # 賽一
-    # GAME_XPATH = "//div[contains(@class, 'game-img') and contains(@class, 'square') and contains(@style, 'af48d779dc07d08d07a526d0076db801')]"  # 賽二
+    # GAME_XPATH = "//div[contains(@class, 'game-card-container') and .//div[contains(@class, 'game-img') and contains(@style, 'ATG-egyptian-mythology.png')]]"  # 賽特1
+    # GAME_XPATH = "//div[contains(@class, 'game-card-container') and contains(@class, 'big')]"  # 賽特2 勿刪除
 
     # 頁面元素選擇器
     INITIAL_LOGIN_BUTTON = "//button[contains(@class, 'btn') and contains(@class, 'login') and contains(@class, 'pc') and text()='登入']"
@@ -2053,6 +2054,27 @@ class SyncBrowserOperator:
                 self.logger.debug("已隱藏所有廣告彈窗")
             except Exception as e:
                 self.logger.debug(f"隱藏廣告彈窗時發生錯誤: {e}")
+            
+            # 針對 richpanda 網站的廣告彈窗處理
+            if "richpanda" in Constants.LOGIN_PAGE:
+                try:
+                    # 檢查廣告容器和關閉按鈕是否都存在
+                    ads_container = driver.find_elements(By.CSS_SELECTOR, "div.ads-container.pc")
+                    close_button = driver.find_elements(By.CSS_SELECTOR, "button.close-btn-container.btn-close")
+                    
+                    if ads_container and close_button:
+                        # 廣告和關閉按鈕都存在，點擊關閉按鈕
+                        try:
+                            driver.execute_script("arguments[0].click();", close_button[0])
+                            self.logger.info(f"[{credential.username}] ✓ 已關閉 richpanda 廣告彈窗")
+                        except Exception:
+                            close_button[0].click()
+                            self.logger.info(f"[{credential.username}] ✓ 已關閉 richpanda 廣告彈窗")
+                        time.sleep(0.5)  # 等待關閉動畫
+                    else:
+                        self.logger.debug(f"[{credential.username}] 未檢測到 richpanda 廣告彈窗")
+                except Exception as e:
+                    self.logger.debug(f"[{credential.username}] 處理 richpanda 廣告彈窗時發生錯誤: {e}")
             
             return True
         
