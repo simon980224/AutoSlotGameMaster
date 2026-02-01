@@ -1,11 +1,14 @@
-"""
-賽特遊戲自動化系統 - 重構版。
+"""賽特遊戲自動化系統 - 獨立重構版。
 
-此模組提供完整的遊戲自動化功能，包含：
-- 多瀏覽器並行管理
-- 圖片識別與自動操作
-- 代理伺服器中繼
-- 互動式控制中心
+此模組提供完整的遊戲自動化功能，採用模組化架構設計，
+支援多視窗同步操作、智慧圖片識別、網路代理中繼等核心功能。
+
+Features:
+    - 多視窗同步管理：支援同時操控多個遊戲視窗
+    - 智慧圖片識別：基於 OpenCV 的畫面自動辨識
+    - 網路代理支援：可設定獨立的網路出口
+    - 互動式控制面板：便捷的命令列操作介面
+    - 異常監控與自動恢復：掉線偵測、錯誤自動處理
 
 Author:
     凡臻科技
@@ -14,10 +17,18 @@ Version:
     2.0.0
 
 Requirements:
-    Python 3.8+, Selenium 4.25+, OpenCV
+    - Python 3.8+
+    - Selenium 4.25+
+    - OpenCV (opencv-python)
+    - Pillow
+    - webdriver-manager
+
+Usage:
+    直接執行此檔案即可啟動系統：
+    $ python main_refactor.py
 
 Note:
-    此版本完全獨立運行，不依賴 main.py
+    此版本完全獨立運行，不依賴其他模組。
 """
 
 # =============================================================================
@@ -36,7 +47,7 @@ from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Protocol, Set, Tuple, Union
 
 # =============================================================================
 # 第三方庫 - 圖片處理
@@ -64,9 +75,19 @@ from webdriver_manager.chrome import ChromeDriverManager
 
 class Constants:
     """系統常量配置類別。
-    
+
     集中管理所有魔法數字和配置值，避免硬編碼。
     所有常量按功能分組，並提供詳細的註解說明。
+
+    Categories:
+        - 版本資訊：系統版本與名稱
+        - 配置檔案：檔案路徑與名稱
+        - 代理伺服器：Proxy 相關設定
+        - 超時配置：各類操作超時時間
+        - 網路容錯：重試次數與間隔
+        - 視窗配置：瀏覽器視窗尺寸與排列
+        - 圖片檢測：模板匹配相關參數
+        - 遊戲金額：可用下注金額列表
     """
     
     # -------------------------------------------------------------------------
@@ -185,10 +206,11 @@ class Constants:
     GAME_CONFIRM_BUTTON_Y_RATIO: float = 0.85
     
     # -------------------------------------------------------------------------
-    # 控制中心配置
+    # 控制面板配置
     # -------------------------------------------------------------------------
     AUTO_SKIP_CLICK_INTERVAL: int = 30
-    ERROR_MONITOR_INTERVAL: float = 5.0  # 錯誤訊息監控間隔（秒）
+    ERROR_MONITOR_INTERVAL: float = 3.0  # 錯誤訊息監控間隔（秒）
+    BLACKSCREEN_CONSECUTIVE_THRESHOLD: int = 3  # 黑屏連續檢測次數閾值（達到後導航到登入頁）
     
     # -------------------------------------------------------------------------
     # 金額模板配置
@@ -254,37 +276,55 @@ class Constants:
 # =============================================================================
 
 class AutoSlotGameError(Exception):
-    """基礎例外類別。
-    
-    所有自定義例外皆繼承自此類別。
+    """自動化遊戲系統基礎例外類別。
+
+    所有自定義例外皆繼承自此類別，便於統一捕獲和處理。
+
+    Example:
+        >>> try:
+        ...     raise AutoSlotGameError("發生錯誤")
+        ... except AutoSlotGameError as e:
+        ...     print(f"捕獲到錯誤: {e}")
     """
 
 
 class ConfigurationError(AutoSlotGameError):
     """配置相關錯誤。
-    
+
     當配置檔案不存在、格式錯誤或讀取失敗時拋出。
+
+    Example:
+        >>> raise ConfigurationError("找不到配置檔案: config.txt")
     """
 
 
 class BrowserCreationError(AutoSlotGameError):
     """瀏覽器建立錯誤。
-    
+
     當 WebDriver 初始化失敗或瀏覽器無法啟動時拋出。
+
+    Example:
+        >>> raise BrowserCreationError("ChromeDriver 版本不相容")
     """
 
 
 class ProxyServerError(AutoSlotGameError):
     """代理伺服器錯誤。
-    
+
     當代理伺服器啟動失敗或連線異常時拋出。
+
+    Example:
+        >>> raise ProxyServerError("無法綁定到埠號 9000")
     """
 
 
 class ImageDetectionError(AutoSlotGameError):
     """圖片檢測錯誤。
-    
+
     當截圖失敗、模板不存在或圖片比對異常時拋出。
+
+    Example:
+        >>> raise ImageDetectionError("模板圖片不存在: login.png")
     """
 
 
@@ -295,19 +335,26 @@ class ImageDetectionError(AutoSlotGameError):
 @dataclass(frozen=True)
 class UserCredential:
     """使用者憑證資料結構（不可變）。
-    
+
     Attributes:
-        username: 使用者帳號
-        password: 登入密碼
-        proxy: 代理出口 IP，格式為 "host:port:username:password"
-    
+        username: 使用者帳號。
+        password: 登入密碼。
+        proxy: 代理連接字串，格式為 ``host:port:username:password``。
+
     Raises:
-        ValueError: 當帳號或密碼為空時
+        ValueError: 當帳號或密碼為空時。
+
+    Example:
+        >>> cred = UserCredential(
+        ...     username="test_user",
+        ...     password="test_pass",
+        ...     proxy="proxy.example.com:8080:user:pass"
+        ... )
     """
     username: str
     password: str
     proxy: Optional[str] = None
-    
+
     def __post_init__(self) -> None:
         """驗證資料完整性。"""
         if not self.username or not self.password:
@@ -317,22 +364,28 @@ class UserCredential:
 @dataclass(frozen=True)
 class BetRule:
     """下注規則資料結構（不可變）。
-    
+
     支援三種規則類型：
-    - 'a' (自動旋轉): 指定金額和旋轉次數
-    - 's' (標準規則): 指定金額、持續時間、最小/最大間隔
-    - 'f' (購買免費遊戲): 僅指定金額
-    
+
+    - ``'a'`` (自動旋轉): 指定金額和旋轉次數
+    - ``'s'`` (標準規則): 指定金額、持續時間、最小/最大間隔
+    - ``'f'`` (購買免費遊戲): 僅指定金額
+
     Attributes:
-        rule_type: 規則類型 ('a', 's', 'f')
-        amount: 下注金額
-        spin_count: 自動旋轉次數 (僅 'a' 類型使用)
-        duration: 持續時間，分鐘 (僅 's' 類型使用)
-        min_seconds: 最小間隔秒數 (僅 's' 類型使用)
-        max_seconds: 最大間隔秒數 (僅 's' 類型使用)
-    
+        rule_type: 規則類型，可為 ``'a'``、``'s'`` 或 ``'f'``。
+        amount: 下注金額。
+        spin_count: 自動旋轉次數，僅 ``'a'`` 類型使用。
+        duration: 持續時間（分鐘），僅 ``'s'`` 類型使用。
+        min_seconds: 最小間隔秒數，僅 ``'s'`` 類型使用。
+        max_seconds: 最大間隔秒數，僅 ``'s'`` 類型使用。
+
     Raises:
-        ValueError: 當規則參數無效時
+        ValueError: 當規則參數無效時。
+
+    Example:
+        >>> rule = BetRule(rule_type='a', amount=10, spin_count=50)
+        >>> rule = BetRule(rule_type='s', amount=20, duration=30,
+        ...                min_seconds=1.0, max_seconds=3.0)
     """
     rule_type: str
     amount: float
@@ -340,18 +393,18 @@ class BetRule:
     duration: Optional[int] = None
     min_seconds: Optional[float] = None
     max_seconds: Optional[float] = None
-    
+
     def __post_init__(self) -> None:
         """驗證資料完整性。"""
         if self.amount <= 0:
             raise ValueError(f"下注金額必須大於 0: {self.amount}")
-        
+
         if self.rule_type == 'a':
             if self.spin_count is None:
                 raise ValueError("自動旋轉規則必須指定次數")
             if self.spin_count not in [10, 50, 100]:
                 raise ValueError(f"自動旋轉次數必須是 10、50 或 100: {self.spin_count}")
-        
+
         elif self.rule_type == 's':
             if self.duration is None or self.duration <= 0:
                 raise ValueError(f"持續時間必須大於 0: {self.duration}")
@@ -361,11 +414,11 @@ class BetRule:
                 raise ValueError(f"最大間隔秒數必須大於 0: {self.max_seconds}")
             if self.min_seconds > self.max_seconds:
                 raise ValueError(f"最小間隔不能大於最大間隔: {self.min_seconds} > {self.max_seconds}")
-        
+
         elif self.rule_type == 'f':
             # 購買免費遊戲規則驗證（只需要金額）
             pass
-        
+
         else:
             raise ValueError(f"無效的規則類型: {self.rule_type}，必須是 'a'、's' 或 'f'")
 
@@ -373,21 +426,26 @@ class BetRule:
 @dataclass(frozen=True)
 class ProxyInfo:
     """代理伺服器資訊資料結構（不可變）。
-    
+
     Attributes:
-        host: 代理主機位址
-        port: 代理埠號
-        username: 認證使用者名稱
-        password: 認證密碼
-    
+        host: 代理主機位址。
+        port: 代理埠號（1-65535）。
+        username: 認證使用者名稱。
+        password: 認證密碼。
+
     Raises:
-        ValueError: 當參數無效時
+        ValueError: 當參數無效時。
+
+    Example:
+        >>> proxy = ProxyInfo.from_connection_string("proxy.com:8080:user:pass")
+        >>> print(proxy.to_url())
+        http://user:pass@proxy.com:8080
     """
     host: str
     port: int
     username: str
     password: str
-    
+
     def __post_init__(self) -> None:
         """驗證資料完整性。"""
         if not self.host:
@@ -396,30 +454,47 @@ class ProxyInfo:
             raise ValueError(f"代理埠號無效: {self.port}")
         if not self.username:
             raise ValueError("代理使用者名稱不能為空")
-    
+
     def to_url(self) -> str:
-        """轉換為代理 URL 格式。"""
+        """轉換為代理 URL 格式。
+
+        Returns:
+            格式為 ``http://username:password@host:port`` 的 URL 字串。
+        """
         return f"http://{self.username}:{self.password}@{self.host}:{self.port}"
-    
+
     def to_connection_string(self) -> str:
-        """轉換為連接字串格式。"""
+        """轉換為連接字串格式。
+
+        Returns:
+            格式為 ``host:port:username:password`` 的連接字串。
+        """
         return f"{self.host}:{self.port}:{self.username}:{self.password}"
-    
+
     def __str__(self) -> str:
-        """字串表示（隱藏敏感資訊）"""
+        """字串表示（隱藏敏感資訊）。"""
         return f"ProxyInfo({self.host}:{self.port}, user={self.username[:3]}***)"
     
     @staticmethod
     def from_connection_string(connection_string: str) -> 'ProxyInfo':
         """從連接字串建立 ProxyInfo 實例。
-        
+
         Args:
-            connection_string: 格式為 "host:port:username:password"
+            connection_string: 格式為 ``host:port:username:password`` 的字串。
+
+        Returns:
+            解析後的 ProxyInfo 實例。
+
+        Raises:
+            ValueError: 當連接字串格式不正確時。
+
+        Example:
+            >>> proxy = ProxyInfo.from_connection_string("proxy.com:8080:user:pass")
         """
         parts = connection_string.split(':')
         if len(parts) < 4:
             raise ValueError(f"代理連接字串格式不正確: {connection_string}")
-        
+
         return ProxyInfo(
             host=parts[0],
             port=int(parts[1]),
@@ -431,27 +506,36 @@ class ProxyInfo:
 @dataclass
 class BrowserContext:
     """瀏覽器上下文資訊。
-    
+
     儲存單一瀏覽器實例的相關資訊，包含驅動程式、憑證和狀態。
-    
+    此類別為可變的，因為需要在執行時更新狀態。
+
     Attributes:
-        driver: WebDriver 實例
-        credential: 使用者憑證
-        index: 瀏覽器索引（從 1 開始）
-        proxy_port: 代理埠號（無代理時為 None）
-        created_at: 建立時間戳（秒）
+        driver: WebDriver 實例。
+        credential: 使用者憑證。
+        index: 瀏覽器索引（從 1 開始）。
+        proxy_port: 代理埠號（無代理時為 None）。
+        created_at: 建立時間戳（秒）。
+
+    Example:
+        >>> context = BrowserContext(
+        ...     driver=driver,
+        ...     credential=credential,
+        ...     index=1
+        ... )
+        >>> print(f"瀏覽器已運行 {context.age_in_seconds} 秒")
     """
     driver: WebDriver
     credential: UserCredential
     index: int
     proxy_port: Optional[int] = None
     created_at: Optional[float] = None
-    
+
     def __post_init__(self) -> None:
         """初始化後設定預設值。"""
         if self.created_at is None:
             self.created_at = time.time()
-    
+
     @property
     def age_in_seconds(self) -> float:
         """取得瀏覽器實例的存活時間（秒）。"""
@@ -459,19 +543,19 @@ class BrowserContext:
 
 
 class BrowserThread(threading.Thread):
-    """瀏覽器專屬執行緒。
-    
-    每個瀏覽器實例都有自己的專屬執行緒，從建立到關閉的所有操作
-    都在同一個執行緒中執行，確保執行緒安全性。
-    
+    """瀏覽器控制器。
+
+    每個瀏覽器視窗都有自己的專屬控制器，負責處理該視窗的所有操作，
+    包括建立、導航、登入和遊戲控制等。
+
     Attributes:
-        index: 瀏覽器索引（從 1 開始）
-        credential: 使用者憑證
-        proxy_port: 代理埠號（無代理時為 None）
-        browser_manager: 瀏覽器管理器實例
-        context: 瀏覽器上下文（建立後填充）
-        driver: WebDriver 實例
-    
+        index: 瀏覽器編號（從 1 開始）。
+        credential: 使用者憑證。
+        proxy_port: 代理埠號（無代理時為 None）。
+        browser_manager: 瀏覽器管理器實例。
+        context: 瀏覽器上下文（建立後填充）。
+        driver: WebDriver 實例。
+
     Example:
         >>> thread = BrowserThread(
         ...     index=1,
@@ -480,9 +564,9 @@ class BrowserThread(threading.Thread):
         ... )
         >>> thread.start()
         >>> thread.wait_until_ready(timeout=30)
-        >>> thread.execute_task(lambda ctx: ctx.driver.get(url))
-    """""
-    
+        >>> result = thread.execute_task(lambda ctx: ctx.driver.current_url)
+    """
+
     def __init__(
         self,
         index: int,
@@ -490,80 +574,96 @@ class BrowserThread(threading.Thread):
         browser_manager: 'BrowserManager',
         proxy_port: Optional[int] = None,
         logger: Optional[logging.Logger] = None
-    ):
+    ) -> None:
+        """初始化瀏覽器控制器。
+
+        Args:
+            index: 瀏覽器編號（從 1 開始）。
+            credential: 使用者憑證。
+            browser_manager: 瀏覽器管理器實例。
+            proxy_port: 代理埠號（可選）。
+            logger: 日誌記錄器（可選）。
+        """
         super().__init__(name=f"BrowserThread-{index}", daemon=True)
         self.index = index
         self.credential = credential
         self.proxy_port = proxy_port
         self.browser_manager = browser_manager
         self.logger = logger or LoggerFactory.get_logger()
-        
-        # 瀏覽器上下文（在執行緒中建立）
+
+        # 瀏覽器上下文（在啟動後建立）
         self.context: Optional[BrowserContext] = None
         self.driver: Optional[WebDriver] = None
-        
-        # 執行緒控制
+
+        # 內部狀態控制
         self._stop_event = threading.Event()
         self._ready_event = threading.Event()  # 瀏覽器就緒事件
         self._creation_error: Optional[Exception] = None
-        
+
         # 任務佇列
         self._task_queue: List[Tuple[Callable, tuple, dict]] = []
         self._task_lock = threading.Lock()
-        self._task_event = threading.Event()  # 有新任務時通知
+        self._task_event = threading.Event()  # 新任務通知
         self._task_result: Any = None
         self._task_done_event = threading.Event()  # 任務完成事件
-    
+
     def run(self) -> None:
-        """執行緒主迴圈。"""
+        """控制器主迴圈。
+
+        流程：
+        1. 建立瀏覽器
+        2. 通知瀏覽器已就緒
+        3. 等待任務或停止信號
+        4. 清理資源
+        """
         try:
             # 1. 建立瀏覽器
             self._create_browser()
-            
+
             if self.driver is None:
                 return
-            
+
             # 2. 通知瀏覽器已就緒
             self._ready_event.set()
-            
-            # 3. 主迴圈：等待任務或停止信號
+
+            # 3. 等待任務或停止信號
             while not self._stop_event.is_set():
-                # 等待任務或停止信號（每秒檢查一次）
+                # 每秒檢查一次
                 if self._task_event.wait(timeout=1.0):
                     self._task_event.clear()
                     self._process_tasks()
-            
+
         except Exception as e:
-            self.logger.error(f"[錯誤] 瀏覽器 {self.index} 執行緒異常: {e}")
+            self.logger.error(f"[錯誤] 瀏覽器 {self.index} 發生異常: {e}")
         finally:
             # 4. 清理資源
             self._cleanup()
-    
+
     def _create_browser(self) -> None:
-        """在執行緒中建立瀏覽器。
-        
+        """建立瀏覽器實例。
+
         建立 WebDriver 實例並初始化 BrowserContext。
-        若建立失敗，將错誤儲存到 _creation_error。
+        若建立失敗，將錯誤儲存到 _creation_error。
         """
         try:
             self.driver = self.browser_manager.create_webdriver(
                 local_proxy_port=self.proxy_port
             )
-            
+
             self.context = BrowserContext(
                 driver=self.driver,
                 credential=self.credential,
                 index=self.index,
                 proxy_port=self.proxy_port
             )
-            
+
         except Exception as e:
             self._creation_error = e
             self._ready_event.set()
-    
+
     def _process_tasks(self) -> None:
         """處理任務佇列中的所有任務。
-        
+
         依序執行佇列中的任務，並將結果儲存到 _task_result。
         """
         while True:
@@ -571,7 +671,7 @@ class BrowserThread(threading.Thread):
                 if not self._task_queue:
                     break
                 func, args, kwargs = self._task_queue.pop(0)
-            
+
             try:
                 # 將 context 注入到任務中
                 self._task_result = func(self.context, *args, **kwargs)
@@ -579,7 +679,7 @@ class BrowserThread(threading.Thread):
                 self._task_result = e
             finally:
                 self._task_done_event.set()
-    
+
     def _cleanup(self) -> None:
         """清理瀏覽器資源。"""
         if self.driver:
@@ -590,53 +690,61 @@ class BrowserThread(threading.Thread):
             finally:
                 self.driver = None
                 self.context = None
-    
+
     def wait_until_ready(self, timeout: Optional[float] = None) -> bool:
         """等待瀏覽器就緒。
-        
+
         Args:
-            timeout: 超時時間（秒），None 表示無限等待
-            
+            timeout: 超時時間（秒），None 表示無限等待。
+
         Returns:
-            瀏覽器是否成功建立
+            瀏覽器是否成功建立。
         """
         self._ready_event.wait(timeout=timeout)
         return self.context is not None and self._creation_error is None
-    
+
     def get_creation_error(self) -> Optional[Exception]:
-        """取得建立瀏覽器時的錯誤。"""
-        return self._creation_error
-    
-    def execute_task(
-        self, 
-        func: Callable[[BrowserContext], Any],
-        *args,
-        timeout: Optional[float] = None,
-        **kwargs
-    ) -> Any:
-        """在瀏覽器執行緒中執行任務。
-        
-        Args:
-            func: 要執行的函數，第一個參數會是 BrowserContext
-            *args: 額外的位置參數
-            timeout: 超時時間（秒）
-            **kwargs: 額外的關鍵字參數
-            
+        """取得建立瀏覽器時的錯誤。
+
         Returns:
-            任務執行的結果
+            建立時發生的例外，若成功則為 None。
+        """
+        return self._creation_error
+
+    def execute_task(
+        self,
+        func: Callable[[BrowserContext], Any],
+        *args: Any,
+        timeout: Optional[float] = None,
+        **kwargs: Any
+    ) -> Any:
+        """在瀏覽器中執行任務。
+
+        Args:
+            func: 要執行的函數，第一個參數會是 BrowserContext。
+            *args: 額外的位置參數。
+            timeout: 超時時間（秒）。
+            **kwargs: 額外的關鍵字參數。
+
+        Returns:
+            任務執行的結果。
+
+        Raises:
+            RuntimeError: 當瀏覽器已關閉時。
+            TimeoutError: 當任務執行超時時。
         """
         if not self.is_alive() or self._stop_event.is_set():
-            raise RuntimeError(f"瀏覽器 {self.index} 執行緒已停止")
-        
+            raise RuntimeError(f"瀏覽器 {self.index} 已關閉")
+
         # 重置任務完成事件
         self._task_done_event.clear()
         self._task_result = None
-        
+
         # 加入任務佇列
         with self._task_lock:
             self._task_queue.append((func, args, kwargs))
         
-        # 通知執行緒有新任務
+        # 通知有新任務
         self._task_event.set()
         
         # 等待任務完成
@@ -649,12 +757,16 @@ class BrowserThread(threading.Thread):
             raise TimeoutError(f"瀏覽器 {self.index} 任務執行超時")
     
     def stop(self) -> None:
-        """停止執行緒。"""
+        """停止瀏覽器並釋放資源。"""
         self._stop_event.set()
-        self._task_event.set()  # 喚醒等待中的執行緒
-    
+        self._task_event.set()
+
     def is_browser_alive(self) -> bool:
-        """檢查瀏覽器是否仍然有效。"""
+        """檢查瀏覽器是否仍然有效。
+
+        Returns:
+            瀏覽器是否仍可操作。
+        """
         if self.driver is None:
             return False
         try:
@@ -666,36 +778,49 @@ class BrowserThread(threading.Thread):
 
 class OperationResult:
     """操作結果封裝類別。
-    
+
     統一封裝操作的執行結果，支援布林轉換和字串表示。
-    
+    此類別用於統一各種操作的回傳格式。
+
     Attributes:
-        success: 操作是否成功
-        data: 操作返回的資料
-        error: 發生的例外（如果有）
-        message: 額外的訊息說明
-    
+        success: 操作是否成功。
+        data: 操作返回的資料。
+        error: 發生的例外（如果有）。
+        message: 額外的訊息說明。
+
     Example:
         >>> result = OperationResult(success=True, data={"count": 5})
         >>> if result:
         ...     print(result.data)
+        {'count': 5}
     """
+
     def __init__(
-        self, 
-        success: bool, 
-        data: Any = None, 
+        self,
+        success: bool,
+        data: Any = None,
         error: Optional[Exception] = None,
         message: str = ""
-    ):
+    ) -> None:
+        """初始化操作結果。
+
+        Args:
+            success: 操作是否成功。
+            data: 操作返回的資料。
+            error: 發生的例外（如果有）。
+            message: 額外的訊息說明。
+        """
         self.success = success
         self.data = data
         self.error = error
         self.message = message
-    
+
     def __bool__(self) -> bool:
+        """支援布林轉換。"""
         return self.success
-    
+
     def __repr__(self) -> str:
+        """字串表示。"""
         status = "成功" if self.success else "失敗"
         return f"OperationResult({status}, {self.message})"
 
@@ -706,8 +831,15 @@ class OperationResult:
 
 class LogLevel(Enum):
     """日誌等級列舉。
-    
+
     提供與 logging 模組相容的日誌等級定義。
+
+    Attributes:
+        DEBUG: 除錯等級，用於開發時的詳細資訊。
+        INFO: 資訊等級，用於一般運行狀態。
+        WARNING: 警告等級，用於潛在問題。
+        ERROR: 錯誤等級，用於錯誤狀況。
+        CRITICAL: 嚴重等級，用於致命錯誤。
     """
     DEBUG = logging.DEBUG
     INFO = logging.INFO
@@ -718,15 +850,19 @@ class LogLevel(Enum):
 
 class ColoredFormatter(logging.Formatter):
     """帶顏色的日誌格式化器。
-    
-    根據日誌等級為輸出添加不同的 ANSI 顏色代碼。
-    
+
+    根據日誌等級為輸出添加不同的 ANSI 顏色代碼，
+    提升終端機輸出的可讀性。
+
     Attributes:
-        COLORS: 顏色代碼對應表
-        formatters: 各日誌等級的格式化器
+        COLORS: 顏色代碼對應表。
+        formatters: 各日誌等級的格式化器。
+
+    Note:
+        此格式化器僅在支援 ANSI 顏色代碼的終端機中有效。
     """
-    
-    COLORS = {
+
+    COLORS: Dict[str, str] = {
         'RESET': "\033[0m",
         'INFO': "\033[32m",       # 綠色
         'WARNING': "\033[33m",    # 黃色
@@ -735,26 +871,48 @@ class ColoredFormatter(logging.Formatter):
         'DEBUG': "\033[36m",      # 青色
         'TIMESTAMP': "\033[90m",  # 灰色
     }
-    
+
     def __init__(self, fmt: Optional[str] = None, datefmt: Optional[str] = None) -> None:
+        """初始化格式化器。
+
+        Args:
+            fmt: 日誌格式字串（可選）。
+            datefmt: 日期格式字串（可選）。
+        """
         super().__init__(fmt, datefmt)
-        self.formatters = {
+        self.formatters: Dict[int, logging.Formatter] = {
             logging.DEBUG: self._create_formatter(self.COLORS['DEBUG'], 'DEBUG'),
             logging.INFO: self._create_formatter(self.COLORS['INFO'], 'INFO'),
             logging.WARNING: self._create_formatter(self.COLORS['WARNING'], 'WARNING'),
             logging.ERROR: self._create_formatter(self.COLORS['ERROR'], 'ERROR'),
             logging.CRITICAL: self._create_formatter(self.COLORS['CRITICAL'], 'CRITICAL'),
         }
-    
+
     def _create_formatter(self, color: str, level_name: str) -> logging.Formatter:
-        """建立指定顏色的格式化器"""
+        """建立指定顏色的格式化器。
+
+        Args:
+            color: ANSI 顏色代碼。
+            level_name: 日誌等級名稱。
+
+        Returns:
+            配置好的 Formatter 實例。
+        """
         return logging.Formatter(
             f"{self.COLORS['TIMESTAMP']}%(asctime)s{self.COLORS['RESET']} - "
             f"{color}%(levelname)-8s{self.COLORS['RESET']} - "
             f"%(message)s"
         )
-    
+
     def format(self, record: logging.LogRecord) -> str:
+        """格式化日誌記錄。
+
+        Args:
+            record: 日誌記錄。
+
+        Returns:
+            格式化後的字串。
+        """
         formatter = self.formatters.get(record.levelno)
         if formatter:
             return formatter.format(record)
@@ -763,13 +921,17 @@ class ColoredFormatter(logging.Formatter):
 
 class FlushingStreamHandler(logging.StreamHandler):
     """自動刷新的 StreamHandler。
-    
-    解決多執行緒環境下的緩衝阻塞問題，
+
+    確保日誌訊息能即時顯示在終端機上，
     每次輸出後立即刷新緩衝區。
     """
     
     def emit(self, record: logging.LogRecord) -> None:
-        """輸出日誌記錄並強制刷新緩衝區。"""
+        """輸出日誌記錄並強制刷新緩衝區。
+
+        Args:
+            record: 日誌記錄。
+        """
         try:
             super().emit(record)
             self.flush()
@@ -779,56 +941,62 @@ class FlushingStreamHandler(logging.StreamHandler):
 
 class LoggerFactory:
     """日誌記錄器工廠類別。
-    
-    使用單例模式管理 logger 實例，確保執行緒安全。
-    
+
+    使用單例模式管理 logger 實例。
+    所有模組應透過此工廠取得 logger，以保持一致的格式和行為。
+
     Attributes:
-        _loggers: logger 實例緩存
-        _lock: 執行緒鎖
-        _formatter: 共享的格式化器實例
+        _loggers: logger 實例緩存。
+        _lock: 鎖定機制。
+        _formatter: 共享的格式化器實例。
+
+    Example:
+        >>> logger = LoggerFactory.get_logger()
+        >>> logger.info("程式啟動")
     """
-    
+
     _loggers: Dict[str, logging.Logger] = {}
-    _lock = threading.RLock()
+    _lock: threading.RLock = threading.RLock()
     _formatter: Optional[ColoredFormatter] = None
-    
+
     @classmethod
     def get_logger(
-        cls, 
+        cls,
         name: str = "AutoSlotGame",
         level: LogLevel = LogLevel.INFO
     ) -> logging.Logger:
         """取得或建立 logger 實例。
-        
-        使用雙重檢查鎖定模式確保執行緒安全。
-        
+
         Args:
-            name: logger 名稱
-            level: 日誌等級
-            
+            name: logger 名稱。
+            level: 日誌等級。
+
         Returns:
-            配置完成的 logger 實例
+            配置完成的 logger 實例。
+
+        Example:
+            >>> logger = LoggerFactory.get_logger(level=LogLevel.DEBUG)
         """
         if name in cls._loggers:
             return cls._loggers[name]
-        
+
         with cls._lock:
             if name in cls._loggers:
                 return cls._loggers[name]
-            
+
             logger = logging.getLogger(name)
             logger.setLevel(level.value)
             logger.propagate = False
-            
+
             if not logger.handlers:
                 if cls._formatter is None:
                     cls._formatter = ColoredFormatter()
-                
+
                 console_handler = FlushingStreamHandler(sys.stdout)
                 console_handler.setLevel(level.value)
                 console_handler.setFormatter(cls._formatter)
                 logger.addHandler(console_handler)
-            
+
             cls._loggers[name] = logger
             return logger
 
@@ -839,16 +1007,21 @@ class LoggerFactory:
 
 def get_resource_path(relative_path: str = "") -> Path:
     """取得資源檔案的絕對路徑。
-    
+
     根據執行環境自動判斷基礎路徑：
     - 開發環境：返回專案根目錄
     - 打包環境：返回可執行檔所在目錄
-    
+
     Args:
-        relative_path: 相對路徑（可選）
-        
+        relative_path: 相對路徑（可選）。
+
     Returns:
-        完整的絕對路徑
+        完整的絕對路徑。
+
+    Example:
+        >>> path = get_resource_path("img/template.png")
+        >>> print(path)
+        /path/to/project/img/template.png
     """
     if getattr(sys, 'frozen', False):
         base_path = Path(sys.executable).resolve().parent
@@ -862,27 +1035,32 @@ def get_resource_path(relative_path: str = "") -> Path:
 
 def cv2_imread_unicode(file_path: Union[str, Path], flags: int = cv2.IMREAD_COLOR) -> Optional[np.ndarray]:
     """安全讀取圖片（支援 Unicode 路徑）。
-    
+
     OpenCV 的 cv2.imread() 無法處理包含中文或其他非 ASCII 字元的路徑。
     此函式使用 numpy 和 PIL 作為替代方案。
-    
+
     Args:
-        file_path: 圖片檔案路徑（支援中文路徑）
-        flags: OpenCV 讀取標誌（cv2.IMREAD_COLOR, cv2.IMREAD_GRAYSCALE 等）
-        
+        file_path: 圖片檔案路徑（支援中文路徑）。
+        flags: OpenCV 讀取標誌，支援 cv2.IMREAD_COLOR、cv2.IMREAD_GRAYSCALE 等。
+
     Returns:
-        圖片的 numpy 陣列，失敗返回 None
+        圖片的 numpy 陣列，失敗返回 None。
+
+    Example:
+        >>> img = cv2_imread_unicode("圖片/模板.png")
+        >>> if img is not None:
+        ...     print(f"圖片尺寸: {img.shape}")
     """
     try:
         # 轉換為 Path 物件
         path = Path(file_path)
-        
+
         # 使用 PIL 讀取圖片（PIL 支援 Unicode 路徑）
         pil_image = Image.open(path)
-        
+
         # 轉換為 numpy 陣列
         img_array = np.array(pil_image)
-        
+
         # 根據讀取標誌處理圖片
         if flags == cv2.IMREAD_GRAYSCALE:
             # 轉換為灰階
@@ -899,9 +1077,9 @@ def cv2_imread_unicode(file_path: Union[str, Path], flags: int = cv2.IMREAD_COLO
             # PIL 使用 RGB，OpenCV 使用 BGR，需要轉換
             if len(img_array.shape) == 3 and img_array.shape[2] == 3:
                 img_array = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
-        
+
         return img_array
-        
+
     except Exception:
         # 返回 None 保持與 cv2.imread() 相同的行為
         return None
@@ -913,14 +1091,15 @@ def cv2_imread_unicode(file_path: Union[str, Path], flags: int = cv2.IMREAD_COLO
 
 class ConfigReaderProtocol(Protocol):
     """配置讀取器協議。
-    
+
     定義配置讀取器必須實現的方法介面。
+    使用 Protocol 實現結構化子類型（鴨子類型）。
     """
-    
+
     def read_user_credentials(self, filename: str) -> List[UserCredential]:
-        """ 讀取使用者憑證檔案。"""
+        """讀取使用者憑證檔案。"""
         ...
-    
+
     def read_bet_rules(self, filename: str) -> List[BetRule]:
         """讀取下注規則檔案。"""
         ...
@@ -928,44 +1107,63 @@ class ConfigReaderProtocol(Protocol):
 
 class ConfigReader:
     """配置檔案讀取器。
-    
+
     讀取並解析系統所需的各種配置檔案，包含：
     - 用戶資料.txt: 使用者憑證
     - 用戶規則.txt: 下注規則
-    
+
     Attributes:
-        lib_path: 配置檔案目錄路徑
-        logger: 日誌記錄器
-    
+        lib_path: 配置檔案目錄路徑。
+        logger: 日誌記錄器。
+
     Raises:
-        ConfigurationError: 當配置目錄不存在時
+        ConfigurationError: 當配置目錄不存在時。
+
+    Example:
+        >>> reader = ConfigReader()
+        >>> credentials = reader.read_user_credentials()
+        >>> rules = reader.read_bet_rules()
     """
-    
+
     def __init__(
-        self, 
+        self,
         lib_path: Optional[Path] = None,
         logger: Optional[logging.Logger] = None
     ) -> None:
+        """初始化配置讀取器。
+
+        Args:
+            lib_path: 配置檔案目錄路徑（可選，預設為 lib/）。
+            logger: 日誌記錄器（可選）。
+        """
         if lib_path is None:
             lib_path = get_resource_path(Constants.DEFAULT_LIB_PATH)
-        
+
         self.lib_path = Path(lib_path)
         self.logger = logger or LoggerFactory.get_logger()
-        
+
         if not self.lib_path.exists():
             raise ConfigurationError(f"配置目錄不存在: {self.lib_path}")
-    
+
     def _read_file_lines(self, filename: str, skip_header: bool = True) -> List[str]:
-        """讀取檔案並返回有效行列表。"""
+        """讀取檔案並返回有效行列表。
+
+        Args:
+            filename: 檔案名稱。
+            skip_header: 是否跳過首行（標題列）。
+
+        Returns:
+            有效行列表（已去除空白和註釋行）。
+        """
         file_path = self.lib_path / filename
-        
+
         if not file_path.exists():
             raise ConfigurationError(f"找不到配置檔案: {file_path}")
-        
+
         try:
             with open(file_path, 'r', encoding='utf-8', buffering=8192) as f:
                 lines = f.readlines()
-            
+
             start_index = 1 if skip_header and lines else 0
             
             valid_lines = [
@@ -1097,49 +1295,70 @@ class ConfigReader:
 
 class ProxyConnectionHandler:
     """代理連接處理器。
-    
+
     處理 HTTP/HTTPS 請求並轉發到上游代理伺服器。
-    自動添加代理認證標頭。
-    
+    自動添加代理認證標頭（Proxy-Authorization）。
+
+    此類別實現了 HTTP 代理協議的核心功能：
+    - CONNECT 方法：用於 HTTPS 連接的隧道建立
+    - 普通 HTTP 方法：GET、POST 等請求的轉發
+
     Attributes:
-        upstream_proxy: 上游代理伺服器資訊
-        logger: 日誌記錄器
+        upstream_proxy: 上游代理伺服器資訊。
+        logger: 日誌記錄器。
+
+    Example:
+        >>> handler = ProxyConnectionHandler(proxy_info)
+        >>> handler.handle_connect_request(client_socket, request)
     """
-    
+
     def __init__(
-        self, 
+        self,
         upstream_proxy: ProxyInfo,
         logger: Optional[logging.Logger] = None
-    ):
+    ) -> None:
+        """初始化代理連接處理器。
+
+        Args:
+            upstream_proxy: 上游代理伺服器資訊。
+            logger: 日誌記錄器（可選）。
+        """
         self.upstream_proxy = upstream_proxy
         self.logger = logger or LoggerFactory.get_logger()
-    
+
     def handle_connect_request(
-        self, 
+        self,
         client_socket: socket.socket,
         request: bytes
     ) -> None:
-        """處理 HTTPS CONNECT 請求。"""
+        """處理 HTTPS CONNECT 請求。
+
+        建立到上游代理的隧道，並雙向轉發數據。
+
+        Args:
+            client_socket: 客戶端 socket。
+            request: 原始請求數據。
+        """
         upstream_socket = None
         try:
             upstream_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             upstream_socket.settimeout(Constants.DEFAULT_TIMEOUT_SECONDS)
             upstream_socket.connect((self.upstream_proxy.host, self.upstream_proxy.port))
-            
+
             auth_string = f"{self.upstream_proxy.username}:{self.upstream_proxy.password}"
             auth_b64 = base64.b64encode(auth_string.encode('utf-8')).decode('ascii')
-            
+
             request_lines = request.split(b'\r\n')
             auth_header = f"Proxy-Authorization: Basic {auth_b64}\r\n".encode('utf-8')
-            
+
             new_request = request_lines[0] + b'\r\n' + auth_header
             for line in request_lines[1:]:
                 new_request += line + b'\r\n'
-            
+
             upstream_socket.sendall(new_request)
-            
+
             response = upstream_socket.recv(Constants.PROXY_BUFFER_SIZE)
-            
+
             if b'200' in response:
                 client_socket.sendall(b'HTTP/1.1 200 Connection Established\r\n\r\n')
                 self._forward_data(client_socket, upstream_socket)
@@ -1487,60 +1706,70 @@ class BrowserHelper:
 
 class ImageDetector:
     """圖片檢測器。
-    
+
     提供螢幕截圖、圖片比對和座標定位功能。
     使用 OpenCV 的 TM_CCOEFF_NORMED 方法進行模板匹配。
-    
+
+    此類別是圖片識別功能的核心，支援：
+    - 瀏覽器截圖
+    - 模板匹配
+    - 各種模板的截取和儲存
+
     Attributes:
-        logger: 日誌記錄器
-        project_root: 專案根目錄路徑
-        image_dir: 圖片目錄路徑
-    
+        logger: 日誌記錄器。
+        project_root: 專案根目錄路徑。
+        image_dir: 圖片目錄路徑。
+
     Example:
         >>> detector = ImageDetector()
         >>> result = detector.detect_in_browser(driver, "遊戲登入.png")
         >>> if result:
         ...     x, y, confidence = result
+        ...     print(f"找到圖片於 ({x}, {y}), 信心度: {confidence:.2f}")
     """
-    
-    def __init__(self, logger: Optional[logging.Logger] = None):
-        """初始化圖片檢測器"""
+
+    def __init__(self, logger: Optional[logging.Logger] = None) -> None:
+        """初始化圖片檢測器。
+
+        Args:
+            logger: 日誌記錄器（可選）。
+        """
         self.logger = logger or LoggerFactory.get_logger()
-        
+
         # 使用輔助函式取得專案根目錄和圖片目錄
-        self.project_root = get_resource_path()
-        self.image_dir = get_resource_path(Constants.IMAGE_DIR)
-        
+        self.project_root: Path = get_resource_path()
+        self.image_dir: Path = get_resource_path(Constants.IMAGE_DIR)
+
         # 確保圖片目錄存在
         self.image_dir.mkdir(parents=True, exist_ok=True)
-    
+
     def get_template_path(self, template_name: str) -> Path:
         """取得模板圖片路徑。
-        
+
         Args:
-            template_name: 模板圖片檔名
-            
+            template_name: 模板圖片檔名。
+
         Returns:
-            模板圖片完整路徑
+            模板圖片完整路徑。
         """
         return self.image_dir / template_name
-    
+
     def template_exists(self, template_name: str) -> bool:
         """檢查模板圖片是否存在。
-        
+
         Args:
-            template_name: 模板圖片檔名
-            
+            template_name: 模板圖片檔名。
+
         Returns:
-            是否存在
+            是否存在。
         """
         return self.get_template_path(template_name).exists()
-    
+
     def capture_screenshot(self, driver: WebDriver, save_path: Optional[Path] = None) -> np.ndarray:
         """截取瀏覽器畫面。
-        
+
         Args:
-            driver: WebDriver 實例
+            driver: WebDriver 實例。
             save_path: 儲存路徑（可選）
             
         Returns:
@@ -1777,7 +2006,7 @@ class ImageDetector:
             return True
             
         except Exception as e:
-            self.logger.error(f"截取金額模板失敗: {e}")
+            self.logger.error(f"[錯誤] 截取金額模板失敗: {e}")
             return False
 
     def capture_blackscreen_template(self, driver: WebDriver) -> bool:
@@ -1853,7 +2082,7 @@ class ImageDetector:
             return True
             
         except Exception as e:
-            self.logger.error(f"截取大廳返回提示模板失敗: {e}")
+            self.logger.error(f"[錯誤] 截取大廳返回提示模板失敗: {e}")
             return False
 
 
@@ -2028,146 +2257,279 @@ class BrowserManager:
 
 
 # =============================================================================
-# 遊戲控制中心
+# 遊戲控制面板
 # =============================================================================
 
 class GameControlCenter:
-    """遊戲控制中心。
-    
+    """遊戲控制面板。
+
     提供互動式命令列介面來控制多個瀏覽器，功能包括：
+
     - 自動按鍵：每個瀏覽器獨立執行緒
     - 暫停/繼續操作
     - 調整下注金額
     - 購買免費遊戲
     - 截取各種模板圖片
-    
+    - 錯誤監控與自動恢復
+
     Attributes:
-        browser_threads: 瀏覽器執行緒列表
-        bet_rules: 下注規則列表
-        canvas_rect: Canvas 區域資訊
-        running: 控制中心是否運行中
-        auto_press_running: 自動按鍵是否運行中
+        browser_threads: 瀏覽器執行緒列表。
+        bet_rules: 下注規則列表。
+        canvas_rect: Canvas 區域資訊。
+        running: 控制面板是否運行中。
+        auto_press_running: 自動按鍵是否運行中。
+        error_monitor_running: 錯誤監控是否運行中。
+
+    Example:
+        >>> center = GameControlCenter(browser_threads, rules)
+        >>> center.start()  # 阻塞式運行，直到使用者退出
     """
-    
+
     def __init__(
         self,
         browser_threads: List['BrowserThread'],
         bet_rules: List[BetRule],
         canvas_rect: Optional[Dict[str, float]] = None,
         logger: Optional[logging.Logger] = None
-    ):
-        """初始化控制中心。
-        
+    ) -> None:
+        """初始化控制面板。
+
         Args:
-            browser_threads: 瀏覽器執行緒列表
-            bet_rules: 下注規則列表
-            canvas_rect: Canvas 區域資訊（可選）
-            logger: 日誌記錄器
+            browser_threads: 瀏覽器執行緒列表。
+            bet_rules: 下注規則列表。
+            canvas_rect: Canvas 區域資訊（可選）。
+            logger: 日誌記錄器（可選）。
         """
         self.logger = logger or LoggerFactory.get_logger()
         self.browser_threads = browser_threads
         self.bet_rules = bet_rules
         self.canvas_rect = canvas_rect
-        
+
         # 控制狀態
-        self.running = False
-        self.auto_press_running = False
-        self.error_monitor_running = False
-        
+        self.running: bool = False
+        self.auto_press_running: bool = False
+        self.error_monitor_running: bool = False
+
         # 執行緒控制
         self._stop_event = threading.Event()
         self._error_monitor_stop_event = threading.Event()
         self.auto_press_threads: Dict[int, threading.Thread] = {}
         self._error_monitor_thread: Optional[threading.Thread] = None
-        
+
+        # 正在恢復中的瀏覽器（避免重複觸發恢復）
+        self._recovering_browsers: Set[int] = set()
+        self._recovering_lock = threading.Lock()
+
         # 圖片檢測器
         self._image_detector = ImageDetector(self.logger)
-    
+
+        # 自動按鍵間隔時間
+        self.min_interval: float = 1.0
+        self.max_interval: float = 2.0
+
     def _get_active_browsers(self) -> List['BrowserThread']:
         """取得所有活躍的瀏覽器執行緒。
-        
+
         Returns:
-            活躍的瀏覽器執行緒列表
+            活躍的瀏覽器執行緒列表。
         """
         return [bt for bt in self.browser_threads if bt.is_browser_alive()]
-    
+
     # -------------------------------------------------------------------------
     # 錯誤訊息監控功能
     # -------------------------------------------------------------------------
-    
+
     def _error_monitor_loop(self) -> None:
-        """錯誤訊息監控循環。
+        """錯誤訊息與黑屏監控循環。
         
-        在背景持續運行，每隔固定時間檢測所有瀏覽器的錯誤訊息。
-        當偵測到「錯誤訊息.png」時，自動導航到 LOGIN_PAGE。
+        在背景持續運行，每隔固定時間同步檢測所有瀏覽器：
+        - 黑屏（BLACK_SCREEN）: 連續檢測到 BLACKSCREEN_CONSECUTIVE_THRESHOLD 次 → 導航到 LOGIN_PAGE
+        - 錯誤訊息（ERROR_REMIND）: 檢測到 1 次 → 點擊 ERROR_CONFIRM 按鈕
+        
+        檢測流程同步並行，恢復操作在獨立執行緒中非同步執行（不阻塞監控）。
         """
-        self.logger.info("[監控] 錯誤訊息監控已啟動")
+        self.logger.info("[監控] 錯誤訊息與黑屏監控已啟動")
+        
+        # 黑屏連續檢測計數器（每個瀏覽器獨立計數）
+        blackscreen_counts: Dict[int, int] = {}
         
         # 檢查模板是否存在
-        if not self._image_detector.template_exists(Constants.ERROR_REMIND):
+        blackscreen_template_exists = self._image_detector.template_exists(Constants.BLACK_SCREEN)
+        error_template_exists = self._image_detector.template_exists(Constants.ERROR_REMIND)
+        
+        if not blackscreen_template_exists:
+            self.logger.warning(f"[監控] 黑屏模板 '{Constants.BLACK_SCREEN}' 不存在")
+            self.logger.info("[監控] 請使用 'd' 命令截取黑屏模板")
+        
+        if not error_template_exists:
             self.logger.warning(f"[監控] 錯誤訊息模板 '{Constants.ERROR_REMIND}' 不存在")
             self.logger.info("[監控] 請使用 'e' 命令截取錯誤訊息模板")
-            self.logger.info("[監控] 監控功能將持續運行，等待模板建立後自動生效")
+        
+        self.logger.info("[監控] 監控功能將持續運行，等待模板建立後自動生效")
         
         while not self._error_monitor_stop_event.is_set():
             try:
-                # 取得所有活躍的瀏覽器
-                active_browsers = self._get_active_browsers()
+                # 取得所有活躍的瀏覽器（排除正在恢復中的）
+                with self._recovering_lock:
+                    active_browsers = [
+                        bt for bt in self._get_active_browsers()
+                        if bt.index not in self._recovering_browsers
+                    ]
                 
                 if not active_browsers:
-                    # 沒有活躍的瀏覽器，等待後繼續
                     self._error_monitor_stop_event.wait(timeout=Constants.ERROR_MONITOR_INTERVAL)
                     continue
                 
-                # 檢查模板是否存在（每次循環都檢查，以支援動態建立模板）
-                if not self._image_detector.template_exists(Constants.ERROR_REMIND):
+                # 每次循環更新模板存在狀態（支援動態建立模板）
+                blackscreen_template_exists = self._image_detector.template_exists(Constants.BLACK_SCREEN)
+                error_template_exists = self._image_detector.template_exists(Constants.ERROR_REMIND)
+                
+                # 如果兩個模板都不存在，等待後繼續
+                if not blackscreen_template_exists and not error_template_exists:
                     self._error_monitor_stop_event.wait(timeout=Constants.ERROR_MONITOR_INTERVAL)
                     continue
                 
-                # 檢測每個瀏覽器
+                # ===== 同步檢測所有瀏覽器的黑屏 =====
+                blackscreen_detected: Dict[int, bool] = {}
+                if blackscreen_template_exists:
+                    def detect_blackscreen_for_browser(bt: 'BrowserThread') -> Tuple[int, bool]:
+                        if not bt.is_browser_alive() or not bt.context:
+                            return (bt.index, False)
+                        try:
+                            def task(context: BrowserContext) -> Optional[Tuple[int, int, float]]:
+                                return self._image_detector.detect_in_browser(
+                                    context.driver, Constants.BLACK_SCREEN
+                                )
+                            result = bt.execute_task(task)
+                            return (bt.index, result is not None)
+                        except Exception:
+                            return (bt.index, False)
+                    
+                    with ThreadPoolExecutor(max_workers=len(active_browsers)) as executor:
+                        futures = [executor.submit(detect_blackscreen_for_browser, bt) for bt in active_browsers]
+                        for future in futures:
+                            try:
+                                browser_index, detected = future.result(timeout=10)
+                                blackscreen_detected[browser_index] = detected
+                            except Exception:
+                                pass
+                
+                # ===== 同步檢測所有瀏覽器的錯誤訊息（僅對未偵測到黑屏的瀏覽器）=====
+                error_detected: Dict[int, bool] = {}
+                if error_template_exists:
+                    browsers_to_check_error = [
+                        bt for bt in active_browsers 
+                        if not blackscreen_detected.get(bt.index, False)
+                    ]
+                    
+                    if browsers_to_check_error:
+                        def detect_error_for_browser(bt: 'BrowserThread') -> Tuple[int, bool]:
+                            if not bt.is_browser_alive() or not bt.context:
+                                return (bt.index, False)
+                            try:
+                                def task(context: BrowserContext) -> Optional[Tuple[int, int, float]]:
+                                    return self._image_detector.detect_in_browser(
+                                        context.driver, Constants.ERROR_REMIND
+                                    )
+                                result = bt.execute_task(task)
+                                return (bt.index, result is not None)
+                            except Exception:
+                                return (bt.index, False)
+                        
+                        with ThreadPoolExecutor(max_workers=len(browsers_to_check_error)) as executor:
+                            futures = [executor.submit(detect_error_for_browser, bt) for bt in browsers_to_check_error]
+                            for future in futures:
+                                try:
+                                    browser_index, detected = future.result(timeout=10)
+                                    error_detected[browser_index] = detected
+                                except Exception:
+                                    pass
+                
+                # ===== 處理檢測結果，啟動非同步恢復執行緒 =====
                 for bt in active_browsers:
                     if self._error_monitor_stop_event.is_set():
                         break
                     
-                    if not bt.is_browser_alive() or not bt.context:
-                        continue
+                    browser_index = bt.index
+                    username = bt.context.credential.username if bt.context else "Unknown"
                     
-                    try:
-                        # 執行圖片檢測任務
-                        def detect_error_task(context: BrowserContext) -> Optional[Tuple[int, int, float]]:
-                            return self._image_detector.detect_in_browser(
-                                context.driver, 
-                                Constants.ERROR_REMIND
-                            )
+                    # 處理黑屏
+                    if blackscreen_detected.get(browser_index, False):
+                        current_count = blackscreen_counts.get(browser_index, 0) + 1
+                        blackscreen_counts[browser_index] = current_count
                         
-                        result = bt.execute_task(detect_error_task)
+                        self.logger.debug(
+                            f"[監控] 瀏覽器 {browser_index} ({username}) "
+                            f"黑屏檢測 {current_count}/{Constants.BLACKSCREEN_CONSECUTIVE_THRESHOLD}"
+                        )
                         
-                        if result:
-                            username = bt.context.credential.username
-                            confidence = result[2]
+                        if current_count >= Constants.BLACKSCREEN_CONSECUTIVE_THRESHOLD:
                             self.logger.warning(
-                                f"[監控] 瀏覽器 {bt.index} ({username}) 偵測到錯誤訊息，準備重新連線..."
+                                f"[監控] 瀏覽器 {browser_index} ({username}) "
+                                f"連續 {current_count} 次黑屏，啟動非同步恢復..."
                             )
-                            
-                            # 導航到 LOGIN_PAGE
-                            self._handle_error_recovery(bt)
-                            
-                    except Exception as e:
-                        self.logger.debug(f"[監控] 瀏覽器 {bt.index} 檢測時發生錯誤: {e}")
+                            blackscreen_counts[browser_index] = 0
+                            # 非同步啟動恢復執行緒
+                            self._start_recovery_thread(bt, "blackscreen")
+                    else:
+                        blackscreen_counts[browser_index] = 0
+                    
+                    # 處理錯誤訊息
+                    if error_detected.get(browser_index, False):
+                        self.logger.warning(
+                            f"[監控] 瀏覽器 {browser_index} ({username}) 偵測到錯誤訊息，啟動非同步點擊..."
+                        )
+                        # 非同步啟動點擊執行緒
+                        self._start_recovery_thread(bt, "error")
                 
                 # 等待下一次檢測
                 self._error_monitor_stop_event.wait(timeout=Constants.ERROR_MONITOR_INTERVAL)
                 
             except Exception as e:
-                self.logger.error(f"[監控] 錯誤訊息監控發生錯誤: {e}")
+                self.logger.error(f"[監控] 監控循環發生錯誤: {e}")
                 self._error_monitor_stop_event.wait(timeout=Constants.ERROR_MONITOR_INTERVAL)
         
-        self.logger.info("[監控] 錯誤訊息監控已停止")
+        self.logger.info("[監控] 錯誤訊息與黑屏監控已停止")
     
-    def _handle_error_recovery(self, bt: 'BrowserThread') -> None:
-        """處理錯誤恢復流程。
+    def _start_recovery_thread(self, bt: 'BrowserThread', recovery_type: str) -> None:
+        """啟動非同步恢復執行緒。
         
-        當偵測到錯誤訊息時，切換到 iframe 並點擊確認按鈕座標。
+        Args:
+            bt: 需要恢復的 BrowserThread 實例
+            recovery_type: 恢復類型 ("blackscreen" 或 "error")
+        """
+        browser_index = bt.index
+        
+        # 標記為恢復中
+        with self._recovering_lock:
+            if browser_index in self._recovering_browsers:
+                self.logger.debug(f"[監控] 瀏覽器 {browser_index} 已在恢復中，跳過")
+                return
+            self._recovering_browsers.add(browser_index)
+        
+        def recovery_task():
+            try:
+                if recovery_type == "blackscreen":
+                    self._handle_blackscreen_recovery(bt)
+                elif recovery_type == "error":
+                    self._handle_error_click_confirm(bt)
+            finally:
+                # 恢復完成，移除標記
+                with self._recovering_lock:
+                    self._recovering_browsers.discard(browser_index)
+        
+        # 啟動獨立執行緒執行恢復
+        thread = threading.Thread(
+            target=recovery_task,
+            daemon=True,
+            name=f"Recovery-{browser_index}-{recovery_type}"
+        )
+        thread.start()
+    
+    def _handle_error_click_confirm(self, bt: 'BrowserThread') -> None:
+        """處理錯誤訊息：點擊確認按鈕。
+        
+        當偵測到「錯誤訊息.png」時，切換到 iframe 並點擊確認按鈕座標。
         包含網路容錯機制，失敗時自動重試。
         
         Args:
@@ -2249,16 +2611,395 @@ class GameControlCenter:
                 ])
                 
                 if attempt < Constants.MAX_RETRY_ATTEMPTS - 1 and is_network_error:
-                    self.logger.warning(f"[監控] 瀏覽器 {bt.index} ({username}) 恢復流程超時，準備重試...")
+                    self.logger.warning(f"[監控] 瀏覽器 {bt.index} ({username}) 點擊確認流程超時，準備重試...")
                     continue
                 else:
-                    self.logger.error(f"[監控] 瀏覽器 {bt.index} ({username}) 恢復流程失敗: {e}")
+                    self.logger.error(f"[監控] 瀏覽器 {bt.index} ({username}) 點擊確認流程失敗: {e}")
                     return
     
+    def _handle_blackscreen_recovery(self, bt: 'BrowserThread') -> None:
+        """處理黑屏恢復：完整的重新連線流程。
+        
+        當連續偵測到黑屏達到閾值時，執行完整恢復流程：
+        1. 將瀏覽器放到最大
+        2. 導航到 LOGIN_PAGE
+        3. 搜尋遊戲並進入（參考 navigate_to_game）
+        4. 縮小回原本視窗大小並回到原位（參考 arrange_windows）
+        5. 執行圖片檢測流程，檢測 game_login 和 error_remind
+        
+        包含網路容錯機制，失敗時自動重試。
+        
+        Args:
+            bt: 發生黑屏的 BrowserThread 實例
+        """
+        username = bt.context.credential.username if bt.context else "Unknown"
+        browser_index = bt.index
+        
+        self.logger.info(f"[監控] 瀏覽器 {browser_index} ({username}) 開始執行黑屏恢復流程...")
+        
+        try:
+            # ===== 步驟 1: 將瀏覽器放到最大 =====
+            self.logger.info(f"[監控] 瀏覽器 {browser_index} 步驟 1/5: 將瀏覽器放到最大")
+            if not self._recovery_maximize_window(bt):
+                self.logger.error(f"[監控] 瀏覽器 {browser_index} ({username}) 放大視窗失敗")
+                return
+            
+            # ===== 步驟 2: 導航到登入頁面 =====
+            self.logger.info(f"[監控] 瀏覽器 {browser_index} 步驟 2/5: 導航到登入頁面")
+            if not self._recovery_navigate_to_login(bt):
+                self.logger.error(f"[監控] 瀏覽器 {browser_index} ({username}) 導航到登入頁面失敗")
+                return
+            
+            # ===== 步驟 3: 搜尋遊戲並進入 =====
+            self.logger.info(f"[監控] 瀏覽器 {browser_index} 步驟 3/5: 搜尋遊戲並進入")
+            if not self._recovery_navigate_to_game(bt):
+                self.logger.error(f"[監控] 瀏覽器 {browser_index} ({username}) 進入遊戲失敗")
+                return
+            
+            # ===== 步驟 4: 縮小回原本視窗大小並回到原位 =====
+            self.logger.info(f"[監控] 瀏覽器 {browser_index} 步驟 4/5: 調整視窗位置")
+            if not self._recovery_arrange_window(bt):
+                self.logger.error(f"[監控] 瀏覽器 {browser_index} ({username}) 調整視窗失敗")
+                return
+            
+            # ===== 步驟 5: 執行圖片檢測流程 =====
+            self.logger.info(f"[監控] 瀏覽器 {browser_index} 步驟 5/5: 執行圖片檢測流程")
+            if not self._recovery_image_detection_flow(bt):
+                self.logger.error(f"[監控] 瀏覽器 {browser_index} ({username}) 圖片檢測流程失敗")
+                return
+            
+            self.logger.info(f"[監控] 瀏覽器 {browser_index} ({username}) ✓ 黑屏恢復完成")
+            
+        except Exception as e:
+            self.logger.error(f"[監控] 瀏覽器 {browser_index} ({username}) 黑屏恢復發生異常: {e}")
+    
+    def _recovery_maximize_window(self, bt: 'BrowserThread') -> bool:
+        """恢復流程：將瀏覽器放到最大。"""
+        try:
+            def task(context: BrowserContext) -> bool:
+                context.driver.maximize_window()
+                time.sleep(1)
+                return True
+            
+            return bt.execute_task(task)
+        except Exception as e:
+            self.logger.debug(f"[監控] 放大視窗失敗: {e}")
+            return False
+    
+    def _recovery_navigate_to_login(self, bt: 'BrowserThread') -> bool:
+        """恢復流程：導航到登入頁面。"""
+        for attempt in range(Constants.MAX_RETRY_ATTEMPTS):
+            try:
+                if attempt > 0:
+                    time.sleep(Constants.RETRY_INTERVAL)
+                
+                def task(context: BrowserContext) -> bool:
+                    driver = context.driver
+                    driver.switch_to.default_content()
+                    driver.get(Constants.LOGIN_PAGE)
+                    WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT_LONG).until(
+                        lambda d: d.execute_script("return document.readyState") == "complete"
+                    )
+                    time.sleep(Constants.PAGE_LOAD_WAIT)
+                    return True
+                
+                if bt.execute_task(task):
+                    return True
+                    
+            except Exception as e:
+                if attempt == Constants.MAX_RETRY_ATTEMPTS - 1:
+                    self.logger.debug(f"[監控] 導航失敗: {e}")
+        return False    
+
+    def _recovery_navigate_to_game(self, bt: 'BrowserThread') -> bool:
+        """恢復流程：搜尋遊戲並進入（參考 navigate_to_game）。"""
+        for attempt in range(Constants.MAX_RETRY_ATTEMPTS):
+            try:
+                if attempt > 0:
+                    time.sleep(Constants.RETRY_INTERVAL)
+                
+                def task(context: BrowserContext) -> bool:
+                    driver = context.driver
+                    
+                    # 1. 關閉可能出現的公告彈窗
+                    try:
+                        driver.execute_script("""
+                            const popups = document.querySelectorAll('.popup-container, .popup-wrap, .popup-account-container');
+                            popups.forEach(popup => {
+                                popup.style.display = 'none';
+                                popup.style.visibility = 'hidden';
+                                popup.remove();
+                            });
+                            const overlays = document.querySelectorAll('[class*="overlay"], [class*="mask"]');
+                            overlays.forEach(overlay => overlay.remove());
+                        """)
+                        time.sleep(1)
+                    except Exception:
+                        pass
+                    
+                    # 2. 點擊搜尋按鈕
+                    search_btn = WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
+                        EC.element_to_be_clickable((By.XPATH, Constants.SEARCH_BUTTON))
+                    )
+                    search_btn.click()
+                    time.sleep(Constants.PAGE_LOAD_WAIT)
+                    
+                    # 3. 輸入「戰神」
+                    search_input = WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
+                        EC.element_to_be_clickable((By.XPATH, Constants.SEARCH_INPUT))
+                    )
+                    search_input.clear()
+                    search_input.send_keys('戰神')
+                    search_input.send_keys('\n')
+                    time.sleep(Constants.PAGE_LOAD_WAIT_LONG)
+                    
+                    # 4. 點擊遊戲
+                    game_element = WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT_LONG).until(
+                        EC.element_to_be_clickable((By.XPATH, Constants.GAME_XPATH))
+                    )
+                    game_element.click()
+                    time.sleep(Constants.PAGE_LOAD_WAIT_LONG)
+                    
+                    # 5. 切換到 iframe
+                    time.sleep(Constants.PAGE_LOAD_WAIT)
+                    iframe = WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT_LONG).until(
+                        EC.presence_of_element_located((By.XPATH, Constants.GAME_IFRAME))
+                    )
+                    driver.switch_to.frame(iframe)
+                    
+                    # 6. 驗證 Canvas 存在
+                    WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
+                        lambda d: d.execute_script(f"return document.getElementById('{Constants.GAME_CANVAS}') !== null;")
+                    )
+                    
+                    return True
+                
+                if bt.execute_task(task):
+                    return True
+                    
+            except Exception as e:
+                if attempt == Constants.MAX_RETRY_ATTEMPTS - 1:
+                    self.logger.debug(f"[監控] 進入遊戲失敗: {e}")
+        return False
+    
+    def _recovery_arrange_window(self, bt: 'BrowserThread') -> bool:
+        """恢復流程：縮小回原本視窗大小並回到原位（參考 arrange_windows）。"""
+        try:
+            def task(context: BrowserContext) -> bool:
+                width = Constants.DEFAULT_WINDOW_WIDTH
+                height = Constants.DEFAULT_WINDOW_HEIGHT
+                columns = Constants.DEFAULT_WINDOW_COLUMNS
+                
+                index = context.index
+                row = (index - 1) // columns
+                col = (index - 1) % columns
+                
+                x = col * width
+                y = row * height
+                
+                context.driver.set_window_size(width, height)
+                context.driver.set_window_position(x, y)
+                return True
+            
+            return bt.execute_task(task)
+        except Exception as e:
+            self.logger.debug(f"[監控] 調整視窗失敗: {e}")
+            return False
+    
+    def _recovery_image_detection_flow(self, bt: 'BrowserThread') -> bool:
+        """恢復流程：執行圖片檢測流程。
+        
+        流程：
+        1. 檢測 game_login → 點擊
+        2. 檢測 error_remind（替代 game_confirm）→ 如果存在就點擊 error_confirm
+        """
+        username = bt.context.credential.username if bt.context else "Unknown"
+        browser_index = bt.index
+        
+        # ===== 階段 1: 檢測並點擊 game_login =====
+        self.logger.debug(f"[監控] 瀏覽器 {browser_index} 檢測 遊戲登入...")
+        if not self._recovery_detect_and_click(
+            bt, 
+            Constants.GAME_LOGIN, 
+            Constants.GAME_LOGIN_BUTTON_X_RATIO,
+            Constants.GAME_LOGIN_BUTTON_Y_RATIO
+        ):
+            self.logger.warning(f"[監控] 瀏覽器 {browser_index} 未檢測到 遊戲登入 或點擊失敗")
+            # 即使 game_login 失敗也繼續嘗試下一步
+        
+        time.sleep(2)  # 等待畫面切換
+        
+        # ===== 階段 2: 檢測 error_remind，如果存在就點擊 error_confirm =====
+        self.logger.debug(f"[監控] 瀏覽器 {browser_index} 檢測 錯誤訊息...")
+        
+        # 檢測 error_remind 是否存在
+        error_detected = False
+        for _ in range(10):  # 最多等待 10 次（約 10 秒）
+            try:
+                def detect_task(context: BrowserContext) -> bool:
+                    result = self._image_detector.detect_in_browser(
+                        context.driver, Constants.ERROR_REMIND
+                    )
+                    return result is not None
+                
+                if bt.execute_task(detect_task):
+                    error_detected = True
+                    break
+            except Exception:
+                pass
+            time.sleep(1)
+        
+        if error_detected:
+            # 點擊 error_confirm 按鈕
+            self.logger.info(f"[監控] 瀏覽器 {browser_index} 偵測到錯誤訊息，點擊確認按鈕...")
+            self._recovery_click_error_confirm(bt)
+        else:
+            # 沒有 error_remind，嘗試檢測並點擊 game_confirm（正常流程）
+            self.logger.debug(f"[監控] 瀏覽器 {browser_index} 未偵測到錯誤訊息，檢測 遊戲開始...")
+            self._recovery_detect_and_click(
+                bt,
+                Constants.GAME_CONFIRM,
+                Constants.GAME_CONFIRM_BUTTON_X_RATIO,
+                Constants.GAME_CONFIRM_BUTTON_Y_RATIO
+            )
+        
+        self.logger.info(f"[監控] 瀏覽器 {browser_index} ({username}) 圖片檢測流程完成")
+        return True
+    
+    def _recovery_detect_and_click(
+        self,
+        bt: 'BrowserThread',
+        template_name: str,
+        x_ratio: float,
+        y_ratio: float
+    ) -> bool:
+        """恢復流程：檢測圖片並點擊。
+        
+        持續檢測直到找到圖片，然後點擊指定座標。
+        """
+        browser_index = bt.index
+        display_name = Constants.TEMPLATE_DISPLAY_NAMES.get(template_name, template_name)
+        
+        # 檢查模板是否存在
+        if not self._image_detector.template_exists(template_name):
+            self.logger.warning(f"[監控] 模板 {template_name} 不存在，跳過檢測")
+            return False
+        
+        # 持續檢測直到找到（最多 30 次）
+        for attempt in range(30):
+            try:
+                def detect_task(context: BrowserContext) -> bool:
+                    result = self._image_detector.detect_in_browser(
+                        context.driver, template_name
+                    )
+                    return result is not None
+                
+                if bt.execute_task(detect_task):
+                    self.logger.debug(f"[監控] 瀏覽器 {browser_index} 檢測到 {display_name}")
+                    break
+            except Exception:
+                pass
+            
+            if attempt % 10 == 0 and attempt > 0:
+                self.logger.debug(f"[監控] 瀏覽器 {browser_index} 等待 {display_name}... ({attempt}/30)")
+            
+            time.sleep(1)
+        else:
+            self.logger.warning(f"[監控] 瀏覽器 {browser_index} 等待 {display_name} 超時")
+            return False
+        
+        # 點擊
+        time.sleep(0.5)
+        try:
+            def click_task(context: BrowserContext) -> bool:
+                driver = context.driver
+                
+                rect = None
+                for _ in range(3):
+                    rect = driver.execute_script(f"""
+                        const canvas = document.getElementById('{Constants.GAME_CANVAS}');
+                        if (canvas) {{
+                            const r = canvas.getBoundingClientRect();
+                            return {{x: r.left, y: r.top, w: r.width, h: r.height}};
+                        }}
+                        return null;
+                    """)
+                    if rect:
+                        break
+                    time.sleep(1)
+                
+                if not rect:
+                    return False
+                
+                click_x, click_y = BrowserHelper.calculate_click_position(rect, x_ratio, y_ratio)
+                
+                for event_type in ["mousePressed", "mouseReleased"]:
+                    driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
+                        "type": event_type,
+                        "x": click_x,
+                        "y": click_y,
+                        "button": "left",
+                        "clickCount": 1
+                    })
+                return True
+            
+            if bt.execute_task(click_task):
+                self.logger.debug(f"[監控] 瀏覽器 {browser_index} 已點擊 {display_name}")
+                return True
+                
+        except Exception as e:
+            self.logger.debug(f"[監控] 瀏覽器 {browser_index} 點擊 {display_name} 失敗: {e}")
+        
+        return False
+    
+    def _recovery_click_error_confirm(self, bt: 'BrowserThread') -> bool:
+        """恢復流程：點擊錯誤訊息確認按鈕。"""
+        try:
+            def task(context: BrowserContext) -> bool:
+                driver = context.driver
+                
+                rect = None
+                for _ in range(3):
+                    rect = driver.execute_script(f"""
+                        const canvas = document.getElementById('{Constants.GAME_CANVAS}');
+                        if (canvas) {{
+                            const r = canvas.getBoundingClientRect();
+                            return {{x: r.left, y: r.top, w: r.width, h: r.height}};
+                        }}
+                        return null;
+                    """)
+                    if rect:
+                        break
+                    time.sleep(1)
+                
+                if not rect:
+                    return False
+                
+                click_x, click_y = BrowserHelper.calculate_click_position(
+                    rect,
+                    Constants.ERROR_CONFIRM_BUTTON_X_RATIO,
+                    Constants.ERROR_CONFIRM_BUTTON_Y_RATIO
+                )
+                
+                for event_type in ["mousePressed", "mouseReleased"]:
+                    driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
+                        "type": event_type,
+                        "x": click_x,
+                        "y": click_y,
+                        "button": "left",
+                        "clickCount": 1
+                    })
+                return True
+            
+            return bt.execute_task(task)
+        except Exception as e:
+            self.logger.debug(f"[監控] 點擊錯誤確認按鈕失敗: {e}")
+            return False
+    
     def _start_error_monitor(self) -> None:
-        """啟動錯誤訊息監控執行緒。"""
+        """啟動錯誤監控功能。"""
         if self.error_monitor_running:
-            self.logger.warning("[監控] 錯誤訊息監控已在運行中")
+            self.logger.warning("[監控] 錯誤監控已在運行中")
             return
         
         self._error_monitor_stop_event.clear()
@@ -2271,7 +3012,7 @@ class GameControlCenter:
         self.error_monitor_running = True
     
     def _stop_error_monitor(self) -> None:
-        """停止錯誤訊息監控執行緒。"""
+        """停止錯誤監控功能。"""
         if not self.error_monitor_running:
             return
         
@@ -2281,7 +3022,7 @@ class GameControlCenter:
             self._error_monitor_thread.join(timeout=2.0)
             
             if self._error_monitor_thread.is_alive():
-                self.logger.warning("[監控] 錯誤訊息監控執行緒未能正常結束")
+                self.logger.warning("[監控] 錯誤監控功能停止時發生延遲")
         
         self._error_monitor_thread = None
         self.error_monitor_running = False
@@ -2290,12 +3031,12 @@ class GameControlCenter:
         """顯示指令說明。"""
         help_text = """
 ==========================================================
-                    【遊戲控制中心 - 指令說明】
+                    【遊戲控制面板 - 指令說明】
 ==========================================================
 
 【自動操作】
   s <最小>,<最大>     開始自動按鍵（設定隨機間隔秒數）
-                      範例: s 1,2  → 每次間隔 1~2 秒下注
+                      範例: s 1,2 → 每 1~2 秒自動下注一次
                    
   p                   暫停所有目前運行的自動操作
 
@@ -2343,7 +3084,7 @@ class GameControlCenter:
             try:
                 # 檢查瀏覽器是否仍然有效
                 if not bt.is_browser_alive():
-                    self.logger.warning(f"瀏覽器 {browser_index} ({username}) 已關閉，停止自動按鍵")
+                    self.logger.warning(f"[警告] 瀏覽器 {browser_index} ({username}) 已離線，自動停止")
                     break
                 
                 press_count += 1
@@ -2363,20 +3104,20 @@ class GameControlCenter:
                     break
                     
             except Exception as e:
-                self.logger.error(f"瀏覽器 {browser_index} ({username}) 執行錯誤: {e}")
+                self.logger.error(f"[錯誤] 瀏覽器 {browser_index} ({username}) 操作失敗: {e}")
                 self._stop_event.wait(timeout=1.0)
         
-        self.logger.info(f"瀏覽器 {browser_index} ({username}) 已停止，共執行 {press_count} 次")
+        self.logger.info(f"[資訊] 瀏覽器 {browser_index} ({username}) 已停止，共按了 {press_count} 次空白鍵")
     
     def _start_auto_press(self) -> None:
-        """為每個瀏覽器啟動獨立的自動按鍵執行緒。"""
+        """為每個瀏覽器啟動獨立的自動按鍵功能。"""
         if self.auto_press_running:
-            self.logger.warning("自動按鍵已在運行中")
+            self.logger.warning("[警告] 自動按鍵已在運行中")
             return
         
         # 檢查是否已設定間隔時間
         if not hasattr(self, 'min_interval') or not hasattr(self, 'max_interval'):
-            self.logger.warning("請先使用 's <最小>,<最大>' 命令設定間隔時間")
+            self.logger.warning("[警告] 請先使用 's <最小>,<最大>' 命令設定間隔時間")
             return
         
         # 清除停止事件
@@ -2402,9 +3143,9 @@ class GameControlCenter:
         self.logger.info(f"[成功] 已啟動 {len(active_browsers)} 個瀏覽器的自動按鍵")
     
     def _stop_auto_press(self) -> None:
-        """停止所有自動按鍵執行緒。"""
+        """停止所有瀏覽器的自動按鍵功能。"""
         if not self.auto_press_running:
-            self.logger.warning("自動按鍵未在運行")
+            self.logger.warning("[警告] 自動按鍵未在運行")
             return
         
         # 設置停止事件
@@ -2419,7 +3160,7 @@ class GameControlCenter:
                 if not thread.is_alive():
                     stopped_count += 1
                 else:
-                    self.logger.warning(f"瀏覽器 {browser_index} 的執行緒未能正常結束")
+                    self.logger.warning(f"[警告] 瀏覽器 {browser_index} 停止時發生延遲")
             else:
                 stopped_count += 1
         
@@ -2513,9 +3254,9 @@ class GameControlCenter:
             是否繼續運行
         """
         if not arguments:
-            self.logger.error("指令格式錯誤，請使用: q <編號>")
-            self.logger.info("  q 0      - 關閉所有瀏覽器並退出")
-            self.logger.info("  q 1      - 關閉第 1 個瀏覽器")
+            self.logger.error("[錯誤] 指令格式錯誤，請使用: q <編號>")
+            self.logger.info("       q 0 - 關閉所有瀏覽器並退出")
+            self.logger.info("       q 1 - 關閉第 1 個瀏覽器")
             return True
         
         try:
@@ -2524,7 +3265,7 @@ class GameControlCenter:
             
             if index == 0:
                 # 關閉所有瀏覽器
-                self.logger.info(f"開始關閉所有 {len(active_browsers)} 個瀏覽器...")
+                self.logger.info(f"[資訊] 開始關閉所有 {len(active_browsers)} 個瀏覽器...")
                 
                 for i, bt in enumerate(active_browsers, 1):
                     try:
@@ -2532,9 +3273,9 @@ class GameControlCenter:
                         username = bt.context.credential.username if bt.context else "Unknown"
                         self.logger.info(f"[成功] 已關閉瀏覽器 {i} ({username})")
                     except Exception as e:
-                        self.logger.error(f"關閉瀏覽器 {i} 失敗: {e}")
+                        self.logger.error(f"[錯誤] 關閉瀏覽器 {i} 失敗: {e}")
                 
-                self.logger.info("所有瀏覽器已關閉，退出控制中心")
+                self.logger.info("[資訊] 所有瀏覽器已關閉，退出控制面板")
                 return False
             
             elif 1 <= index <= len(active_browsers):
@@ -2546,20 +3287,20 @@ class GameControlCenter:
                     bt.stop()
                     self.logger.info(f"[成功] 已關閉瀏覽器 {index} ({username})")
                 except Exception as e:
-                    self.logger.error(f"關閉瀏覽器 {index} 失敗: {e}")
+                    self.logger.error(f"[錯誤] 關閉瀏覽器 {index} 失敗: {e}")
                 
                 # 檢查是否還有瀏覽器在運行
                 remaining = len(self._get_active_browsers())
                 if remaining == 0:
-                    self.logger.info("所有瀏覽器已關閉，退出控制中心")
+                    self.logger.info("[資訊] 所有瀏覽器已關閉，退出控制面板")
                     return False
                 else:
-                    self.logger.info(f"剩餘 {remaining} 個瀏覽器仍在運行")
+                    self.logger.info(f"[資訊] 剩餘 {remaining} 個瀏覽器仍在運行")
             else:
-                self.logger.error(f"瀏覽器編號無效，請輸入 0 (全部) 或 1-{len(active_browsers)} 之間的數字")
+                self.logger.error(f"[錯誤] 瀏覽器編號無效，請輸入 0 (全部) 或 1-{len(active_browsers)}")
         
         except ValueError:
-            self.logger.error(f"無效的編號: {arguments}，請輸入數字")
+            self.logger.error(f"[錯誤] 無效的編號: {arguments}，請輸入數字")
         
         return True
     
@@ -2574,8 +3315,8 @@ class GameControlCenter:
         """
         if not arguments:
             self.logger.error("[錯誤] 指令格式錯誤")
-            self.logger.info("   正確格式: s <最小>,<最大>")
-            self.logger.info("   範例: s 1,2  → 間隔 1~2 秒按空白鍵")
+            self.logger.info("       正確格式: s <最小>,<最大>")
+            self.logger.info("       範例: s 1,2 → 每 1~2 秒按一次空白鍵")
             return True
         
         # 解析用戶輸入的間隔時間
@@ -2583,7 +3324,7 @@ class GameControlCenter:
             interval_parts = arguments.split(',')
             if len(interval_parts) != 2:
                 self.logger.error("[錯誤] 間隔格式錯誤，需要兩個數字")
-                self.logger.info("   範例: s 1,2 或 s 1.5,3")
+                self.logger.info("       範例: s 1,2 或 s 1.5,3")
                 return True
             
             min_interval = float(interval_parts[0].strip())
@@ -2595,19 +3336,19 @@ class GameControlCenter:
             
             if min_interval > max_interval:
                 self.logger.error("[錯誤] 最小間隔不能大於最大間隔")
-                self.logger.info(f"   您輸入的: 最小={min_interval}, 最大={max_interval}")
+                self.logger.info(f"       您輸入的: 最小={min_interval}, 最大={max_interval}")
                 return True
                 
         except ValueError:
             self.logger.error("[錯誤] 間隔格式錯誤，請輸入有效的數字")
-            self.logger.info("   範例: s 1,2 或 s 1.5,3")
+            self.logger.info("       範例: s 1,2 或 s 1.5,3")
             return True
         
         # 檢查是否已在運行
         if self.auto_press_running:
             self.logger.warning("[警告] 自動按鍵已在運行中")
-            self.logger.info(f"   目前設定: {self.min_interval}~{self.max_interval} 秒")
-            self.logger.info("   提示: 請先使用 'p' 暫停，再重新啟動")
+            self.logger.info(f"       目前設定: {self.min_interval}~{self.max_interval} 秒")
+            self.logger.info("       請先使用 'p' 暫停後再重新設定")
             return True
         
         # 設置間隔時間
@@ -2618,9 +3359,9 @@ class GameControlCenter:
         
         self.logger.info("")
         self.logger.info("[成功] 自動按鍵已啟動")
-        self.logger.info(f"  > 間隔時間: {min_interval}~{max_interval} 秒")
-        self.logger.info(f"  > 瀏覽器數: {active_count} 個")
-        self.logger.info("  > 暫停指令: p")
+        self.logger.info(f"       間隔時間: {min_interval}~{max_interval} 秒")
+        self.logger.info(f"       瀏覽器數: {active_count} 個")
+        self.logger.info("       暫停指令: p")
         self.logger.info("")
         
         # 啟動自動按鍵
@@ -2643,22 +3384,22 @@ class GameControlCenter:
         self.logger.info("=" * 60)
         self.logger.info("")
         self.logger.info(f"[提示] 需要擷取 {display_name} 的參考圖片")
-        self.logger.info("   請確保目標瀏覽器的遊戲畫面已顯示目標內容")
+        self.logger.info("       請確保目標遊戲視窗已顯示正確的畫面內容")
         self.logger.info("")
         
         # 取得可用的瀏覽器
         active_browsers = self._get_active_browsers()
         
         if not active_browsers:
-            self.logger.error("[錯誤] 沒有可用的瀏覽器")
+            self.logger.error("[錯誤] 沒有可用的遊戲視窗")
             return None
         
         # 顯示可選擇的瀏覽器列表
-        self.logger.info("請選擇要擷取的瀏覽器:")
+        self.logger.info("請選擇要擷取的遊戲視窗:")
         for bt in active_browsers:
             if bt.context:
                 username = bt.context.credential.username
-                self.logger.info(f"  {bt.index}  - 瀏覽器 {bt.index} ({username})")
+                self.logger.info(f"  {bt.index}  - 視窗 {bt.index} ({username})")
         
         self.logger.info("  q  - 取消")
         self.logger.info("")
@@ -2808,19 +3549,19 @@ class GameControlCenter:
             self.logger.error(f"[錯誤] 截取失敗: {e}")
     
     def start(self) -> None:
-        """啟動控制中心。"""
+        """啟動控制面板。"""
         self.running = True
         self.logger.info("")
         self.logger.info("=" * 60)
-        self.logger.info("           【遊戲控制中心】已啟動")
+        self.logger.info("           【遊戲控制面板】已啟動")
         self.logger.info("=" * 60)
         self.logger.info("")
         
         active_count = len(self._get_active_browsers())
-        self.logger.info(f"[成功] 已連接 {active_count} 個瀏覽器")
+        self.logger.info(f"[成功] 已連接 {active_count} 個遊戲視窗")
         self.logger.info("")
         
-        # 啟動錯誤訊息監控（步驟 10 後開始監控）
+        # 啟動錯誤訊息監控
         self._start_error_monitor()
         
         # 自動顯示幫助訊息
@@ -2839,10 +3580,10 @@ class GameControlCenter:
                         self.logger.warning("[警告] 請輸入指令（輸入 'h' 查看幫助）")
                         
                 except EOFError:
-                    self.logger.info("\n[警告] 檢測到 EOF，退出控制中心")
+                    self.logger.info("\n[資訊] 輸入結束，退出控制面板")
                     break
                 except KeyboardInterrupt:
-                    self.logger.info("\n[警告] 使用者中斷，退出控制中心")
+                    self.logger.info("\n[資訊] 使用者中斷，退出控制面板")
                     break
         finally:
             # 確保停止所有自動操作
@@ -2853,10 +3594,10 @@ class GameControlCenter:
             self._stop_error_monitor()
             
             self.running = False
-            self.logger.info("[成功] 控制中心已關閉")
+            self.logger.info("[成功] 控制面板已關閉")
     
     def stop(self) -> None:
-        """停止控制中心。"""
+        """停止控制面板。"""
         self.running = False
         
         # 確保停止自動按鍵
@@ -2880,7 +3621,7 @@ class AutoSlotGameAppStarter:
     - 建立瀏覽器實例（每個瀏覽器使用專屬執行緒）
     - 執行登入與導航流程
     - 圖片檢測與點擊
-    - 啟動控制中心
+    - 啟動控制面板
     
     Attributes:
         browser_threads: 瀏覽器執行緒列表
@@ -2946,7 +3687,14 @@ class AutoSlotGameAppStarter:
             return False
     
     def _step_load_config(self) -> None:
-        """步驟 1: 載入配置檔案"""
+        """步驟 1: 載入配置檔案。
+        
+        從 lib/用戶資料.txt 讀取用戶帳號密碼，
+        從 lib/用戶規則.txt 讀取下注規則。
+        
+        Raises:
+            ConfigurationError: 配置檔案格式錯誤時拋出。
+        """
         self.logger.info("=" * 60)
         self.logger.info("【步驟 1】載入配置檔案")
         self.logger.info("=" * 60)
@@ -3022,7 +3770,7 @@ class AutoSlotGameAppStarter:
         if success_count > 0:
             self.logger.info(f"[成功] 已啟動 {success_count} 個代理中繼伺服器")
         if no_proxy_count > 0:
-            self.logger.info(f"[資訊] {no_proxy_count} 個瀏覽器無代理配置，將使用本機網路")
+            self.logger.info(f"[資訊] {no_proxy_count} 個瀏覽器無代理配置，使用直連網路")
         
         self.logger.info("")
         return proxy_ports
@@ -3046,7 +3794,7 @@ class AutoSlotGameAppStarter:
         self.logger.info("=" * 60)
         
         self.browser_manager = BrowserManager(logger=self.logger)
-        self.logger.info(f"[資訊] 正在建立 {browser_count} 個瀏覽器執行緒...")
+        self.logger.info(f"[資訊] 正在開啟 {browser_count} 個遊戲視窗...")
         
         # 1. 建立並啟動所有瀏覽器執行緒
         for i in range(browser_count):
@@ -3091,7 +3839,16 @@ class AutoSlotGameAppStarter:
         self.logger.info("")
     
     def cleanup(self) -> None:
-        """清理所有資源"""
+        """清理所有資源。
+        
+        執行以下清理步驟：
+        1. 停止所有瀏覽器執行緒（會自動關閉瀏覽器）
+        2. 等待所有執行緒結束（最多 5 秒）
+        3. 清空執行緒列表
+        4. 停止所有代理伺服器
+        
+        此方法應在程式結束時呼叫，確保資源正確釋放。
+        """
         self.logger.info("=" * 60)
         self.logger.info("【清理資源】")
         self.logger.info("=" * 60)
@@ -3119,11 +3876,32 @@ class AutoSlotGameAppStarter:
         self.logger.info("")
     
     def get_browser_threads(self) -> List[BrowserThread]:
-        """取得所有瀏覽器執行緒"""
+        """取得所有瀏覽器執行緒。
+        
+        Returns:
+            瀏覽器執行緒列表，每個執行緒包含一個獨立的瀏覽器實例。
+        
+        Example:
+            >>> threads = starter.get_browser_threads()
+            >>> for thread in threads:
+            ...     print(f"瀏覽器 {thread.index}: {thread.is_browser_alive()}")
+        """
         return self.browser_threads
     
     def get_browser_contexts(self) -> List[BrowserContext]:
-        """取得所有瀏覽器上下文（向後相容）"""
+        """取得所有瀏覽器上下文。
+        
+        此方法提供向後相容性，從執行緒中提取 BrowserContext 物件。
+        僅返回已成功建立的瀏覽器上下文（排除 None）。
+        
+        Returns:
+            瀏覽器上下文列表。
+        
+        Example:
+            >>> contexts = starter.get_browser_contexts()
+            >>> for ctx in contexts:
+            ...     print(f"用戶: {ctx.credential.username}")
+        """
         return [t.context for t in self.browser_threads if t.context is not None]
     
     def execute_on_all_browsers(
@@ -3134,13 +3912,25 @@ class AutoSlotGameAppStarter:
         """在所有瀏覽器上並行執行任務。
         
         每個任務都會在對應瀏覽器的專屬執行緒中執行，所有任務同時啟動。
+        已關閉的瀏覽器會自動跳過並返回錯誤結果。
         
         Args:
-            func: 要執行的函數，接收 BrowserContext 作為參數
-            timeout: 每個任務的超時時間
+            func: 要執行的函數，接收 BrowserContext 作為參數。
+            timeout: 每個任務的超時時間（秒），None 表示無限等待。
             
         Returns:
-            結果列表，每個元素為 (index, result, error)
+            結果列表，每個元素為 (index, result, error) 元組：
+            - index: 瀏覽器編號
+            - result: 任務執行結果，失敗時為 None
+            - error: 例外物件，成功時為 None
+        
+        Example:
+            >>> def print_url(ctx: BrowserContext) -> str:
+            ...     return ctx.driver.current_url
+            >>> results = starter.execute_on_all_browsers(print_url, timeout=10.0)
+            >>> for idx, url, err in results:
+            ...     if err is None:
+            ...         print(f"瀏覽器 {idx}: {url}")
         """
         results: List[Tuple[int, Any, Optional[Exception]]] = []
         pending_threads: List[BrowserThread] = []
@@ -3183,11 +3973,19 @@ class AutoSlotGameAppStarter:
         return results
     
     def get_credentials(self) -> List[UserCredential]:
-        """取得所有用戶憑證"""
+        """取得所有用戶憑證。
+        
+        Returns:
+            用戶憑證列表，從配置檔案讀取。
+        """
         return self.credentials
     
     def get_rules(self) -> List[BetRule]:
-        """取得所有下注規則"""
+        """取得所有下注規則。
+        
+        Returns:
+            下注規則列表，從配置檔案讀取。
+        """
         return self.rules
     
     # ========================================================================
@@ -3818,13 +4616,13 @@ class AutoSlotGameAppStarter:
             time.sleep(Constants.DETECTION_INTERVAL)
     
     def start_control_center(self) -> None:
-        """步驟 10: 啟動遊戲控制中心
+        """步驟 10: 啟動遊戲控制面板
         
         建立並啟動 GameControlCenter 實例，提供互動式命令列介面。
-        ClickLobbyConfirm --> StartControlCenter[啟動遊戲控制中心]
+        ClickLobbyConfirm --> StartControlCenter[啟動遊戲控制面板]
         """
         self.logger.info("=" * 60)
-        self.logger.info("【步驟 10】啟動遊戲控制中心")
+        self.logger.info("【步驟 10】啟動遊戲控制面板")
         self.logger.info("=" * 60)
         
         if not self.browser_threads:
@@ -3851,7 +4649,7 @@ class AutoSlotGameAppStarter:
                 except Exception:
                     pass
         
-        # 建立控制中心實例
+        # 建立控制面板實例
         control_center = GameControlCenter(
             browser_threads=self.browser_threads,
             bet_rules=self.rules,
@@ -3859,7 +4657,7 @@ class AutoSlotGameAppStarter:
             logger=self.logger
         )
         
-        # 啟動控制中心（阻塞式，直到使用者退出）
+        # 啟動控制面板（阻塞式，直到使用者退出）
         control_center.start()
 
 
@@ -3877,7 +4675,7 @@ def main() -> None:
     4. 導航到遊戲頁面
     5. 調整視窗排列
     6. 執行圖片檢測流程
-    7. 啟動遊戲控制中心
+    7. 啟動遊戲控制面板
     
     程式結束時自動清理所有資源。
     """
@@ -3925,7 +4723,7 @@ def main() -> None:
             logger.info("[成功] 所有瀏覽器已就緒")
             logger.info("")
             
-            # 步驟 10: 啟動遊戲控制中心（阻塞式，直到使用者退出）
+            # 步驟 10: 啟動遊戲控制面板（阻塞式，直到使用者退出）
             starter.start_control_center()
             
         else:
