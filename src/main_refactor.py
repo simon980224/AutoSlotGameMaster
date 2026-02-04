@@ -153,9 +153,15 @@ class Constants:
     DEFAULT_WINDOW_COLUMNS: int = 4
     
     # =========================================================================
-    # URL 配置
+    # 代理商配置
     # =========================================================================
     LOGIN_PAGE: str = "https://www.fin88.app/"
+
+    # =========================================================================
+    # 遊戲配置
+    # =========================================================================
+    GAME_PATTERN = "ATG-egyptian-mythology"              # 賽特一
+    GAME_PATTERN = "feb91c659e820a0405aabc1520c24d12"    # 賽特二
     
     # =========================================================================
     # 登入相關 XPath
@@ -174,12 +180,6 @@ class Constants:
     # =========================================================================
     # 遊戲頁面相關 XPath
     # =========================================================================
-    SEARCH_BUTTON: str = "//button[contains(@class, 'search-btn')]"
-    SEARCH_INPUT: str = "//input[@placeholder='按換行鍵搜索']"
-    GAME_XPATH: str = (
-        "//div[contains(@class, 'game-card-container') "
-        "and .//div[contains(@style, 'ATG-egyptian-mythology.png')]]"
-    )
     GAME_IFRAME: str = "//iframe[contains(@class, 'iframe-item')]"
     GAME_CANVAS: str = "GameCanvas"
     
@@ -2948,37 +2948,24 @@ class GameControlCenter:
                     except Exception:
                         pass
                     
-                    # 2. 點擊搜尋按鈕
-                    search_btn = WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
-                        EC.element_to_be_clickable((By.XPATH, Constants.SEARCH_BUTTON))
+                    # 2. 用背景圖片找遊戲卡片並點擊
+                    game_selector = f"//div[contains(@class, 'game-img') and contains(@style, '{Constants.GAME_PATTERN}')]"
+                    game_element = WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
+                        EC.presence_of_element_located((By.XPATH, game_selector))
                     )
-                    search_btn.click()
-                    time.sleep(Constants.PAGE_LOAD_WAIT)
-                    
-                    # 3. 輸入「戰神」
-                    search_input = WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
-                        EC.element_to_be_clickable((By.XPATH, Constants.SEARCH_INPUT))
-                    )
-                    search_input.clear()
-                    search_input.send_keys('戰神')
-                    search_input.send_keys('\n')
+                    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", game_element)
+                    time.sleep(1)
+                    driver.execute_script("arguments[0].click();", game_element)
                     time.sleep(Constants.PAGE_LOAD_WAIT_LONG)
                     
-                    # 4. 點擊遊戲
-                    game_element = WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT_LONG).until(
-                        EC.element_to_be_clickable((By.XPATH, Constants.GAME_XPATH))
-                    )
-                    game_element.click()
-                    time.sleep(Constants.PAGE_LOAD_WAIT_LONG)
-                    
-                    # 5. 切換到 iframe
+                    # 3. 切換到 iframe
                     time.sleep(Constants.PAGE_LOAD_WAIT)
                     iframe = WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT_LONG).until(
                         EC.presence_of_element_located((By.XPATH, Constants.GAME_IFRAME))
                     )
                     driver.switch_to.frame(iframe)
                     
-                    # 6. 驗證 Canvas 存在
+                    # 4. 驗證 Canvas 存在
                     WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
                         lambda d: d.execute_script(f"return document.getElementById('{Constants.GAME_CANVAS}') !== null;")
                     )
@@ -4438,37 +4425,24 @@ class AutoSlotGameAppStarter:
                     except Exception:
                         pass  # 沒有彈窗也沒關係
                     
-                    # 2. 點擊搜尋按鈕（使用 WebDriverWait 確保元素可點擊）
-                    search_btn = WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
-                        EC.element_to_be_clickable((By.XPATH, Constants.SEARCH_BUTTON))
+                    # 2. 用背景圖片找遊戲卡片並點擊
+                    game_selector = f"//div[contains(@class, 'game-img') and contains(@style, '{Constants.GAME_PATTERN}')]"
+                    game_element = WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
+                        EC.presence_of_element_located((By.XPATH, game_selector))
                     )
-                    search_btn.click()
-                    time.sleep(Constants.PAGE_LOAD_WAIT)  # 等待搜尋輸入框顯示
-                    
-                    # 3. 輸入「戰神」（使用 WebDriverWait 確保輸入框可用）
-                    search_input = WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
-                        EC.element_to_be_clickable((By.XPATH, Constants.SEARCH_INPUT))
-                    )
-                    search_input.clear()
-                    search_input.send_keys('戰神')
-                    search_input.send_keys('\n')
-                    time.sleep(Constants.PAGE_LOAD_WAIT_LONG)  # 等待搜尋結果載入（網路慢時需要更長時間）
-                    
-                    # 4. 點擊遊戲（使用 WebDriverWait 確保遊戲卡片載入完成）
-                    game_element = WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT_LONG).until(
-                        EC.element_to_be_clickable((By.XPATH, Constants.GAME_XPATH))
-                    )
-                    game_element.click()
+                    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", game_element)
+                    time.sleep(1)
+                    driver.execute_script("arguments[0].click();", game_element)
                     time.sleep(Constants.PAGE_LOAD_WAIT_LONG)  # 等待遊戲載入
                     
-                    # 5. 切換到 iframe（使用較長超時等待 iframe 載入）
+                    # 3. 切換到 iframe（使用較長超時等待 iframe 載入）
                     time.sleep(Constants.PAGE_LOAD_WAIT)  # 額外等待 iframe 載入
                     iframe = WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT_LONG).until(
                         EC.presence_of_element_located((By.XPATH, Constants.GAME_IFRAME))
                     )
                     driver.switch_to.frame(iframe)
                     
-                    # 6. 驗證是否成功進入遊戲（檢查 Canvas 是否存在）
+                    # 4. 驗證是否成功進入遊戲（檢查 Canvas 是否存在）
                     WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
                         lambda d: d.execute_script(f"return document.getElementById('{Constants.GAME_CANVAS}') !== null;")
                     )
