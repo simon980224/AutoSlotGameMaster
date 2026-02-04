@@ -4070,16 +4070,17 @@ class AutoSlotGameAppStarter:
                         self.logger.info(f"[重試] 瀏覽器 {context.index} 登入第 {attempt + 1} 次嘗試...")
                         time.sleep(Constants.RETRY_INTERVAL)
                     
-                    # 1. 等待 loading 遮罩層消失（延長等待時間以適應慢網路）
-                    for wait_count in range(Constants.LOADING_MAX_WAIT):
-                        loading_elements = driver.find_elements(By.CSS_SELECTOR, ".loading-container")
-                        if not loading_elements or not loading_elements[0].is_displayed():
-                            break
-                        if wait_count > 0 and wait_count % 10 == 0:
-                            self.logger.debug(f"[除錯] 瀏覽器 {context.index} 等待 loading 消失... ({wait_count}s)")
-                        time.sleep(1)
-                    
-                    # 2. 點擊初始登入按鈕（使用較長超時）
+                    # 1. 等待 loading 遮罩層消失（使用 JavaScript 檢測，避免多次 WebDriver 調用）
+                    WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
+                        lambda d: d.execute_script("""
+                            const loading = document.querySelector('.loading-container');
+                            return !loading || loading.style.display === 'none' || 
+                                   getComputedStyle(loading).display === 'none' ||
+                                   getComputedStyle(loading).visibility === 'hidden';
+                        """)
+                    )
+
+                    # 2. 點擊初始登入按鈕
                     initial_login_btn = WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
                         EC.element_to_be_clickable((By.XPATH, Constants.INITIAL_LOGIN_BUTTON))
                     )
@@ -4679,7 +4680,10 @@ def main() -> None:
     
     程式結束時自動清理所有資源。
     """
+    # 建立日誌記錄器
     logger = LoggerFactory.get_logger()
+    # 設定日誌等級為 DEBUG
+    # logger = LoggerFactory.get_logger(level=LogLevel.DEBUG)
     
     logger.info("")
     logger.info("=" * 60)
