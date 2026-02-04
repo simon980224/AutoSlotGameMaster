@@ -1689,25 +1689,41 @@ class BrowserHelper:
         })
     
     @staticmethod
-    def calculate_click_position(
+    def click_canvas_position(
+        driver: WebDriver,
         canvas_rect: Dict[str, float],
         x_ratio: float,
         y_ratio: float
     ) -> Tuple[float, float]:
-        """根據 Canvas 區域和比例計算點擊座標。
+        """根據 Canvas 區域和比例計算座標並執行 CDP 點擊。
+        
+        此方法合併了座標計算和點擊執行，簡化呼叫流程。
         
         參數:
+            driver: WebDriver 實例
             canvas_rect: Canvas 區域資訊 {"x", "y", "w", "h"}
             x_ratio: X 座標比例
             y_ratio: Y 座標比例
             
         回傳:
-            (x, y) 實際座標
+            (x, y) 實際點擊座標
         """
+        # 計算點擊座標
         x = canvas_rect["x"] + canvas_rect["w"] * x_ratio
         y = canvas_rect["y"] + canvas_rect["h"] * y_ratio
+        
+        # 執行 CDP 點擊
+        for event_type in ["mousePressed", "mouseReleased"]:
+            driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
+                "type": event_type,
+                "x": x,
+                "y": y,
+                "button": "left",
+                "clickCount": 1
+            })
+        
         return x, y
-
+    
     @staticmethod
     def execute_cdp_click(driver: WebDriver, x: float, y: float) -> None:
         """使用 Chrome DevTools Protocol 執行滑鼠點擊。
@@ -2241,12 +2257,8 @@ class ImageDetector:
         w, h = Image.open(io.BytesIO(screenshot)).size
         x, y = int(w * x_ratio), int(h * y_ratio)
         
-        # CDP 點擊
-        for event_type in ["mouseMoved", "mousePressed", "mouseReleased"]:
-            params = {"type": event_type, "x": x, "y": y}
-            if event_type != "mouseMoved":
-                params.update({"button": "left", "clickCount": 1})
-            driver.execute_cdp_cmd("Input.dispatchMouseEvent", params)
+        # 使用標準 CDP 點擊
+        BrowserHelper.execute_cdp_click(driver, x, y)
 
     def adjust_betsize(
         self,
@@ -2287,8 +2299,6 @@ class ImageDetector:
             
             # 已達目標
             if current == target_amount:
-                if not silent:
-                    self.logger.info(f"[成功] 金額調整完成: {current}")
                 return True
             
             # 點擊調整按鈕
@@ -2785,24 +2795,14 @@ class GameControlCenter:
                     if not rect:
                         return False
                     
-                    # 使用 calculate_click_position 計算點擊座標
-                    click_x, click_y = BrowserHelper.calculate_click_position(
-                        rect,
+                    time.sleep(0.5)
+                    
+                    # 計算座標並點擊確認按鈕
+                    BrowserHelper.click_canvas_position(
+                        driver, rect,
                         Constants.ERROR_CONFIRM_BUTTON_X_RATIO,
                         Constants.ERROR_CONFIRM_BUTTON_Y_RATIO
                     )
-                    
-                    time.sleep(0.5)
-                    
-                    # 執行 CDP 點擊
-                    for event_type in ["mousePressed", "mouseReleased"]:
-                        driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
-                            "type": event_type,
-                            "x": click_x,
-                            "y": click_y,
-                            "button": "left",
-                            "clickCount": 1
-                        })
                     return True
                 
                 result = bt.execute_task(click_error_confirm_task)
@@ -3142,16 +3142,7 @@ class GameControlCenter:
                 if not rect:
                     return False
                 
-                click_x, click_y = BrowserHelper.calculate_click_position(rect, x_ratio, y_ratio)
-                
-                for event_type in ["mousePressed", "mouseReleased"]:
-                    driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
-                        "type": event_type,
-                        "x": click_x,
-                        "y": click_y,
-                        "button": "left",
-                        "clickCount": 1
-                    })
+                BrowserHelper.click_canvas_position(driver, rect, x_ratio, y_ratio)
                 return True
             
             if bt.execute_task(click_task):
@@ -3186,20 +3177,11 @@ class GameControlCenter:
                 if not rect:
                     return False
                 
-                click_x, click_y = BrowserHelper.calculate_click_position(
-                    rect,
+                BrowserHelper.click_canvas_position(
+                    driver, rect,
                     Constants.ERROR_CONFIRM_BUTTON_X_RATIO,
                     Constants.ERROR_CONFIRM_BUTTON_Y_RATIO
                 )
-                
-                for event_type in ["mousePressed", "mouseReleased"]:
-                    driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
-                        "type": event_type,
-                        "x": click_x,
-                        "y": click_y,
-                        "button": "left",
-                        "clickCount": 1
-                    })
                 return True
             
             return bt.execute_task(task)
@@ -3318,7 +3300,7 @@ class GameControlCenter:
                 self.logger.error(f"[錯誤] 瀏覽器 {browser_index} ({username}) 操作失敗: {e}")
                 self._stop_event.wait(timeout=1.0)
         
-        self.logger.info(f"[資訊] 瀏覽器 {browser_index} ({username}) 已停止，共按了 {press_count} 次空白鍵")
+        self.logger.info(f"[資訊] 瀏覽器 {browser_index} ({username}) 已停止，共執行 {press_count} 次")
     
     def _start_auto_press(self) -> None:
         """為每個瀏覽器啟動獨立的自動按鍵功能。"""
@@ -3578,7 +3560,7 @@ class GameControlCenter:
         if not arguments:
             self.logger.error("[錯誤] 指令格式錯誤")
             self.logger.info("       正確格式: s <最小>,<最大>")
-            self.logger.info("       範例: s 1,2 → 每 1~2 秒按一次空白鍵")
+            self.logger.info("       範例: s 1,2 → 每 1~2 秒自動執行一次")
             return True
         
         # 解析用戶輸入的間隔時間
@@ -4655,20 +4637,10 @@ class AutoSlotGameAppStarter:
                             continue
                         return False
                     
-                    # 使用 calculate_click_position 計算點擊座標
-                    click_x, click_y = BrowserHelper.calculate_click_position(
-                        rect, x_ratio, y_ratio
+                    # 計算座標並點擊
+                    click_x, click_y = BrowserHelper.click_canvas_position(
+                        driver, rect, x_ratio, y_ratio
                     )
-                    
-                    # 執行 CDP 點擊
-                    for event_type in ["mousePressed", "mouseReleased"]:
-                        driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
-                            "type": event_type,
-                            "x": click_x,
-                            "y": click_y,
-                            "button": "left",
-                            "clickCount": 1
-                        })
                     self.logger.debug(
                         f"[除錯] 瀏覽器 {context.index} 已點擊 {display_name} "
                         f"(座標: {click_x:.0f}, {click_y:.0f})"
