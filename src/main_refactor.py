@@ -207,7 +207,7 @@ class Constants:
     # =========================================================================
     AUTO_SKIP_CLICK_INTERVAL: int = 30
     ERROR_MONITOR_INTERVAL: float = 3.0  # 錯誤訊息監控間隔（秒）
-    BLACKSCREEN_CONSECUTIVE_THRESHOLD: int = 3  # 黑屏連續檢測次數閾值（達到後導航到登入頁）
+    BLACKSCREEN_CONSECUTIVE_THRESHOLD: int = 5  # 黑屏連續檢測次數閾值（達到後導航到登入頁）
     
     # -------------------------------------------------------------------------
     # 金額模板配置
@@ -2586,8 +2586,6 @@ class GameControlCenter:
             self.logger.warning(f"[監控] 錯誤訊息模板 '{Constants.ERROR_REMIND}' 不存在")
             self.logger.info("[監控] 請使用 'e' 命令截取錯誤訊息模板")
         
-        self.logger.info("[監控] 監控功能將持續運行，等待模板建立後自動生效")
-        
         while not self._error_monitor_stop_event.is_set():
             try:
                 # 取得所有活躍的瀏覽器（排除正在恢復中的）
@@ -2824,11 +2822,9 @@ class GameControlCenter:
         """處理黑屏恢復：完整的重新連線流程。
         
         當連續偵測到黑屏達到閾值時，執行完整恢復流程：
-        1. 將瀏覽器放到最大
-        2. 導航到 LOGIN_PAGE
-        3. 搜尋遊戲並進入（參考 navigate_to_game）
-        4. 縮小回原本視窗大小並回到原位（參考 arrange_windows）
-        5. 執行圖片檢測流程，檢測 game_login 和 error_remind
+        1. 導航到 LOGIN_PAGE
+        2. 進入遊戲
+        3. 執行圖片檢測流程，檢測 game_login 和 error_remind
         
         包含網路容錯機制，失敗時自動重試。
         
@@ -2841,53 +2837,28 @@ class GameControlCenter:
         self.logger.info(f"[監控] 瀏覽器 {browser_index} ({username}) 開始執行黑屏恢復流程...")
         
         try:
-            # ===== 步驟 1: 將瀏覽器放到最大 =====
-            self.logger.info(f"[監控] 瀏覽器 {browser_index} 步驟 1/5: 將瀏覽器放到最大")
-            if not self._recovery_maximize_window(bt):
-                self.logger.error(f"[監控] 瀏覽器 {browser_index} ({username}) 放大視窗失敗")
-                return
-            
-            # ===== 步驟 2: 導航到登入頁面 =====
-            self.logger.info(f"[監控] 瀏覽器 {browser_index} 步驟 2/5: 導航到登入頁面")
+            # ===== 步驟 1: 導航到登入頁面 =====
+            self.logger.info(f"[監控] 瀏覽器 {browser_index} 步驟 1/3: 導航到登入頁面")
             if not self._recovery_navigate_to_login(bt):
                 self.logger.error(f"[監控] 瀏覽器 {browser_index} ({username}) 導航到登入頁面失敗")
                 return
             
-            # ===== 步驟 3: 搜尋遊戲並進入 =====
-            self.logger.info(f"[監控] 瀏覽器 {browser_index} 步驟 3/5: 搜尋遊戲並進入")
+            # ===== 步驟 2: 進入遊戲 =====
+            self.logger.info(f"[監控] 瀏覽器 {browser_index} 步驟 2/3: 進入遊戲")
             if not self._recovery_navigate_to_game(bt):
                 self.logger.error(f"[監控] 瀏覽器 {browser_index} ({username}) 進入遊戲失敗")
                 return
             
-            # ===== 步驟 4: 縮小回原本視窗大小並回到原位 =====
-            self.logger.info(f"[監控] 瀏覽器 {browser_index} 步驟 4/5: 調整視窗位置")
-            if not self._recovery_arrange_window(bt):
-                self.logger.error(f"[監控] 瀏覽器 {browser_index} ({username}) 調整視窗失敗")
-                return
-            
-            # ===== 步驟 5: 執行圖片檢測流程 =====
-            self.logger.info(f"[監控] 瀏覽器 {browser_index} 步驟 5/5: 執行圖片檢測流程")
+            # ===== 步驟 3: 執行圖片檢測流程 =====
+            self.logger.info(f"[監控] 瀏覽器 {browser_index} 步驟 3/3: 執行圖片檢測流程")
             if not self._recovery_image_detection_flow(bt):
                 self.logger.error(f"[監控] 瀏覽器 {browser_index} ({username}) 圖片檢測流程失敗")
                 return
             
-            self.logger.info(f"[監控] 瀏覽器 {browser_index} ({username}) ✓ 黑屏恢復完成")
+            self.logger.info(f"[監控] 瀏覽器 {browser_index} ({username}) 黑屏恢復完成")
             
         except Exception as e:
             self.logger.error(f"[監控] 瀏覽器 {browser_index} ({username}) 黑屏恢復發生異常: {e}")
-    
-    def _recovery_maximize_window(self, bt: 'BrowserThread') -> bool:
-        """恢復流程：將瀏覽器放到最大。"""
-        try:
-            def task(context: BrowserContext) -> bool:
-                context.driver.maximize_window()
-                time.sleep(1)
-                return True
-            
-            return bt.execute_task(task)
-        except Exception as e:
-            self.logger.debug(f"[監控] 放大視窗失敗: {e}")
-            return False
     
     def _recovery_navigate_to_login(self, bt: 'BrowserThread') -> bool:
         """恢復流程：導航到登入頁面。"""
@@ -2972,42 +2943,18 @@ class GameControlCenter:
                     self.logger.debug(f"[監控] 進入遊戲失敗: {e}")
         return False
     
-    def _recovery_arrange_window(self, bt: 'BrowserThread') -> bool:
-        """恢復流程：縮小回原本視窗大小並回到原位（參考 arrange_windows）。"""
-        try:
-            def task(context: BrowserContext) -> bool:
-                width = Constants.DEFAULT_WINDOW_WIDTH
-                height = Constants.DEFAULT_WINDOW_HEIGHT
-                columns = Constants.DEFAULT_WINDOW_COLUMNS
-                
-                index = context.index
-                row = (index - 1) // columns
-                col = (index - 1) % columns
-                
-                x = col * width
-                y = row * height
-                
-                context.driver.set_window_size(width, height)
-                context.driver.set_window_position(x, y)
-                return True
-            
-            return bt.execute_task(task)
-        except Exception as e:
-            self.logger.debug(f"[監控] 調整視窗失敗: {e}")
-            return False
-    
     def _recovery_image_detection_flow(self, bt: 'BrowserThread') -> bool:
-        """恢復流程：執行圖片檢測流程。
+        """恢復流程：執行圖片檢測流程（參照登入流程）。
         
         流程：
         1. 檢測 game_login → 點擊
-        2. 檢測 error_remind（替代 game_confirm）→ 如果存在就點擊 error_confirm
+        2. 檢測 game_confirm 或 error_remind → 點擊對應按鈕
         """
         username = bt.context.credential.username if bt.context else "Unknown"
         browser_index = bt.index
         
         # ===== 階段 1: 檢測並點擊 game_login =====
-        self.logger.debug(f"[監控] 瀏覽器 {browser_index} 檢測 遊戲登入...")
+        self.logger.info(f"[監控] 瀏覽器 {browser_index} 【階段 1】檢測 遊戲登入...")
         if not self._recovery_detect_and_click(
             bt, 
             Constants.GAME_LOGIN, 
@@ -3019,42 +2966,137 @@ class GameControlCenter:
         
         time.sleep(2)  # 等待畫面切換
         
-        # ===== 階段 2: 檢測 error_remind，如果存在就點擊 error_confirm =====
-        self.logger.debug(f"[監控] 瀏覽器 {browser_index} 檢測 錯誤訊息...")
+        # ===== 階段 2: 優先檢測 game_confirm，若無則檢測 error_remind =====
+        self.logger.info(f"[監控] 瀏覽器 {browser_index} 【階段 2】檢測 遊戲開始 或 錯誤訊息...")
         
-        # 檢測 error_remind 是否存在
-        error_detected = False
-        for _ in range(10):  # 最多等待 10 次（約 10 秒）
+        # 先嘗試檢測 game_confirm（正常流程）
+        game_confirm_exists = self._image_detector.template_exists(Constants.GAME_CONFIRM)
+        error_remind_exists = self._image_detector.template_exists(Constants.ERROR_REMIND)
+        
+        if not game_confirm_exists and not error_remind_exists:
+            self.logger.warning(f"[監控] 瀏覽器 {browser_index} 無可用模板，跳過階段 2")
+            return True
+        
+        # 使用改進的檢測邏輯：同時檢查兩個模板，哪個先出現就處理哪個
+        detected_template = None
+        attempt = 0
+        max_attempts = 30  # 最多等待約 30 秒
+        
+        while detected_template is None and attempt < max_attempts:
+            attempt += 1
+            
             try:
-                def detect_task(context: BrowserContext) -> bool:
-                    result = self._image_detector.detect_in_browser(
-                        context.driver, Constants.ERROR_REMIND
-                    )
-                    return result is not None
+                def detect_both_task(context: BrowserContext) -> Optional[str]:
+                    """同時檢測 game_confirm 和 error_remind，返回先檢測到的模板名稱。"""
+                    # 優先檢測 game_confirm（正常流程）
+                    if game_confirm_exists:
+                        result = self._image_detector.detect_in_browser(
+                            context.driver, Constants.GAME_CONFIRM
+                        )
+                        if result is not None:
+                            return Constants.GAME_CONFIRM
+                    
+                    # 再檢測 error_remind
+                    if error_remind_exists:
+                        result = self._image_detector.detect_in_browser(
+                            context.driver, Constants.ERROR_REMIND
+                        )
+                        if result is not None:
+                            return Constants.ERROR_REMIND
+                    
+                    return None
                 
-                if bt.execute_task(detect_task):
-                    error_detected = True
-                    break
-            except Exception:
-                pass
-            time.sleep(1)
+                detected_template = bt.execute_task(detect_both_task, timeout=10)
+                
+            except Exception as e:
+                self.logger.debug(f"[監控] 瀏覽器 {browser_index} 檢測時發生錯誤: {e}")
+            
+            if detected_template is None:
+                # 每 10 次檢測顯示一次進度
+                if attempt % Constants.DETECTION_PROGRESS_INTERVAL == 0:
+                    self.logger.info(f"[監控] 瀏覽器 {browser_index} 等待畫面... (已嘗試 {attempt} 次)")
+                
+                time.sleep(Constants.DETECTION_INTERVAL)
         
-        if error_detected:
-            # 點擊 error_confirm 按鈕
-            self.logger.info(f"[監控] 瀏覽器 {browser_index} 偵測到錯誤訊息，點擊確認按鈕...")
-            self._recovery_click_error_confirm(bt)
-        else:
-            # 沒有 error_remind，嘗試檢測並點擊 game_confirm（正常流程）
-            self.logger.debug(f"[監控] 瀏覽器 {browser_index} 未偵測到錯誤訊息，檢測 遊戲開始...")
-            self._recovery_detect_and_click(
+        # 根據檢測結果處理
+        if detected_template == Constants.GAME_CONFIRM:
+            display_name = Constants.TEMPLATE_DISPLAY_NAMES.get(Constants.GAME_CONFIRM, Constants.GAME_CONFIRM)
+            self.logger.info(f"[監控] 瀏覽器 {browser_index} ({username}) 檢測到 {display_name}")
+            
+            # 等待一下再點擊
+            time.sleep(1)
+            self._recovery_click_button(
                 bt,
-                Constants.GAME_CONFIRM,
                 Constants.GAME_CONFIRM_BUTTON_X_RATIO,
-                Constants.GAME_CONFIRM_BUTTON_Y_RATIO
+                Constants.GAME_CONFIRM_BUTTON_Y_RATIO,
+                display_name
             )
+            
+        elif detected_template == Constants.ERROR_REMIND:
+            display_name = Constants.TEMPLATE_DISPLAY_NAMES.get(Constants.ERROR_REMIND, Constants.ERROR_REMIND)
+            self.logger.info(f"[監控] 瀏覽器 {browser_index} ({username}) 檢測到 {display_name}，點擊確認...")
+            
+            # 等待一下再點擊
+            time.sleep(1)
+            self._recovery_click_error_confirm(bt)
+            
+        else:
+            self.logger.warning(f"[監控] 瀏覽器 {browser_index} 等待畫面超時（未檢測到 遊戲開始 或 錯誤訊息）")
         
         self.logger.info(f"[監控] 瀏覽器 {browser_index} ({username}) 圖片檢測流程完成")
         return True
+    
+    def _recovery_click_button(
+        self,
+        bt: 'BrowserThread',
+        x_ratio: float,
+        y_ratio: float,
+        display_name: str
+    ) -> bool:
+        """恢復流程：點擊指定座標的按鈕。"""
+        browser_index = bt.index
+        username = bt.context.credential.username if bt.context else "Unknown"
+        
+        for click_attempt in range(Constants.MAX_RETRY_ATTEMPTS):
+            try:
+                if click_attempt > 0:
+                    time.sleep(Constants.RETRY_INTERVAL)
+                
+                def click_task(context: BrowserContext) -> bool:
+                    driver = context.driver
+                    
+                    # 取得 Canvas 區域
+                    rect = None
+                    for _ in range(3):
+                        rect = driver.execute_script(f"""
+                            const canvas = document.getElementById('{Constants.GAME_CANVAS}');
+                            if (canvas) {{
+                                const r = canvas.getBoundingClientRect();
+                                return {{x: r.left, y: r.top, w: r.width, h: r.height}};
+                            }}
+                            return null;
+                        """)
+                        if rect:
+                            break
+                        time.sleep(1)
+                    
+                    if not rect:
+                        return False
+                    
+                    BrowserHelper.click_canvas_position(driver, rect, x_ratio, y_ratio)
+                    return True
+                
+                if bt.execute_task(click_task, timeout=10):
+                    self.logger.info(f"[監控] 瀏覽器 {browser_index} ({username}) 已點擊 {display_name}")
+                    return True
+                    
+            except Exception as e:
+                if click_attempt < Constants.MAX_RETRY_ATTEMPTS - 1:
+                    self.logger.warning(f"[監控] 瀏覽器 {browser_index} 點擊超時，準備重試...")
+                else:
+                    self.logger.error(f"[監控] 瀏覽器 {browser_index} 點擊 {display_name} 失敗: {e}")
+        
+        return False
     
     def _recovery_detect_and_click(
         self,
@@ -3063,11 +3105,13 @@ class GameControlCenter:
         x_ratio: float,
         y_ratio: float
     ) -> bool:
-        """恢復流程：檢測圖片並點擊。
+        """恢復流程：檢測圖片並點擊（參照登入流程）。
         
         持續檢測直到找到圖片，然後點擊指定座標。
+        使用與登入流程相同的檢測邏輯，確保穩定性。
         """
         browser_index = bt.index
+        username = bt.context.credential.username if bt.context else "Unknown"
         display_name = Constants.TEMPLATE_DISPLAY_NAMES.get(template_name, template_name)
         
         # 檢查模板是否存在
@@ -3075,61 +3119,100 @@ class GameControlCenter:
             self.logger.warning(f"[監控] 模板 {template_name} 不存在，跳過檢測")
             return False
         
-        # 持續檢測直到找到（最多 30 次）
-        for attempt in range(30):
+        self.logger.info(f"[監控] 瀏覽器 {browser_index} 開始檢測 {display_name}...")
+        
+        # 持續檢測直到找到（無限循環，參照登入流程）
+        attempt = 0
+        detected = False
+        
+        while not detected:
+            attempt += 1
+            
             try:
-                def detect_task(context: BrowserContext) -> bool:
-                    result = self._image_detector.detect_in_browser(
+                def detect_task(context: BrowserContext) -> Optional[Tuple[int, int, float]]:
+                    """檢測任務：返回檢測結果而非布林值，提供更多資訊。"""
+                    return self._image_detector.detect_in_browser(
                         context.driver, template_name
                     )
-                    return result is not None
                 
-                if bt.execute_task(detect_task):
-                    self.logger.debug(f"[監控] 瀏覽器 {browser_index} 檢測到 {display_name}")
+                result = bt.execute_task(detect_task, timeout=10)
+                
+                if result is not None:
+                    self.logger.info(
+                        f"[監控] 瀏覽器 {browser_index} ({username}) 檢測到 {display_name}"
+                    )
+                    detected = True
                     break
-            except Exception:
-                pass
+                    
+            except Exception as e:
+                self.logger.debug(f"[監控] 瀏覽器 {browser_index} 檢測時發生錯誤: {e}")
             
-            if attempt % 10 == 0 and attempt > 0:
-                self.logger.debug(f"[監控] 瀏覽器 {browser_index} 等待 {display_name}... ({attempt}/30)")
+            # 每 10 次檢測顯示一次進度（參照登入流程）
+            if attempt % Constants.DETECTION_PROGRESS_INTERVAL == 0:
+                self.logger.info(f"[監控] 瀏覽器 {browser_index} 等待 {display_name}... (已嘗試 {attempt} 次)")
             
-            time.sleep(1)
-        else:
-            self.logger.warning(f"[監控] 瀏覽器 {browser_index} 等待 {display_name} 超時")
-            return False
+            # 設置最大嘗試次數，避免無限循環
+            if attempt >= 60:  # 最多等待約 60 秒
+                self.logger.warning(f"[監控] 瀏覽器 {browser_index} 等待 {display_name} 超時")
+                return False
+            
+            time.sleep(Constants.DETECTION_INTERVAL)
         
-        # 點擊
-        time.sleep(0.5)
-        try:
-            def click_task(context: BrowserContext) -> bool:
-                driver = context.driver
+        # 檢測成功後等待一下再點擊（參照登入流程）
+        time.sleep(1)
+        
+        # 點擊（包含重試機制，參照登入流程）
+        for click_attempt in range(Constants.MAX_RETRY_ATTEMPTS):
+            try:
+                if click_attempt > 0:
+                    time.sleep(Constants.RETRY_INTERVAL)
                 
-                rect = None
-                for _ in range(3):
-                    rect = driver.execute_script(f"""
-                        const canvas = document.getElementById('{Constants.GAME_CANVAS}');
-                        if (canvas) {{
-                            const r = canvas.getBoundingClientRect();
-                            return {{x: r.left, y: r.top, w: r.width, h: r.height}};
-                        }}
-                        return null;
-                    """)
-                    if rect:
-                        break
-                    time.sleep(1)
+                def click_task(context: BrowserContext) -> bool:
+                    driver = context.driver
+                    
+                    # 取得 Canvas 區域（使用重試機制）
+                    rect = None
+                    for rect_attempt in range(3):
+                        rect = driver.execute_script(f"""
+                            const canvas = document.getElementById('{Constants.GAME_CANVAS}');
+                            if (canvas) {{
+                                const r = canvas.getBoundingClientRect();
+                                return {{x: r.left, y: r.top, w: r.width, h: r.height}};
+                            }}
+                            return null;
+                        """)
+                        if rect:
+                            break
+                        time.sleep(1)
+                    
+                    if not rect:
+                        return False
+                    
+                    # 計算座標並點擊
+                    click_x, click_y = BrowserHelper.click_canvas_position(
+                        driver, rect, x_ratio, y_ratio
+                    )
+                    self.logger.debug(
+                        f"[監控] 瀏覽器 {context.index} 已點擊 {display_name} "
+                        f"(座標: {click_x:.0f}, {click_y:.0f})"
+                    )
+                    return True
                 
-                if not rect:
-                    return False
+                if bt.execute_task(click_task, timeout=10):
+                    self.logger.info(f"[監控] 瀏覽器 {browser_index} ({username}) 已點擊 {display_name}")
+                    return True
+                    
+            except Exception as e:
+                error_msg = str(e)
+                is_network_error = any(keyword in error_msg.lower() for keyword in [
+                    'timeout', 'timed out', 'connection', 'network', 'stale'
+                ])
                 
-                BrowserHelper.click_canvas_position(driver, rect, x_ratio, y_ratio)
-                return True
-            
-            if bt.execute_task(click_task):
-                self.logger.debug(f"[監控] 瀏覽器 {browser_index} 已點擊 {display_name}")
-                return True
-                
-        except Exception as e:
-            self.logger.debug(f"[監控] 瀏覽器 {browser_index} 點擊 {display_name} 失敗: {e}")
+                if click_attempt < Constants.MAX_RETRY_ATTEMPTS - 1 and is_network_error:
+                    self.logger.warning(f"[監控] 瀏覽器 {browser_index} 點擊超時，準備重試...")
+                    continue
+                else:
+                    self.logger.error(f"[監控] 瀏覽器 {browser_index} 點擊 {display_name} 失敗: {e}")
         
         return False
     
@@ -4881,9 +4964,9 @@ def main() -> None:
     程式結束時自動清理所有資源。
     """
     # 建立日誌記錄器
-    logger = LoggerFactory.get_logger()
+    # logger = LoggerFactory.get_logger()
     # 設定日誌等級為 DEBUG
-    # logger = LoggerFactory.get_logger(level=LogLevel.DEBUG)
+    logger = LoggerFactory.get_logger(level=LogLevel.DEBUG)
     
     logger.info("")
     logger.info("=" * 60)
