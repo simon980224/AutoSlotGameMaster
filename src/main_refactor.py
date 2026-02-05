@@ -231,7 +231,7 @@ class Constants:
     AUTO_SPIN_50_Y_RATIO: float = 0.5         # 50 次按鈕 Y 座標比例
     AUTO_SPIN_100_X_RATIO: float = 0.57       # 100 次按鈕 X 座標比例
     AUTO_SPIN_100_Y_RATIO: float = 0.5        # 100 次按鈕 Y 座標比例
-    AUTO_SPIN_MENU_WAIT: float = 0.5          # 自動旋轉選單等待時間（秒）
+    AUTO_SPIN_MENU_WAIT: float = 1.0          # 自動旋轉選單等待時間（秒）
     
     # =========================================================================
     # 購買免費遊戲按鈕座標比例
@@ -317,7 +317,7 @@ class Constants:
     NORMAL_WAIT: float = 1.0                   # 一般等待（DOM 更新）
     SCREEN_SWITCH_WAIT: float = 2.0            # 畫面切換等待
     CANVAS_RETRY_WAIT: float = 1.0             # Canvas 重試等待
-    CANVAS_RETRY_COUNT: int = 3                # Canvas 取得最大重試次數
+    CANVAS_RETRY_COUNT: int = 5                # Canvas 取得最大重試次數
     
     # =========================================================================
     # 金額調整按鈕配置
@@ -327,7 +327,7 @@ class Constants:
     BETSIZE_DECREASE_BUTTON_X: float = 0.63    # 減少金額按鈕 X 座標比例
     BETSIZE_DECREASE_BUTTON_Y: float = 0.89    # 減少金額按鈕 Y 座標比例
     BETSIZE_MATCH_THRESHOLD: float = 0.85      # 金額識別匹配閾值
-    BETSIZE_ADJUST_STEP_WAIT: float = 3.0      # 調整金額每步等待時間
+    BETSIZE_ADJUST_STEP_WAIT: float = 1.0      # 調整金額每步等待時間
     BETSIZE_ADJUST_RETRY_WAIT: float = 1.0     # 調整金額重試等待時間
     BETSIZE_READ_RETRY_WAIT: float = 0.5       # 讀取金額重試等待時間
     BETSIZE_READ_MAX_RETRIES: int = 2          # 讀取金額最大重試次數
@@ -3435,15 +3435,12 @@ class GameControlCenter:
                       f 1      → 第 1 個瀏覽器
                       f 1,2,3  → 第 1、2、3 個瀏覽器
                       【賽特一】自動購買免費遊戲
-                      【賽特二】需選擇類別（1=免費遊戲, 2=覺醒之力）
+                      【賽特二】1=免費遊戲, 2=覺醒之力
 
 【截圖工具】
   t                   截取金額模板（進入互動模式）
-
   d                   截取黑屏提示模板
-
   e                   截取錯誤訊息模板
-
   l                   截取返回大廳模板
 
 【系統指令】
