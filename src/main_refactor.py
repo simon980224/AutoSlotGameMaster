@@ -162,9 +162,7 @@ class Constants:
     # =========================================================================
     # 遊戲配置
     # =========================================================================
-    # 遊戲版本設定（直接修改這個值即可）
-    # 1 = 賽特一（只有一個免費遊戲）
-    # 2 = 賽特二（有免費遊戲和覺醒之力兩種）
+    # TODO: 賽特1=True, 賽特2=False
     Sett_1: bool = True
     
     # 根據 GAME_VERSION 自動設定遊戲識別碼
@@ -4016,7 +4014,7 @@ class GameControlCenter:
                 input()
                 
                 # 對成功購買的瀏覽器執行結算
-                self.logger.info("正在執行結算...")
+                self.logger.info("正在等待結算...")
                 
                 def settle_free_game_task(context: BrowserContext) -> bool:
                     """執行免費遊戲結算。"""
@@ -5471,9 +5469,9 @@ def main() -> None:
     程式結束時自動清理所有資源。
     """
     # 建立日誌記錄器
-    # logger = LoggerFactory.get_logger()
+    logger = LoggerFactory.get_logger()
     # TODO: 發佈前改回 INFO
-    logger = LoggerFactory.get_logger(level=LogLevel.DEBUG)
+    # logger = LoggerFactory.get_logger(level=LogLevel.DEBUG)
     
     logger.info("")
     logger.info("=" * 60)
