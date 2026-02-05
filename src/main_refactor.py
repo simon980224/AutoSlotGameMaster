@@ -156,12 +156,13 @@ class Constants:
     # =========================================================================
     # 代理商配置
     # =========================================================================
+    # TODO: 更新為正式代理商網址
     LOGIN_PAGE: str = "https://www.fin88.app/"
 
     # =========================================================================
     # 遊戲配置
     # =========================================================================
-    # 遊戲識別碼（選擇其一）
+    # TODO: 發佈前確認使用哪個遊戲識別碼，並註解另一個
     # GAME_PATTERN = "ATG-egyptian-mythology"            # 賽特一
     GAME_PATTERN: str = "feb91c659e820a0405aabc1520c24d12"  # 賽特二
     
@@ -204,6 +205,19 @@ class Constants:
     GAME_LOGIN_BUTTON_Y_RATIO: float = 0.9
     GAME_CONFIRM_BUTTON_X_RATIO: float = 0.74
     GAME_CONFIRM_BUTTON_Y_RATIO: float = 0.85
+    
+    # =========================================================================
+    # 自動旋轉按鈕座標比例
+    # =========================================================================
+    AUTO_SPIN_BUTTON_X_RATIO: float = 0.8     # 自動轉按鈕 X 座標比例
+    AUTO_SPIN_BUTTON_Y_RATIO: float = 0.77    # 自動轉按鈕 Y 座標比例
+    AUTO_SPIN_10_X_RATIO: float = 0.4         # 10 次按鈕 X 座標比例
+    AUTO_SPIN_10_Y_RATIO: float = 0.5         # 10 次按鈕 Y 座標比例
+    AUTO_SPIN_50_X_RATIO: float = 0.5         # 50 次按鈕 X 座標比例
+    AUTO_SPIN_50_Y_RATIO: float = 0.5         # 50 次按鈕 Y 座標比例
+    AUTO_SPIN_100_X_RATIO: float = 0.57       # 100 次按鈕 X 座標比例
+    AUTO_SPIN_100_Y_RATIO: float = 0.5        # 100 次按鈕 Y 座標比例
+    AUTO_SPIN_MENU_WAIT: float = 0.5          # 自動旋轉選單等待時間（秒）
     
     # =========================================================================
     # 控制面板配置
@@ -3382,6 +3396,11 @@ class GameControlCenter:
   b <金額>            調整下注金額
                       範例: b 2, b 4, b 10, b 100
   
+  a <次數>            設定自動旋轉
+                      a 10     → 自動旋轉 10 次
+                      a 50     → 自動旋轉 50 次
+                      a 100    → 自動旋轉 100 次
+  
   f <編號>            購買免費遊戲
                       f 0      → 所有瀏覽器
                       f 1      → 第 1 個瀏覽器
@@ -3553,6 +3572,10 @@ class GameControlCenter:
                 # 調整金額
                 self._handle_betsize_command(command_arguments)
             
+            elif cmd == 'a':
+                # 自動旋轉
+                self._handle_auto_spin_command(command_arguments)
+            
             elif cmd == 'f':
                 # 購買免費遊戲（簡化版 - 尚未實作完整邏輯）
                 self.logger.info("購買免費遊戲功能尚未完整實作")
@@ -3641,6 +3664,114 @@ class GameControlCenter:
             self.logger.error(f"無效的編號: {arguments}，請輸入數字")
         
         return True
+    
+    def _handle_auto_spin_command(self, arguments: str) -> None:
+        """處理自動旋轉指令。
+        
+        設定所有瀏覽器的自動旋轉功能，支援 10、50、100 次。
+        
+        參數:
+            arguments: 指令參數（旋轉次數）
+        """
+        if not arguments:
+            self.logger.error("指令格式錯誤")
+            self.logger.info("       正確格式: a <次數>")
+            self.logger.info("       範例: a 10 → 自動旋轉 10 次")
+            return
+        
+        # 解析次數參數
+        try:
+            spin_count = int(arguments.strip())
+        except ValueError:
+            self.logger.error("次數格式錯誤，請輸入有效的數字")
+            self.logger.info("       可選次數: 10, 50, 100")
+            return
+        
+        # 驗證次數是否有效
+        if spin_count not in [10, 50, 100]:
+            self.logger.error("無效的次數")
+            self.logger.info(f"       您輸入的: {spin_count}")
+            self.logger.info("       可選次數: 10, 50, 100")
+            return
+        
+        # 取得活躍的瀏覽器
+        active_browsers = [bt for bt in self._get_active_browsers() 
+                          if bt.is_browser_alive() and bt.context]
+        if not active_browsers:
+            self.logger.error("沒有可用的瀏覽器")
+            return
+        
+        # 根據次數選擇對應的座標比例
+        count_ratio_map = {
+            10: (Constants.AUTO_SPIN_10_X_RATIO, Constants.AUTO_SPIN_10_Y_RATIO),
+            50: (Constants.AUTO_SPIN_50_X_RATIO, Constants.AUTO_SPIN_50_Y_RATIO),
+            100: (Constants.AUTO_SPIN_100_X_RATIO, Constants.AUTO_SPIN_100_Y_RATIO)
+        }
+        count_x_ratio, count_y_ratio = count_ratio_map[spin_count]
+        
+        def auto_spin_task(context: BrowserContext) -> bool:
+            """在單個瀏覽器中執行自動旋轉設定。"""
+            driver = context.driver
+            
+            # 取得 Canvas 區域
+            rect = BrowserHelper.get_canvas_rect(driver)
+            if not rect:
+                return False
+            
+            # 第一次點擊：自動旋轉按鈕（開啟選單）
+            BrowserHelper.click_canvas_position(
+                driver, rect,
+                Constants.AUTO_SPIN_BUTTON_X_RATIO,
+                Constants.AUTO_SPIN_BUTTON_Y_RATIO
+            )
+            
+            # 等待選單出現
+            time.sleep(Constants.AUTO_SPIN_MENU_WAIT)
+            
+            # 第二次點擊：選擇次數
+            BrowserHelper.click_canvas_position(
+                driver, rect,
+                count_x_ratio,
+                count_y_ratio
+            )
+            
+            return True
+        
+        # 使用 ThreadPoolExecutor 並行執行所有瀏覽器
+        results = {}
+        with ThreadPoolExecutor(max_workers=len(active_browsers)) as executor:
+            futures = {
+                executor.submit(bt.execute_task, auto_spin_task): bt 
+                for bt in active_browsers
+            }
+            
+            for future in futures:
+                bt = futures[future]
+                try:
+                    results[bt.index] = future.result()
+                except Exception as e:
+                    username = bt.context.credential.username if bt.context else "Unknown"
+                    self.logger.error(f"瀏覽器 {bt.index} ({username}) 設定失敗: {e}")
+                    results[bt.index] = False
+        
+        # 統計結果
+        success_count = sum(1 for v in results.values() if v)
+        total = len(active_browsers)
+        
+        self.logger.info("")
+        if success_count == total:
+            self.logger.info("自動旋轉已啟動")
+            self.logger.info(f"       旋轉次數: {spin_count} 次")
+            self.logger.info(f"       瀏覽器數: {success_count} 個")
+        else:
+            self.logger.warning("自動旋轉部分啟動")
+            self.logger.info(f"       旋轉次數: {spin_count} 次")
+            self.logger.info(f"       成功數量: {success_count}/{total} 個")
+            for bt in active_browsers:
+                if not results.get(bt.index, False):
+                    username = bt.context.credential.username if bt.context else "Unknown"
+                    self.logger.error(f"       失敗: 瀏覽器 {bt.index} ({username})")
+        self.logger.info("")
     
     def _handle_betsize_command(self, arguments: str) -> None:
         """處理調整金額指令（同步並行操作）。"""
@@ -5047,7 +5178,7 @@ def main() -> None:
     """
     # 建立日誌記錄器
     # logger = LoggerFactory.get_logger()
-    # 設定日誌等級為 DEBUG
+    # TODO: 發佈前改回 INFO
     logger = LoggerFactory.get_logger(level=LogLevel.DEBUG)
     
     logger.info("")
