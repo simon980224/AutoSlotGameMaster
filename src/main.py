@@ -13,10 +13,11 @@
 - 完善的錯誤處理與重試機制
 
 作者: 凡臻科技
-版本: 1.31.0
+版本: 1.32.0
 Python: 3.8+
 
 版本歷史:
+- v1.32.0: 新增免費遊戲類別 3（不朽覺醒 immortal_awake）並更新座標配置（類別 1 座標更新為 0.3,0.85；類別 2 座標更新為 0.5,0.95；新增類別 3 座標為 0.7,0.85；'f' 命令和規則解析支援三種類別選擇）
 - v1.31.0: 新增 richpanda 網站廣告彈窗處理功能（自動檢測 ads-container 和 close-btn-container 元素，登入後自動點擊關閉按鈕；更新 richpanda 網站的 GAME_XPATH 選擇器配置）
 - v1.30.1: 修正規則執行中按 'p' 暫停後金額調整卡住的問題（adjust_betsize 方法新增 stop_event 參數支援，規則執行中的金額調整操作現在可以立即響應停止信號，避免無限等待導致程式無法正常暫停）
 - v1.30.0: 新增規則前綴控制功能（帶 '-' 前綴的規則只執行一次，如 -a:2:10；不帶前綴的規則循環執行；'a' 類型規則現在也支援循環執行；規則執行邏輯重構為先執行所有單次規則，再循環執行剩餘規則）
@@ -167,8 +168,8 @@ class Constants:
     # FIN
     LOGIN_PAGE = "https://www.fin88.app"
     GAME_PAGE = "https://www.fin88.app"
-    GAME_XPATH = "//div[contains(@class, 'game-card-container') and .//div[contains(@style, 'ATG-egyptian-mythology.png')]]" # 賽特1（第二個大卡片-戰神埃及神話）
-    # GAME_XPATH = "//div[contains(@class, 'game-card-container') and contains(@class, 'big')]" # 賽特2（第一個大卡片）勿刪除
+    # GAME_XPATH = "//div[contains(@class, 'game-card-container') and .//div[contains(@style, 'ATG-egyptian-mythology.png')]]" # 賽特1（第二個大卡片-戰神埃及神話）
+    GAME_XPATH = "//div[contains(@class, 'game-card-container') and contains(@class, 'big')]" # 賽特2（第一個大卡片）勿刪除
 
     # FPD 勿刪除
     # LOGIN_PAGE = "https://richpanda.vip"
