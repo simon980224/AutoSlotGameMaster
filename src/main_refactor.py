@@ -162,9 +162,16 @@ class Constants:
     # =========================================================================
     # 遊戲配置
     # =========================================================================
-    # TODO: 發佈前確認使用哪個遊戲識別碼，並註解另一個
-    # GAME_PATTERN = "ATG-egyptian-mythology"            # 賽特一
-    GAME_PATTERN: str = "feb91c659e820a0405aabc1520c24d12"  # 賽特二
+    # 遊戲版本設定（直接修改這個值即可）
+    # 1 = 賽特一（只有一個免費遊戲）
+    # 2 = 賽特二（有免費遊戲和覺醒之力兩種）
+    Sett_1: bool = True
+    
+    # 根據 GAME_VERSION 自動設定遊戲識別碼
+    if Sett_1:
+        GAME_PATTERN: str = "ATG-egyptian-mythology"            # 賽特一
+    else:
+        GAME_PATTERN: str = "feb91c659e820a0405aabc1520c24d12"  # 賽特二
     
     # =========================================================================
     # 登入相關 XPath
@@ -218,6 +225,30 @@ class Constants:
     AUTO_SPIN_100_X_RATIO: float = 0.57       # 100 次按鈕 X 座標比例
     AUTO_SPIN_100_Y_RATIO: float = 0.5        # 100 次按鈕 Y 座標比例
     AUTO_SPIN_MENU_WAIT: float = 0.5          # 自動旋轉選單等待時間（秒）
+    
+    # =========================================================================
+    # 購買免費遊戲按鈕座標比例
+    # =========================================================================
+    # 賽特一專用：只有一個免費遊戲按鈕
+    BUY_FREE_GAME_BUTTON_X_RATIO: float = 0.15    # 免費遊戲區域按鈕 X 座標比例
+    BUY_FREE_GAME_BUTTON_Y_RATIO: float = 0.75    # 免費遊戲區域按鈕 Y 座標比例
+    BUY_FREE_GAME_CONFIRM_X_RATIO: float = 0.65   # 免費遊戲確認按鈕 X 座標比例（賽特一）
+    BUY_FREE_GAME_CONFIRM_Y_RATIO: float = 0.9    # 免費遊戲確認按鈕 Y 座標比例（賽特一）
+    
+    # 賽特二專用：免費遊戲類別座標 - only_freegame (類別 1)
+    BUY_FREE_GAME_ONLY_FREEGAME_X_RATIO: float = 0.4    # 免費遊戲確認按鈕 X 座標比例
+    BUY_FREE_GAME_ONLY_FREEGAME_Y_RATIO: float = 0.85   # 免費遊戲確認按鈕 Y 座標比例
+    
+    # 賽特二專用：免費遊戲類別座標 - awake_power (類別 2)
+    BUY_FREE_GAME_AWAKE_POWER_X_RATIO: float = 0.61     # 覺醒之力確認按鈕 X 座標比例
+    BUY_FREE_GAME_AWAKE_POWER_Y_RATIO: float = 0.85     # 覺醒之力確認按鈕 Y 座標比例
+    
+    # 購買後等待與結算配置
+    BUY_FREE_GAME_WAIT_SECONDS: int = 10              # 購買後等待秒數
+    FREE_GAME_CLICK_WAIT: float = 2.0                 # 免費遊戲點擊間隔
+    FREE_GAME_SETTLE_INITIAL_WAIT: float = 3.0        # 免費遊戲結算初始等待
+    FREE_GAME_SETTLE_CLICK_INTERVAL: float = 3.0      # 免費遊戲結算點擊間隔
+    FREE_GAME_SETTLE_CLICK_COUNT: int = 5             # 免費遊戲結算點擊次數
     
     # =========================================================================
     # 控制面板配置
@@ -2778,7 +2809,7 @@ class GameControlCenter:
                         if current_count >= Constants.BLACKSCREEN_CONSECUTIVE_THRESHOLD:
                             self.logger.warning(
                                 f"瀏覽器 {browser_index} ({username}) "
-                                f"連續 {current_count} 次黑屏，啟動非同步恢復..."
+                                f"連續 {current_count} 次黑屏，啟動恢復執行緒..."
                             )
                             blackscreen_counts[browser_index] = 0
                             # 非同步啟動恢復執行緒
@@ -2789,7 +2820,7 @@ class GameControlCenter:
                     # 處理錯誤訊息
                     if error_detected.get(browser_index, False):
                         self.logger.warning(
-                            f"瀏覽器 {browser_index} ({username}) 偵測到錯誤訊息，啟動非同步點擊..."
+                            f"瀏覽器 {browser_index} ({username}) 偵測到錯誤訊息，處理中..."
                         )
                         # 非同步啟動點擊執行緒
                         self._start_recovery_thread(bt, "error")
@@ -3404,6 +3435,9 @@ class GameControlCenter:
   f <編號>            購買免費遊戲
                       f 0      → 所有瀏覽器
                       f 1      → 第 1 個瀏覽器
+                      f 1,2,3  → 第 1、2、3 個瀏覽器
+                      【賽特一】自動購買免費遊戲
+                      【賽特二】需選擇類別（1=免費遊戲, 2=覺醒之力）
 
 【截圖工具】
   t                   截取金額模板（進入互動模式）
@@ -3577,8 +3611,8 @@ class GameControlCenter:
                 self._handle_auto_spin_command(command_arguments)
             
             elif cmd == 'f':
-                # 購買免費遊戲（簡化版 - 尚未實作完整邏輯）
-                self.logger.info("購買免費遊戲功能尚未完整實作")
+                # 購買免費遊戲
+                self._handle_free_game_command(command_arguments)
             
             elif cmd == 't':
                 # 截取金額模板 (template)
@@ -3773,6 +3807,266 @@ class GameControlCenter:
                     self.logger.error(f"       失敗: 瀏覽器 {bt.index} ({username})")
         self.logger.info("")
     
+    def _handle_free_game_command(self, arguments: str) -> None:
+        """處理購買免費遊戲指令。
+        
+        根據 GAME_PATTERN 自動判斷遊戲版本：
+        - 賽特一：直接購買免費遊戲
+        - 賽特二：需要選擇類別（1=免費遊戲, 2=覺醒之力）
+        
+        參數:
+            arguments: 指令參數（瀏覽器編號）
+        """
+        if not arguments:
+            self.logger.error("指令格式錯誤")
+            self.logger.info("       正確格式: f <編號>")
+            self.logger.info("       f 0      → 所有瀏覽器")
+            self.logger.info("       f 1      → 第 1 個瀏覽器")
+            self.logger.info("       f 1,2,3  → 第 1、2、3 個瀏覽器")
+            return
+        
+        # 取得所有活躍的瀏覽器
+        all_browsers = [bt for bt in self._get_active_browsers() 
+                       if bt.is_browser_alive() and bt.context]
+        if not all_browsers:
+            self.logger.error("沒有可用的瀏覽器")
+            return
+        
+        # 解析目標瀏覽器編號
+        target_browsers: List[BrowserThread] = []
+        
+        try:
+            if ',' in arguments:
+                # 多個編號：f 1,2,3
+                indices = [int(x.strip()) for x in arguments.split(',')]
+                for idx in indices:
+                    found = False
+                    for bt in all_browsers:
+                        if bt.index == idx:
+                            target_browsers.append(bt)
+                            found = True
+                            break
+                    if not found:
+                        self.logger.warning(f"瀏覽器 {idx} 不存在或已關閉，跳過")
+            else:
+                # 單一編號
+                idx = int(arguments.strip())
+                if idx == 0:
+                    # 0 表示所有瀏覽器
+                    target_browsers = all_browsers.copy()
+                else:
+                    for bt in all_browsers:
+                        if bt.index == idx:
+                            target_browsers.append(bt)
+                            break
+                    if not target_browsers:
+                        self.logger.error(f"瀏覽器 {idx} 不存在或已關閉")
+                        return
+        except ValueError:
+            self.logger.error("編號格式錯誤，請輸入數字")
+            self.logger.info("       範例: f 0 或 f 1 或 f 1,2,3")
+            return
+        
+        if not target_browsers:
+            self.logger.error("沒有有效的瀏覽器可執行操作")
+            return
+        
+        # 判斷遊戲版本（根據 Sett_1 判斷）
+        is_sette_1 = Constants.Sett_1
+        is_sette_2 = not Constants.Sett_1
+        
+        # 賽特二需要選擇免費遊戲類別
+        free_game_type: Optional[int] = None
+        if is_sette_2:
+            self.logger.info("")
+            self.logger.info("請選擇免費遊戲類別:")
+            self.logger.info("       1 - 免費遊戲")
+            self.logger.info("       2 - 覺醒之力")
+            self.logger.info("       q - 取消")
+            self.logger.info("")
+            
+            try:
+                print("請輸入類別 > ", end="", flush=True)
+                sys.stdout.flush()
+                type_input = input().strip().lower()
+                
+                if type_input == 'q':
+                    self.logger.info("已取消操作")
+                    return
+                elif type_input == '1':
+                    free_game_type = 1
+                elif type_input == '2':
+                    free_game_type = 2
+                else:
+                    self.logger.error(f"無效的類別: {type_input}")
+                    self.logger.info("       請輸入 1 或 2")
+                    return
+                    
+            except (EOFError, KeyboardInterrupt):
+                self.logger.info("")
+                self.logger.info("已取消操作")
+                return
+        
+        # 顯示執行資訊
+        self.logger.info("")
+        if len(target_browsers) == len(all_browsers):
+            self.logger.info(f"開始購買免費遊戲 (全部 {len(target_browsers)} 個瀏覽器)")
+        else:
+            browser_list = ", ".join([str(bt.index) for bt in target_browsers])
+            self.logger.info(f"開始購買免費遊戲 (瀏覽器 {browser_list})")
+        
+        if is_sette_1:
+            self.logger.info("       遊戲版本: 賽特一")
+        elif is_sette_2:
+            type_name = "免費遊戲" if free_game_type == 1 else "覺醒之力"
+            self.logger.info(f"       遊戲版本: 賽特二")
+            self.logger.info(f"       購買類別: {type_name}")
+        else:
+            self.logger.warning("       遊戲版本: 未知（使用賽特二邏輯）")
+            # 未知版本預設使用賽特二邏輯，需要選擇類別
+            if free_game_type is None:
+                free_game_type = 1
+        
+        def buy_free_game_task(context: BrowserContext) -> bool:
+            """在單個瀏覽器中購買免費遊戲。"""
+            driver = context.driver
+            
+            # 取得 Canvas 區域
+            rect = BrowserHelper.get_canvas_rect(driver)
+            if not rect:
+                return False
+            
+            # === 第一次點擊：免費遊戲區域按鈕 ===
+            BrowserHelper.click_canvas_position(
+                driver, rect,
+                Constants.BUY_FREE_GAME_BUTTON_X_RATIO,
+                Constants.BUY_FREE_GAME_BUTTON_Y_RATIO
+            )
+            time.sleep(Constants.FREE_GAME_CLICK_WAIT)
+            
+            # === 第二次點擊：確認按鈕 ===
+            if is_sette_1:
+                # 賽特一：直接點擊確認按鈕
+                confirm_x_ratio = Constants.BUY_FREE_GAME_CONFIRM_X_RATIO
+                confirm_y_ratio = Constants.BUY_FREE_GAME_CONFIRM_Y_RATIO
+            else:
+                # 賽特二：根據類別選擇座標
+                if free_game_type == 2:
+                    confirm_x_ratio = Constants.BUY_FREE_GAME_AWAKE_POWER_X_RATIO
+                    confirm_y_ratio = Constants.BUY_FREE_GAME_AWAKE_POWER_Y_RATIO
+                else:
+                    confirm_x_ratio = Constants.BUY_FREE_GAME_ONLY_FREEGAME_X_RATIO
+                    confirm_y_ratio = Constants.BUY_FREE_GAME_ONLY_FREEGAME_Y_RATIO
+            
+            BrowserHelper.click_canvas_position(
+                driver, rect,
+                confirm_x_ratio,
+                confirm_y_ratio
+            )
+            
+            # === 購買完成後等待並按空白鍵開始 ===
+            time.sleep(Constants.BUY_FREE_GAME_WAIT_SECONDS)
+            BrowserHelper.execute_cdp_space_key(driver)
+            
+            return True
+        
+        # 使用 ThreadPoolExecutor 並行執行
+        results = {}
+        with ThreadPoolExecutor(max_workers=len(target_browsers)) as executor:
+            futures = {
+                executor.submit(bt.execute_task, buy_free_game_task): bt 
+                for bt in target_browsers
+            }
+            
+            for future in futures:
+                bt = futures[future]
+                try:
+                    results[bt.index] = future.result()
+                except Exception as e:
+                    username = bt.context.credential.username if bt.context else "Unknown"
+                    self.logger.error(f"瀏覽器 {bt.index} ({username}) 購買失敗: {e}")
+                    results[bt.index] = False
+        
+        # 統計結果
+        success_count = sum(1 for v in results.values() if v)
+        total = len(target_browsers)
+        successful_browsers = [bt for bt in target_browsers if results.get(bt.index, False)]
+        
+        self.logger.info("")
+        if success_count == total:
+            self.logger.info("免費遊戲購買完成")
+            self.logger.info(f"       成功數量: {success_count} 個")
+        else:
+            self.logger.warning("免費遊戲部分購買完成")
+            self.logger.info(f"       成功數量: {success_count}/{total} 個")
+            for bt in target_browsers:
+                if not results.get(bt.index, False):
+                    username = bt.context.credential.username if bt.context else "Unknown"
+                    self.logger.error(f"       失敗: 瀏覽器 {bt.index} ({username})")
+        
+        # 等待用戶確認免費遊戲結束
+        if success_count > 0:
+            self.logger.info("")
+            self.logger.info("免費遊戲已啟動，請手動遊玩")
+            self.logger.info("結束後請按 Enter 繼續（系統將自動結算）")
+            
+            try:
+                print("按 Enter 繼續 > ", end="", flush=True)
+                sys.stdout.flush()
+                input()
+                
+                # 對成功購買的瀏覽器執行結算
+                self.logger.info("正在執行結算...")
+                
+                def settle_free_game_task(context: BrowserContext) -> bool:
+                    """執行免費遊戲結算。"""
+                    driver = context.driver
+                    
+                    # 按空白鍵
+                    BrowserHelper.execute_cdp_space_key(driver)
+                    
+                    # 取得 Canvas 區域
+                    rect = BrowserHelper.get_canvas_rect(driver)
+                    if not rect:
+                        return False
+                    
+                    # 等待後連續點擊跳過結算畫面
+                    time.sleep(Constants.FREE_GAME_SETTLE_INITIAL_WAIT)
+                    for i in range(Constants.FREE_GAME_SETTLE_CLICK_COUNT):
+                        BrowserHelper.click_canvas_position(
+                            driver, rect,
+                            Constants.GAME_LOGIN_BUTTON_X_RATIO,
+                            Constants.GAME_LOGIN_BUTTON_Y_RATIO
+                        )
+                        if i < Constants.FREE_GAME_SETTLE_CLICK_COUNT - 1:
+                            time.sleep(Constants.FREE_GAME_SETTLE_CLICK_INTERVAL)
+                    
+                    return True
+                
+                # 對成功購買的瀏覽器執行結算
+                settle_results = {}
+                with ThreadPoolExecutor(max_workers=len(successful_browsers)) as executor:
+                    futures = {
+                        executor.submit(bt.execute_task, settle_free_game_task): bt 
+                        for bt in successful_browsers
+                    }
+                    
+                    for future in futures:
+                        bt = futures[future]
+                        try:
+                            settle_results[bt.index] = future.result()
+                        except Exception:
+                            settle_results[bt.index] = False
+                
+                settle_success = sum(1 for v in settle_results.values() if v)
+                self.logger.info(f"結算完成: {settle_success} 個瀏覽器")
+                
+            except (EOFError, KeyboardInterrupt):
+                self.logger.info("")
+                self.logger.info("已取消結算操作")
+        
+        self.logger.info("")
+
     def _handle_betsize_command(self, arguments: str) -> None:
         """處理調整金額指令（同步並行操作）。"""
         if not arguments:
