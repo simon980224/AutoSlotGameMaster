@@ -70,6 +70,7 @@ from webdriver_manager.chrome import ChromeDriverManager
 # 常量定義
 # =============================================================================
 
+
 class Constants:
     """系統常量配置。
 
@@ -160,8 +161,9 @@ class Constants:
     # =========================================================================
     # 遊戲配置
     # =========================================================================
-    GAME_PATTERN = "ATG-egyptian-mythology"              # 賽特一
-    GAME_PATTERN = "feb91c659e820a0405aabc1520c24d12"    # 賽特二
+    # 遊戲識別碼（選擇其一）
+    # GAME_PATTERN = "ATG-egyptian-mythology"            # 賽特一
+    GAME_PATTERN: str = "feb91c659e820a0405aabc1520c24d12"  # 賽特二
     
     # =========================================================================
     # 登入相關 XPath
@@ -193,6 +195,7 @@ class Constants:
     DETECTION_INTERVAL: float = 1.0
     MAX_DETECTION_ATTEMPTS: int = 60
     DETECTION_PROGRESS_INTERVAL: int = 20
+    RECOVERY_DETECTION_ATTEMPTS: int = 30  # 恢復流程檢測最大次數
     
     # =========================================================================
     # Canvas 點擊座標比例
@@ -256,6 +259,15 @@ class Constants:
     }
     
     # =========================================================================
+    # 短等待時間配置（單位：秒）
+    # =========================================================================
+    SHORT_WAIT: float = 0.5                    # 短暫等待（元素操作間隔）
+    NORMAL_WAIT: float = 1.0                   # 一般等待（DOM 更新）
+    SCREEN_SWITCH_WAIT: float = 2.0            # 畫面切換等待
+    CANVAS_RETRY_WAIT: float = 1.0             # Canvas 重試等待
+    CANVAS_RETRY_COUNT: int = 3                # Canvas 取得最大重試次數
+    
+    # =========================================================================
     # 金額調整按鈕配置
     # =========================================================================
     BETSIZE_INCREASE_BUTTON_X: float = 0.8     # 增加金額按鈕 X 座標比例
@@ -267,6 +279,14 @@ class Constants:
     BETSIZE_ADJUST_RETRY_WAIT: float = 1.0     # 調整金額重試等待時間
     BETSIZE_READ_RETRY_WAIT: float = 0.5       # 讀取金額重試等待時間
     BETSIZE_READ_MAX_RETRIES: int = 2          # 讀取金額最大重試次數
+    
+    # =========================================================================
+    # 網路錯誤關鍵字（用於判斷是否可重試）
+    # =========================================================================
+    NETWORK_ERROR_KEYWORDS: Tuple[str, ...] = (
+        'timeout', 'timed out', 'connection', 'network', 'err_',
+        'loading', 'stale'
+    )
     
     # -------------------------------------------------------------------------
     # 遊戲金額配置（tuple 支援 in 檢查和索引計算）
@@ -643,7 +663,7 @@ class BrowserThread(threading.Thread):
                     self._process_tasks()
 
         except Exception as e:
-            self.logger.error(f"[錯誤] 瀏覽器 {self.index} 發生異常: {e}")
+            self.logger.error(f"瀏覽器 {self.index} 發生異常: {e}")
         finally:
             # 4. 清理資源
             self._cleanup()
@@ -933,7 +953,12 @@ class FlushingStreamHandler(logging.StreamHandler):
 
     確保日誌訊息能即時顯示在終端機上，
     每次輸出後立即刷新緩衝區。
+    在輸出前清除當前行，避免與輸入提示混在一起。
+    輸出後重新顯示提示符。
     """
+    
+    # 類別變數：控制是否顯示提示符
+    show_prompt: bool = False
     
     def emit(self, record: logging.LogRecord) -> None:
         """輸出日誌記錄並強制刷新緩衝區。
@@ -942,7 +967,12 @@ class FlushingStreamHandler(logging.StreamHandler):
             record: 日誌記錄。
         """
         try:
+            # 清除當前行（避免與 >>> 提示混在一起）
+            self.stream.write('\r\033[K')
             super().emit(record)
+            # 如果需要顯示提示符，重新輸出
+            if FlushingStreamHandler.show_prompt:
+                self.stream.write('>>> ')
             self.flush()
         except Exception:
             self.handleError(record)
@@ -1204,7 +1234,7 @@ class ConfigReader:
                 parts = [p.strip() for p in line.split(',')]
                 
                 if len(parts) < 2:
-                    self.logger.warning(f"[警告] 第 {line_number} 行格式不完整，已跳過: {line}")
+                    self.logger.warning(f"第 {line_number} 行格式不完整，已跳過: {line}")
                     continue
                 
                 username = parts[0]
@@ -1218,7 +1248,7 @@ class ConfigReader:
                 ))  
                 
             except ValueError as e:
-                self.logger.warning(f"[警告] 第 {line_number} 行資料無效: {e}")
+                self.logger.warning(f"第 {line_number} 行資料無效: {e}")
                 continue
         
         return credentials
@@ -1242,14 +1272,14 @@ class ConfigReader:
                 parts = line.split(':')
                 
                 if len(parts) < 2:
-                    self.logger.warning(f"[警告] 第 {line_number} 行格式不完整，已跳過: {line}")
+                    self.logger.warning(f"第 {line_number} 行格式不完整: {line}")
                     continue
                 
                 rule_type = parts[0].strip().lower()
                 
                 if rule_type == 'a':
                     if len(parts) < 3:
-                        self.logger.warning(f"[警告] 第 {line_number} 行格式不完整，已跳過: {line}")
+                        self.logger.warning(f"第 {line_number} 行格式不完整: {line}")
                         continue
                     
                     amount = float(parts[1].strip())
@@ -1263,7 +1293,7 @@ class ConfigReader:
                     
                 elif rule_type == 's':
                     if len(parts) < 5:
-                        self.logger.warning(f"[警告] 第 {line_number} 行格式不完整，已跳過: {line}")
+                        self.logger.warning(f"第 {line_number} 行格式不完整: {line}")
                         continue
                     
                     amount = float(parts[1].strip())
@@ -1288,11 +1318,11 @@ class ConfigReader:
                     ))
                     
                 else:
-                    self.logger.warning(f"[警告] 第 {line_number} 行無效的規則類型 '{rule_type}'，已跳過")
+                    self.logger.warning(f"第 {line_number} 行無效的規則類型 '{rule_type}'")
                     continue
                 
             except (ValueError, IndexError) as e:
-                self.logger.warning(f"[警告] 第 {line_number} 行無法解析: {e}")
+                self.logger.warning(f"第 {line_number} 行無法解析: {e}")
                 continue
         
         return rules
@@ -1375,11 +1405,11 @@ class ProxyConnectionHandler:
                 client_socket.sendall(b'HTTP/1.1 502 Bad Gateway\r\n\r\n')
                 
         except socket.timeout:
-            self.logger.warning("[警告] 上游代理連接逾時")
+            self.logger.warning("上游代理連接逾時")
             with suppress(Exception):
                 client_socket.sendall(b'HTTP/1.1 504 Gateway Timeout\r\n\r\n')
         except Exception as e:
-            self.logger.debug(f"[除錯] CONNECT 請求處理失敗: {e}")
+            self.logger.debug(f"CONNECT 請求處理失敗: {e}")
             with suppress(Exception):
                 client_socket.sendall(b'HTTP/1.1 502 Bad Gateway\r\n\r\n')
         finally:
@@ -1417,11 +1447,11 @@ class ProxyConnectionHandler:
                 client_socket.sendall(response)
                 
         except socket.timeout:
-            self.logger.warning("[警告] 上游代理回應逾時")
+            self.logger.warning("上游代理回應逾時")
             with suppress(Exception):
                 client_socket.sendall(b'HTTP/1.1 504 Gateway Timeout\r\n\r\n')
         except Exception as e:
-            self.logger.debug(f"[除錯] HTTP 請求處理失敗: {e}")
+            self.logger.debug(f"HTTP 請求處理失敗: {e}")
             with suppress(Exception):
                 client_socket.sendall(b'HTTP/1.1 502 Bad Gateway\r\n\r\n')
         finally:
@@ -1506,9 +1536,9 @@ class SimpleProxyServer:
                 self.handler.handle_http_request(client_socket, request)
                 
         except socket.timeout:
-            self.logger.debug("[除錯] 客戶端連接逾時")
+            self.logger.debug("客戶端連接逾時")
         except Exception as e:
-            self.logger.debug(f"[除錯] 處理客戶端連接時發生錯誤: {e}")
+            self.logger.debug(f"處理客戶端連接時發生錯誤: {e}")
         finally:
             with suppress(Exception):
                 client_socket.close()
@@ -1541,7 +1571,7 @@ class SimpleProxyServer:
                     break
                 except Exception as e:
                     if self.running:
-                        self.logger.error(f"[錯誤] 接受連接時發生錯誤: {e}")
+                        self.logger.error(f"接受連接時發生錯誤: {e}")
                     
         except Exception as e:
             raise ProxyServerError(f"代理伺服器啟動失敗: {e}") from e
@@ -1602,7 +1632,7 @@ class LocalProxyServerManager:
                 try:
                     server.start()
                 except Exception as e:
-                    self.logger.error(f"[錯誤] 代理伺服器執行失敗 (埠 {local_port}): {e}")
+                    self.logger.error(f"代理伺服器執行失敗 (埠 {local_port}): {e}")
             
             server_thread = threading.Thread(target=run_server, daemon=True)
             server_thread.start()
@@ -1616,7 +1646,7 @@ class LocalProxyServerManager:
             return local_port
             
         except Exception as e:
-            self.logger.error(f"[錯誤] 啟動本機代理伺服器失敗: {e}")
+            self.logger.error(f"啟動本機代理伺服器失敗: {e}")
             return None
     
     def stop_proxy_server(self, local_port: int) -> None:
@@ -1631,7 +1661,7 @@ class LocalProxyServerManager:
             try:
                 server.stop()
             except Exception as e:
-                self.logger.debug(f"[除錯] 停止代理伺服器時發生錯誤 (埠 {local_port}): {e}")
+                self.logger.debug(f"停止代理伺服器時發生錯誤 (埠 {local_port}): {e}")
     
     def stop_all_servers(self) -> None:
         """停止所有代理伺服器"""
@@ -1660,9 +1690,66 @@ class BrowserHelper:
     提供常用的瀏覽器操作方法，主要包含：
     - CDP 按鍵模擬
     - 點擊座標計算
+    - Canvas 區域取得
+    - 彈窗關閉
     
     所有方法皆為靜態方法，無需實例化。
     """
+    
+    # JavaScript 程式碼常數（避免重複定義）
+    JS_CLOSE_POPUPS: str = """
+        const popups = document.querySelectorAll('.popup-container, .popup-wrap, .popup-account-container');
+        popups.forEach(popup => {
+            popup.style.display = 'none';
+            popup.style.visibility = 'hidden';
+            popup.remove();
+        });
+        const overlays = document.querySelectorAll('[class*="overlay"], [class*="mask"]');
+        overlays.forEach(overlay => overlay.remove());
+    """
+    
+    JS_GET_CANVAS_RECT: str = """
+        const canvas = document.getElementById('%s');
+        if (canvas) {
+            const r = canvas.getBoundingClientRect();
+            return {x: r.left, y: r.top, w: r.width, h: r.height};
+        }
+        return null;
+    """
+    
+    @staticmethod
+    def close_popups(driver: WebDriver) -> None:
+        """使用 JavaScript 關閉所有彈窗和遮罩層。
+        
+        參數:
+            driver: WebDriver 實例
+        """
+        driver.execute_script(BrowserHelper.JS_CLOSE_POPUPS)
+    
+    @staticmethod
+    def get_canvas_rect(
+        driver: WebDriver,
+        canvas_id: str = Constants.GAME_CANVAS,
+        max_retries: int = Constants.CANVAS_RETRY_COUNT
+    ) -> Optional[Dict[str, float]]:
+        """取得 Canvas 元素的位置和大小。
+        
+        參數:
+            driver: WebDriver 實例
+            canvas_id: Canvas 元素 ID
+            max_retries: 最大重試次數
+        
+        回傳:
+            Canvas 區域資訊 {"x", "y", "w", "h"}，失敗時回傳 None
+        """
+        for _ in range(max_retries):
+            rect = driver.execute_script(
+                BrowserHelper.JS_GET_CANVAS_RECT % canvas_id
+            )
+            if rect:
+                return rect
+            time.sleep(Constants.CANVAS_RETRY_WAIT)
+        return None
     
     @staticmethod
     def execute_cdp_space_key(driver: WebDriver) -> None:
@@ -1839,7 +1926,7 @@ class ImageDetector:
                 if is_success:
                     with open(save_path, 'wb') as f:
                         f.write(buffer.tobytes())
-                    self.logger.info(f"[資訊] 截圖已儲存 {save_path}")
+                    self.logger.info(f"截圖已儲存 {save_path}")
                 else:
                     raise ImageDetectionError(f"圖片編碼失敗")
             
@@ -1920,14 +2007,14 @@ class ImageDetector:
             try:
                 _ = driver.current_url
             except Exception:
-                self.logger.warning(f"[警告] 瀏覽器已關閉，無法進行圖片檢測")
+                self.logger.warning("瀏覽器已關閉，無法進行圖片檢測")
                 return None
             
             screenshot = self.capture_screenshot(driver)
             template_path = self.get_template_path(template_name)
             return self.match_template(screenshot, template_path, threshold)
         except Exception as e:
-            self.logger.error(f"[錯誤] 瀏覽器圖片檢測失敗: {e}")
+            self.logger.error(f"瀏覽器圖片檢測失敗: {e}")
             return None
     
     def _capture_cropped_template(
@@ -1986,12 +2073,12 @@ class ImageDetector:
             
             # 取得顯示名稱
             display_name = Constants.TEMPLATE_DISPLAY_NAMES.get(filename, filename)
-            self.logger.info(f"[成功] 模板已儲存: {display_name}")
+            self.logger.info(f"模板已儲存: {display_name}")
             
             return True
             
         except Exception as e:
-            self.logger.error(f"[錯誤] 截取模板失敗: {e}")
+            self.logger.error(f"截取模板失敗: {e}")
             return False
     
     def capture_betsize_template(self, driver: WebDriver, amount: float) -> bool:
@@ -2044,12 +2131,12 @@ class ImageDetector:
             output_path = bet_size_dir / filename
             cropped_img.save(output_path)
             
-            self.logger.info(f"[成功] 模板已儲存: {filename}")
+            self.logger.info(f"模板已儲存: {filename}")
             
             return True
             
         except Exception as e:
-            self.logger.error(f"[錯誤] 截取金額模板失敗: {e}")
+            self.logger.error(f"截取金額模板失敗: {e}")
             return False
 
     def capture_blackscreen_template(self, driver: WebDriver) -> bool:
@@ -2120,12 +2207,12 @@ class ImageDetector:
             # 直接儲存完整截圖（不裁切）
             screenshot_img.save(output_path)
             
-            self.logger.info(f"[成功] 模板已儲存: {display_name}")
+            self.logger.info(f"模板已儲存: {display_name}")
             
             return True
             
         except Exception as e:
-            self.logger.error(f"[錯誤] 截取大廳返回提示模板失敗: {e}")
+            self.logger.error(f"截取大廳返回提示模板失敗: {e}")
             return False
 
     # -------------------------------------------------------------------------
@@ -2172,14 +2259,14 @@ class ImageDetector:
                         # 使用 Constants.GAME_BETSIZE 進行驗證
                         if amount_value in Constants.GAME_BETSIZE:
                             if not silent:
-                                self.logger.info(f"[成功] 目前金額: {amount_value}")
+                                self.logger.info(f"目前金額: {amount_value}")
                             return amount_value
                     except ValueError:
                         pass
                 
             except Exception as e:
                 if not silent:
-                    self.logger.error(f"[錯誤] 查詢下注金額時發生錯誤: {e}")
+                    self.logger.error(f"查詢下注金額時發生錯誤: {e}")
         
         return None
 
@@ -2199,18 +2286,18 @@ class ImageDetector:
             bet_size_dir = get_resource_path("img") / "bet_size"
             
             if not bet_size_dir.exists():
-                self.logger.warning(f"[警告] bet_size 資料夾不存在: {bet_size_dir}")
+                self.logger.warning(f"bet_size 資料夾不存在: {bet_size_dir}")
                 try:
                     bet_size_dir.mkdir(parents=True, exist_ok=True)
-                    self.logger.info(f"[資訊] 已建立 bet_size 資料夾: {bet_size_dir}")
+                    self.logger.info(f"已建立 bet_size 資料夾: {bet_size_dir}")
                 except Exception as e:
-                    self.logger.error(f"[錯誤] 無法建立 bet_size 資料夾: {e}")
+                    self.logger.error(f"無法建立 bet_size 資料夾: {e}")
                     return None, 0.0
             
             # 取得所有 png 圖片
             image_files = sorted(bet_size_dir.glob("*.png"))
             if not image_files:
-                self.logger.warning("[警告] bet_size 資料夾中沒有圖片")
+                self.logger.warning("bet_size 資料夾中沒有圖片")
                 return None, 0.0
             
             # 儲存所有匹配結果
@@ -2247,7 +2334,7 @@ class ImageDetector:
                 return None, best_match_score
                 
         except Exception as e:
-            self.logger.error(f"[錯誤] 比對圖片時發生錯誤: {e}")
+            self.logger.error(f"比對圖片時發生錯誤: {e}")
             return None, 0.0
 
     def click_betsize_button(self, driver: WebDriver, x_ratio: float, y_ratio: float) -> None:
@@ -2271,7 +2358,7 @@ class ImageDetector:
         # 驗證目標金額
         if target_amount not in Constants.GAME_BETSIZE:
             if not silent:
-                self.logger.error(f"[錯誤] 目標金額 {target_amount} 不在可用金額列表中")
+                self.logger.error(f"目標金額 {target_amount} 不在可用金額列表中")
             return False
         
         # 決定調整方向的按鈕座標
@@ -2284,7 +2371,7 @@ class ImageDetector:
             # 檢查停止事件
             if stop_event and stop_event.is_set():
                 if not silent:
-                    self.logger.info("[中斷] 金額調整已被停止")
+                    self.logger.info("金額調整已被停止")
                 return False
             
             attempt += 1
@@ -2293,7 +2380,7 @@ class ImageDetector:
             # 無法識別金額，繼續等待
             if current is None:
                 if attempt == 1 or attempt % 20 == 0:
-                    self.logger.warning(f"[警告] 無法識別金額，持續等待中... (嘗試 {attempt} 次)")
+                    self.logger.warning(f"無法識別金額，持續等待中... (嘗試 {attempt} 次)")
                 time.sleep(Constants.BETSIZE_ADJUST_RETRY_WAIT)
                 continue
             
@@ -2403,14 +2490,14 @@ class BrowserManager:
             
         except Exception as e:
             errors.append(f"WebDriver Manager: {e}")
-            self.logger.warning(f"[警告] WebDriver Manager 失敗，嘗試使用本機驅動程式")
+            self.logger.warning("WebDriver Manager 失敗，嘗試使用本機驅動程式")
             
             # 方法 2: 使用本機驅動程式
             try:
                 driver = self._create_webdriver_with_local_driver(chrome_options)
             except Exception as e2:
                 errors.append(f"本機驅動程式: {e2}")
-                self.logger.error(f"[錯誤] 本機驅動程式也失敗: {e2}")
+                self.logger.error(f"本機驅動程式也失敗: {e2}")
         
         if driver is None:
             error_message = "無法建立瀏覽器實例。\n" + "\n".join(f"- {error}" for error in errors)
@@ -2475,7 +2562,7 @@ class BrowserManager:
             if driver:
                 with suppress(Exception):
                     driver.quit()
-                self.logger.debug(f"[除錯] 瀏覽器 #{index} 已關閉")
+                self.logger.debug(f"瀏覽器 #{index} 已關閉")
 
 
 # =============================================================================
@@ -2569,7 +2656,7 @@ class GameControlCenter:
         
         檢測流程同步並行，恢復操作在獨立執行緒中非同步執行（不阻塞監控）。
         """
-        self.logger.info("[監控] 錯誤訊息與黑屏監控已啟動")
+        self.logger.info("錯誤訊息與黑屏監控已啟動")
         
         # 黑屏連續檢測計數器（每個瀏覽器獨立計數）
         blackscreen_counts: Dict[int, int] = {}
@@ -2579,12 +2666,12 @@ class GameControlCenter:
         error_template_exists = self._image_detector.template_exists(Constants.ERROR_REMIND)
         
         if not blackscreen_template_exists:
-            self.logger.warning(f"[監控] 黑屏模板 '{Constants.BLACK_SCREEN}' 不存在")
-            self.logger.info("[監控] 請使用 'd' 命令截取黑屏模板")
+            self.logger.warning(f"黑屏模板 '{Constants.BLACK_SCREEN}' 不存在")
+            self.logger.info("請使用 'd' 命令截取黑屏模板")
         
         if not error_template_exists:
-            self.logger.warning(f"[監控] 錯誤訊息模板 '{Constants.ERROR_REMIND}' 不存在")
-            self.logger.info("[監控] 請使用 'e' 命令截取錯誤訊息模板")
+            self.logger.warning(f"錯誤訊息模板 '{Constants.ERROR_REMIND}' 不存在")
+            self.logger.info("請使用 'e' 命令截取錯誤訊息模板")
         
         while not self._error_monitor_stop_event.is_set():
             try:
@@ -2670,13 +2757,13 @@ class GameControlCenter:
                         blackscreen_counts[browser_index] = current_count
                         
                         self.logger.debug(
-                            f"[監控] 瀏覽器 {browser_index} ({username}) "
+                            f"瀏覽器 {browser_index} ({username}) "
                             f"黑屏檢測 {current_count}/{Constants.BLACKSCREEN_CONSECUTIVE_THRESHOLD}"
                         )
                         
                         if current_count >= Constants.BLACKSCREEN_CONSECUTIVE_THRESHOLD:
                             self.logger.warning(
-                                f"[監控] 瀏覽器 {browser_index} ({username}) "
+                                f"瀏覽器 {browser_index} ({username}) "
                                 f"連續 {current_count} 次黑屏，啟動非同步恢復..."
                             )
                             blackscreen_counts[browser_index] = 0
@@ -2688,7 +2775,7 @@ class GameControlCenter:
                     # 處理錯誤訊息
                     if error_detected.get(browser_index, False):
                         self.logger.warning(
-                            f"[監控] 瀏覽器 {browser_index} ({username}) 偵測到錯誤訊息，啟動非同步點擊..."
+                            f"瀏覽器 {browser_index} ({username}) 偵測到錯誤訊息，啟動非同步點擊..."
                         )
                         # 非同步啟動點擊執行緒
                         self._start_recovery_thread(bt, "error")
@@ -2697,10 +2784,10 @@ class GameControlCenter:
                 self._error_monitor_stop_event.wait(timeout=Constants.ERROR_MONITOR_INTERVAL)
                 
             except Exception as e:
-                self.logger.error(f"[監控] 監控循環發生錯誤: {e}")
+                self.logger.error(f"監控循環發生錯誤: {e}")
                 self._error_monitor_stop_event.wait(timeout=Constants.ERROR_MONITOR_INTERVAL)
         
-        self.logger.info("[監控] 錯誤訊息與黑屏監控已停止")
+        self.logger.info("錯誤訊息與黑屏監控已停止")
     
     def _start_recovery_thread(self, bt: 'BrowserThread', recovery_type: str) -> None:
         """啟動非同步恢復執行緒。
@@ -2714,7 +2801,7 @@ class GameControlCenter:
         # 標記為恢復中
         with self._recovering_lock:
             if browser_index in self._recovering_browsers:
-                self.logger.debug(f"[監控] 瀏覽器 {browser_index} 已在恢復中，跳過")
+                self.logger.debug(f"瀏覽器 {browser_index} 已在恢復中，跳過")
                 return
             self._recovering_browsers.add(browser_index)
         
@@ -2752,7 +2839,7 @@ class GameControlCenter:
         for attempt in range(Constants.MAX_RETRY_ATTEMPTS):
             try:
                 if attempt > 0:
-                    self.logger.debug(f"[監控] 瀏覽器 {bt.index} 恢復流程重試第 {attempt + 1} 次...")
+                    self.logger.debug(f"瀏覽器 {bt.index} 恢復流程重試第 {attempt + 1} 次...")
                     time.sleep(Constants.RETRY_INTERVAL)
                 
                 def click_error_confirm_task(context: BrowserContext) -> bool:
@@ -2765,7 +2852,7 @@ class GameControlCenter:
                         EC.presence_of_element_located((By.XPATH, Constants.GAME_IFRAME))
                     )
                     driver.switch_to.frame(iframe)
-                    time.sleep(1)
+                    time.sleep(Constants.NORMAL_WAIT)
                     
                     # 取得 Canvas 區域（使用重試機制）
                     rect = None
@@ -2780,12 +2867,12 @@ class GameControlCenter:
                         """)
                         if rect:
                             break
-                        time.sleep(1)
+                        time.sleep(Constants.NORMAL_WAIT)
                     
                     if not rect:
                         return False
                     
-                    time.sleep(0.5)
+                    time.sleep(Constants.SHORT_WAIT)
                     
                     # 計算座標並點擊確認按鈕
                     BrowserHelper.click_canvas_position(
@@ -2799,23 +2886,21 @@ class GameControlCenter:
                 
                 if result:
                     self.logger.info(
-                        f"[監控] 瀏覽器 {bt.index} ({username}) 已點擊錯誤訊息確認按鈕"
+                        f"瀏覽器 {bt.index} ({username}) 已點擊錯誤訊息確認按鈕"
                     )
                     return  # 成功，退出重試循環
                 else:
-                    self.logger.warning(f"[監控] 瀏覽器 {bt.index} ({username}) 無法找到 Canvas 元素")
+                    self.logger.warning(f"瀏覽器 {bt.index} ({username}) 無法找到 Canvas 元素")
                     
             except Exception as e:
                 error_msg = str(e)
-                is_network_error = any(keyword in error_msg.lower() for keyword in [
-                    'timeout', 'timed out', 'connection', 'network', 'stale'
-                ])
+                is_network_error = any(kw in error_msg.lower() for kw in Constants.NETWORK_ERROR_KEYWORDS)
                 
                 if attempt < Constants.MAX_RETRY_ATTEMPTS - 1 and is_network_error:
-                    self.logger.warning(f"[監控] 瀏覽器 {bt.index} ({username}) 點擊確認流程超時，準備重試...")
+                    self.logger.warning(f"瀏覽器 {bt.index} ({username}) 點擊確認流程超時，準備重試...")
                     continue
                 else:
-                    self.logger.error(f"[監控] 瀏覽器 {bt.index} ({username}) 點擊確認流程失敗: {e}")
+                    self.logger.error(f"瀏覽器 {bt.index} ({username}) 點擊確認流程失敗: {e}")
                     return
     
     def _handle_blackscreen_recovery(self, bt: 'BrowserThread') -> None:
@@ -2834,31 +2919,31 @@ class GameControlCenter:
         username = bt.context.credential.username if bt.context else "Unknown"
         browser_index = bt.index
         
-        self.logger.info(f"[監控] 瀏覽器 {browser_index} ({username}) 開始執行黑屏恢復流程...")
+        self.logger.info(f"瀏覽器 {browser_index} ({username}) 開始執行黑屏恢復流程...")
         
         try:
             # ===== 步驟 1: 導航到登入頁面 =====
-            self.logger.info(f"[監控] 瀏覽器 {browser_index} 步驟 1/3: 導航到登入頁面")
+            self.logger.info(f"瀏覽器 {browser_index} 步驟 1/3: 導航到登入頁面")
             if not self._recovery_navigate_to_login(bt):
-                self.logger.error(f"[監控] 瀏覽器 {browser_index} ({username}) 導航到登入頁面失敗")
+                self.logger.error(f"瀏覽器 {browser_index} ({username}) 導航到登入頁面失敗")
                 return
             
             # ===== 步驟 2: 進入遊戲 =====
-            self.logger.info(f"[監控] 瀏覽器 {browser_index} 步驟 2/3: 進入遊戲")
+            self.logger.info(f"瀏覽器 {browser_index} 步驟 2/3: 進入遊戲")
             if not self._recovery_navigate_to_game(bt):
-                self.logger.error(f"[監控] 瀏覽器 {browser_index} ({username}) 進入遊戲失敗")
+                self.logger.error(f"瀏覽器 {browser_index} ({username}) 進入遊戲失敗")
                 return
             
             # ===== 步驟 3: 執行圖片檢測流程 =====
-            self.logger.info(f"[監控] 瀏覽器 {browser_index} 步驟 3/3: 執行圖片檢測流程")
+            self.logger.info(f"瀏覽器 {browser_index} 步驟 3/3: 執行圖片檢測流程")
             if not self._recovery_image_detection_flow(bt):
-                self.logger.error(f"[監控] 瀏覽器 {browser_index} ({username}) 圖片檢測流程失敗")
+                self.logger.error(f"瀏覽器 {browser_index} ({username}) 圖片檢測流程失敗")
                 return
             
-            self.logger.info(f"[監控] 瀏覽器 {browser_index} ({username}) 黑屏恢復完成")
+            self.logger.info(f"瀏覽器 {browser_index} ({username}) 黑屏恢復完成")
             
         except Exception as e:
-            self.logger.error(f"[監控] 瀏覽器 {browser_index} ({username}) 黑屏恢復發生異常: {e}")
+            self.logger.error(f"瀏覽器 {browser_index} ({username}) 黑屏恢復發生異常: {e}")
     
     def _recovery_navigate_to_login(self, bt: 'BrowserThread') -> bool:
         """恢復流程：導航到登入頁面。"""
@@ -2882,7 +2967,7 @@ class GameControlCenter:
                     
             except Exception as e:
                 if attempt == Constants.MAX_RETRY_ATTEMPTS - 1:
-                    self.logger.debug(f"[監控] 導航失敗: {e}")
+                    self.logger.debug(f"導航失敗: {e}")
         return False    
 
     def _recovery_navigate_to_game(self, bt: 'BrowserThread') -> bool:
@@ -2907,7 +2992,7 @@ class GameControlCenter:
                             const overlays = document.querySelectorAll('[class*="overlay"], [class*="mask"]');
                             overlays.forEach(overlay => overlay.remove());
                         """)
-                        time.sleep(1)
+                        time.sleep(Constants.NORMAL_WAIT)
                     except Exception:
                         pass
                     
@@ -2917,7 +3002,7 @@ class GameControlCenter:
                         EC.presence_of_element_located((By.XPATH, game_selector))
                     )
                     driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", game_element)
-                    time.sleep(1)
+                    time.sleep(Constants.NORMAL_WAIT)
                     driver.execute_script("arguments[0].click();", game_element)
                     time.sleep(Constants.PAGE_LOAD_WAIT_LONG)
                     
@@ -2940,7 +3025,7 @@ class GameControlCenter:
                     
             except Exception as e:
                 if attempt == Constants.MAX_RETRY_ATTEMPTS - 1:
-                    self.logger.debug(f"[監控] 進入遊戲失敗: {e}")
+                    self.logger.debug(f"進入遊戲失敗: {e}")
         return False
     
     def _recovery_image_detection_flow(self, bt: 'BrowserThread') -> bool:
@@ -2954,33 +3039,33 @@ class GameControlCenter:
         browser_index = bt.index
         
         # ===== 階段 1: 檢測並點擊 game_login =====
-        self.logger.info(f"[監控] 瀏覽器 {browser_index} 【階段 1】檢測 遊戲登入...")
+        self.logger.info(f"瀏覽器 {browser_index} 【階段 1】檢測 遊戲登入...")
         if not self._recovery_detect_and_click(
             bt, 
             Constants.GAME_LOGIN, 
             Constants.GAME_LOGIN_BUTTON_X_RATIO,
             Constants.GAME_LOGIN_BUTTON_Y_RATIO
         ):
-            self.logger.warning(f"[監控] 瀏覽器 {browser_index} 未檢測到 遊戲登入 或點擊失敗")
+            self.logger.warning(f"瀏覽器 {browser_index} 未檢測到 遊戲登入 或點擊失敗")
             # 即使 game_login 失敗也繼續嘗試下一步
         
-        time.sleep(2)  # 等待畫面切換
+        time.sleep(Constants.SCREEN_SWITCH_WAIT)  # 等待畫面切換
         
         # ===== 階段 2: 優先檢測 game_confirm，若無則檢測 error_remind =====
-        self.logger.info(f"[監控] 瀏覽器 {browser_index} 【階段 2】檢測 遊戲開始 或 錯誤訊息...")
+        self.logger.info(f"瀏覽器 {browser_index} 【階段 2】檢測 遊戲開始 或 錯誤訊息...")
         
         # 先嘗試檢測 game_confirm（正常流程）
         game_confirm_exists = self._image_detector.template_exists(Constants.GAME_CONFIRM)
         error_remind_exists = self._image_detector.template_exists(Constants.ERROR_REMIND)
         
         if not game_confirm_exists and not error_remind_exists:
-            self.logger.warning(f"[監控] 瀏覽器 {browser_index} 無可用模板，跳過階段 2")
+            self.logger.warning(f"瀏覽器 {browser_index} 無可用模板，跳過階段 2")
             return True
         
         # 使用改進的檢測邏輯：同時檢查兩個模板，哪個先出現就處理哪個
         detected_template = None
         attempt = 0
-        max_attempts = 30  # 最多等待約 30 秒
+        max_attempts = Constants.RECOVERY_DETECTION_ATTEMPTS
         
         while detected_template is None and attempt < max_attempts:
             attempt += 1
@@ -3009,22 +3094,22 @@ class GameControlCenter:
                 detected_template = bt.execute_task(detect_both_task, timeout=10)
                 
             except Exception as e:
-                self.logger.debug(f"[監控] 瀏覽器 {browser_index} 檢測時發生錯誤: {e}")
+                self.logger.debug(f"瀏覽器 {browser_index} 檢測時發生錯誤: {e}")
             
             if detected_template is None:
                 # 每 10 次檢測顯示一次進度
                 if attempt % Constants.DETECTION_PROGRESS_INTERVAL == 0:
-                    self.logger.info(f"[監控] 瀏覽器 {browser_index} 等待畫面... (已嘗試 {attempt} 次)")
+                    self.logger.info(f"瀏覽器 {browser_index} 等待畫面... (已嘗試 {attempt} 次)")
                 
                 time.sleep(Constants.DETECTION_INTERVAL)
         
         # 根據檢測結果處理
         if detected_template == Constants.GAME_CONFIRM:
             display_name = Constants.TEMPLATE_DISPLAY_NAMES.get(Constants.GAME_CONFIRM, Constants.GAME_CONFIRM)
-            self.logger.info(f"[監控] 瀏覽器 {browser_index} ({username}) 檢測到 {display_name}")
+            self.logger.info(f"瀏覽器 {browser_index} ({username}) 檢測到 {display_name}")
             
             # 等待一下再點擊
-            time.sleep(1)
+            time.sleep(Constants.NORMAL_WAIT)
             self._recovery_click_button(
                 bt,
                 Constants.GAME_CONFIRM_BUTTON_X_RATIO,
@@ -3034,16 +3119,16 @@ class GameControlCenter:
             
         elif detected_template == Constants.ERROR_REMIND:
             display_name = Constants.TEMPLATE_DISPLAY_NAMES.get(Constants.ERROR_REMIND, Constants.ERROR_REMIND)
-            self.logger.info(f"[監控] 瀏覽器 {browser_index} ({username}) 檢測到 {display_name}，點擊確認...")
+            self.logger.info(f"瀏覽器 {browser_index} ({username}) 檢測到 {display_name}，點擊確認...")
             
             # 等待一下再點擊
-            time.sleep(1)
+            time.sleep(Constants.NORMAL_WAIT)
             self._recovery_click_error_confirm(bt)
             
         else:
-            self.logger.warning(f"[監控] 瀏覽器 {browser_index} 等待畫面超時（未檢測到 遊戲開始 或 錯誤訊息）")
+            self.logger.warning(f"瀏覽器 {browser_index} 等待畫面超時（未檢測到 遊戲開始 或 錯誤訊息）")
         
-        self.logger.info(f"[監控] 瀏覽器 {browser_index} ({username}) 圖片檢測流程完成")
+        self.logger.info(f"瀏覽器 {browser_index} ({username}) 圖片檢測流程完成")
         return True
     
     def _recovery_click_button(
@@ -3078,7 +3163,7 @@ class GameControlCenter:
                         """)
                         if rect:
                             break
-                        time.sleep(1)
+                        time.sleep(Constants.NORMAL_WAIT)
                     
                     if not rect:
                         return False
@@ -3087,14 +3172,14 @@ class GameControlCenter:
                     return True
                 
                 if bt.execute_task(click_task, timeout=10):
-                    self.logger.info(f"[監控] 瀏覽器 {browser_index} ({username}) 已點擊 {display_name}")
+                    self.logger.info(f"瀏覽器 {browser_index} ({username}) 已點擊 {display_name}")
                     return True
                     
             except Exception as e:
                 if click_attempt < Constants.MAX_RETRY_ATTEMPTS - 1:
-                    self.logger.warning(f"[監控] 瀏覽器 {browser_index} 點擊超時，準備重試...")
+                    self.logger.warning(f"瀏覽器 {browser_index} 點擊超時，準備重試...")
                 else:
-                    self.logger.error(f"[監控] 瀏覽器 {browser_index} 點擊 {display_name} 失敗: {e}")
+                    self.logger.error(f"瀏覽器 {browser_index} 點擊 {display_name} 失敗: {e}")
         
         return False
     
@@ -3116,10 +3201,10 @@ class GameControlCenter:
         
         # 檢查模板是否存在
         if not self._image_detector.template_exists(template_name):
-            self.logger.warning(f"[監控] 模板 {template_name} 不存在，跳過檢測")
+            self.logger.warning(f"模板 {template_name} 不存在，跳過檢測")
             return False
         
-        self.logger.info(f"[監控] 瀏覽器 {browser_index} 開始檢測 {display_name}...")
+        self.logger.info(f"瀏覽器 {browser_index} 開始檢測 {display_name}...")
         
         # 持續檢測直到找到（無限循環，參照登入流程）
         attempt = 0
@@ -3139,27 +3224,27 @@ class GameControlCenter:
                 
                 if result is not None:
                     self.logger.info(
-                        f"[監控] 瀏覽器 {browser_index} ({username}) 檢測到 {display_name}"
+                        f"瀏覽器 {browser_index} ({username}) 檢測到 {display_name}"
                     )
                     detected = True
                     break
                     
             except Exception as e:
-                self.logger.debug(f"[監控] 瀏覽器 {browser_index} 檢測時發生錯誤: {e}")
+                self.logger.debug(f"瀏覽器 {browser_index} 檢測時發生錯誤: {e}")
             
             # 每 10 次檢測顯示一次進度（參照登入流程）
             if attempt % Constants.DETECTION_PROGRESS_INTERVAL == 0:
-                self.logger.info(f"[監控] 瀏覽器 {browser_index} 等待 {display_name}... (已嘗試 {attempt} 次)")
+                self.logger.info(f"瀏覽器 {browser_index} 等待 {display_name}... (已嘗試 {attempt} 次)")
             
             # 設置最大嘗試次數，避免無限循環
-            if attempt >= 60:  # 最多等待約 60 秒
-                self.logger.warning(f"[監控] 瀏覽器 {browser_index} 等待 {display_name} 超時")
+            if attempt >= Constants.MAX_DETECTION_ATTEMPTS:
+                self.logger.warning(f"瀏覽器 {browser_index} 等待 {display_name} 超時")
                 return False
             
             time.sleep(Constants.DETECTION_INTERVAL)
         
         # 檢測成功後等待一下再點擊（參照登入流程）
-        time.sleep(1)
+        time.sleep(Constants.NORMAL_WAIT)
         
         # 點擊（包含重試機制，參照登入流程）
         for click_attempt in range(Constants.MAX_RETRY_ATTEMPTS):
@@ -3183,7 +3268,7 @@ class GameControlCenter:
                         """)
                         if rect:
                             break
-                        time.sleep(1)
+                        time.sleep(Constants.NORMAL_WAIT)
                     
                     if not rect:
                         return False
@@ -3193,26 +3278,24 @@ class GameControlCenter:
                         driver, rect, x_ratio, y_ratio
                     )
                     self.logger.debug(
-                        f"[監控] 瀏覽器 {context.index} 已點擊 {display_name} "
+                        f"瀏覽器 {context.index} 已點擊 {display_name} "
                         f"(座標: {click_x:.0f}, {click_y:.0f})"
                     )
                     return True
                 
                 if bt.execute_task(click_task, timeout=10):
-                    self.logger.info(f"[監控] 瀏覽器 {browser_index} ({username}) 已點擊 {display_name}")
+                    self.logger.info(f"瀏覽器 {browser_index} ({username}) 已點擊 {display_name}")
                     return True
                     
             except Exception as e:
                 error_msg = str(e)
-                is_network_error = any(keyword in error_msg.lower() for keyword in [
-                    'timeout', 'timed out', 'connection', 'network', 'stale'
-                ])
+                is_network_error = any(kw in error_msg.lower() for kw in Constants.NETWORK_ERROR_KEYWORDS)
                 
                 if click_attempt < Constants.MAX_RETRY_ATTEMPTS - 1 and is_network_error:
-                    self.logger.warning(f"[監控] 瀏覽器 {browser_index} 點擊超時，準備重試...")
+                    self.logger.warning(f"瀏覽器 {browser_index} 點擊超時，準備重試...")
                     continue
                 else:
-                    self.logger.error(f"[監控] 瀏覽器 {browser_index} 點擊 {display_name} 失敗: {e}")
+                    self.logger.error(f"瀏覽器 {browser_index} 點擊 {display_name} 失敗: {e}")
         
         return False
     
@@ -3234,7 +3317,7 @@ class GameControlCenter:
                     """)
                     if rect:
                         break
-                    time.sleep(1)
+                    time.sleep(Constants.NORMAL_WAIT)
                 
                 if not rect:
                     return False
@@ -3248,13 +3331,13 @@ class GameControlCenter:
             
             return bt.execute_task(task)
         except Exception as e:
-            self.logger.debug(f"[監控] 點擊錯誤確認按鈕失敗: {e}")
+            self.logger.debug(f"點擊錯誤確認按鈕失敗: {e}")
             return False
     
     def _start_error_monitor(self) -> None:
         """啟動錯誤監控功能。"""
         if self.error_monitor_running:
-            self.logger.warning("[監控] 錯誤監控已在運行中")
+            self.logger.warning("錯誤監控已在運行中")
             return
         
         self._error_monitor_stop_event.clear()
@@ -3277,7 +3360,7 @@ class GameControlCenter:
             self._error_monitor_thread.join(timeout=2.0)
             
             if self._error_monitor_thread.is_alive():
-                self.logger.warning("[監控] 錯誤監控功能停止時發生延遲")
+                self.logger.warning("錯誤監控功能停止時發生延遲")
         
         self._error_monitor_thread = None
         self.error_monitor_running = False
@@ -3339,7 +3422,7 @@ class GameControlCenter:
             try:
                 # 檢查瀏覽器是否仍然有效
                 if not bt.is_browser_alive():
-                    self.logger.warning(f"[警告] 瀏覽器 {browser_index} ({username}) 已離線，自動停止")
+                    self.logger.warning(f"瀏覽器 {browser_index} ({username}) 已離線，自動停止")
                     break
                 
                 press_count += 1
@@ -3359,20 +3442,20 @@ class GameControlCenter:
                     break
                     
             except Exception as e:
-                self.logger.error(f"[錯誤] 瀏覽器 {browser_index} ({username}) 操作失敗: {e}")
+                self.logger.error(f"瀏覽器 {browser_index} ({username}) 操作失敗: {e}")
                 self._stop_event.wait(timeout=1.0)
         
-        self.logger.info(f"[資訊] 瀏覽器 {browser_index} ({username}) 已停止，共執行 {press_count} 次")
+        self.logger.info(f"瀏覽器 {browser_index} ({username}) 已停止，共執行 {press_count} 次")
     
     def _start_auto_press(self) -> None:
         """為每個瀏覽器啟動獨立的自動按鍵功能。"""
         if self.auto_press_running:
-            self.logger.warning("[警告] 自動按鍵已在運行中")
+            self.logger.warning("自動按鍵已在運行中")
             return
         
         # 檢查是否已設定間隔時間
         if not hasattr(self, 'min_interval') or not hasattr(self, 'max_interval'):
-            self.logger.warning("[警告] 請先使用 's <最小>,<最大>' 命令設定間隔時間")
+            self.logger.warning("請先使用 's <最小>,<最大>' 命令設定間隔時間")
             return
         
         # 清除停止事件
@@ -3395,12 +3478,12 @@ class GameControlCenter:
         
         self.auto_press_running = True
         
-        self.logger.info(f"[成功] 已啟動 {len(active_browsers)} 個瀏覽器的自動按鍵")
+        self.logger.info(f"已啟動 {len(active_browsers)} 個瀏覽器的自動按鍵")
     
     def _stop_auto_press(self) -> None:
         """停止所有瀏覽器的自動按鍵功能。"""
         if not self.auto_press_running:
-            self.logger.warning("[警告] 自動按鍵未在運行")
+            self.logger.warning("自動按鍵未在運行")
             return
         
         # 設置停止事件
@@ -3415,11 +3498,11 @@ class GameControlCenter:
                 if not thread.is_alive():
                     stopped_count += 1
                 else:
-                    self.logger.warning(f"[警告] 瀏覽器 {browser_index} 停止時發生延遲")
+                    self.logger.warning(f"瀏覽器 {browser_index} 停止時發生延遲")
             else:
                 stopped_count += 1
         
-        self.logger.info(f"[成功] 已停止 {stopped_count}/{len(self.auto_press_threads)} 個瀏覽器")
+        self.logger.info(f"已停止 {stopped_count}/{len(self.auto_press_threads)} 個瀏覽器")
         
         self.auto_press_threads.clear()
         self.auto_press_running = False
@@ -3460,11 +3543,11 @@ class GameControlCenter:
                 if self.auto_press_running:
                     self._stop_auto_press()
                     self.logger.info("")
-                    self.logger.info("[成功] 已暫停自動按鍵")
+                    self.logger.info("已暫停自動按鍵")
                     self.logger.info("")
                     self.show_help()
                 else:
-                    self.logger.warning("[警告] 目前沒有運行中的自動操作")
+                    self.logger.warning("目前沒有運行中的自動操作")
             
             elif cmd == 'b':
                 # 調整金額
@@ -3472,7 +3555,7 @@ class GameControlCenter:
             
             elif cmd == 'f':
                 # 購買免費遊戲（簡化版 - 尚未實作完整邏輯）
-                self.logger.info("[提示] 購買免費遊戲功能尚未完整實作")
+                self.logger.info("購買免費遊戲功能尚未完整實作")
             
             elif cmd == 't':
                 # 截取金額模板 (template)
@@ -3491,11 +3574,11 @@ class GameControlCenter:
                 self._handle_capture_lobby_return_command()
             
             else:
-                self.logger.warning(f"[警告] 未知指令: {cmd}")
+                self.logger.warning(f"未知指令: {cmd}")
                 self.logger.info("   輸入 'h' 查看指令說明")
                 
         except Exception as e:
-            self.logger.error(f"[錯誤] 處理指令時發生錯誤: {e}")
+            self.logger.error(f"處理指令時發生錯誤: {e}")
         
         return True
     
@@ -3509,7 +3592,7 @@ class GameControlCenter:
             是否繼續運行
         """
         if not arguments:
-            self.logger.error("[錯誤] 指令格式錯誤，請使用: q <編號>")
+            self.logger.error("指令格式錯誤，請使用: q <編號>")
             self.logger.info("       q 0 - 關閉所有瀏覽器並退出")
             self.logger.info("       q 1 - 關閉第 1 個瀏覽器")
             return True
@@ -3520,17 +3603,17 @@ class GameControlCenter:
             
             if index == 0:
                 # 關閉所有瀏覽器
-                self.logger.info(f"[資訊] 開始關閉所有 {len(active_browsers)} 個瀏覽器...")
+                self.logger.info(f"開始關閉所有 {len(active_browsers)} 個瀏覽器...")
                 
                 for i, bt in enumerate(active_browsers, 1):
                     try:
                         bt.stop()
                         username = bt.context.credential.username if bt.context else "Unknown"
-                        self.logger.info(f"[成功] 已關閉瀏覽器 {i} ({username})")
+                        self.logger.info(f"已關閉瀏覽器 {i} ({username})")
                     except Exception as e:
-                        self.logger.error(f"[錯誤] 關閉瀏覽器 {i} 失敗: {e}")
+                        self.logger.error(f"關閉瀏覽器 {i} 失敗: {e}")
                 
-                self.logger.info("[資訊] 所有瀏覽器已關閉，退出控制面板")
+                self.logger.info("所有瀏覽器已關閉，退出控制面板")
                 return False
             
             elif 1 <= index <= len(active_browsers):
@@ -3540,44 +3623,44 @@ class GameControlCenter:
                 
                 try:
                     bt.stop()
-                    self.logger.info(f"[成功] 已關閉瀏覽器 {index} ({username})")
+                    self.logger.info(f"已關閉瀏覽器 {index} ({username})")
                 except Exception as e:
-                    self.logger.error(f"[錯誤] 關閉瀏覽器 {index} 失敗: {e}")
+                    self.logger.error(f"關閉瀏覽器 {index} 失敗: {e}")
                 
                 # 檢查是否還有瀏覽器在運行
                 remaining = len(self._get_active_browsers())
                 if remaining == 0:
-                    self.logger.info("[資訊] 所有瀏覽器已關閉，退出控制面板")
+                    self.logger.info("所有瀏覽器已關閉，退出控制面板")
                     return False
                 else:
-                    self.logger.info(f"[資訊] 剩餘 {remaining} 個瀏覽器仍在運行")
+                    self.logger.info(f"剩餘 {remaining} 個瀏覽器仍在運行")
             else:
-                self.logger.error(f"[錯誤] 瀏覽器編號無效，請輸入 0 (全部) 或 1-{len(active_browsers)}")
+                self.logger.error(f"瀏覽器編號無效，請輸入 0 (全部) 或 1-{len(active_browsers)}")
         
         except ValueError:
-            self.logger.error(f"[錯誤] 無效的編號: {arguments}，請輸入數字")
+            self.logger.error(f"無效的編號: {arguments}，請輸入數字")
         
         return True
     
     def _handle_betsize_command(self, arguments: str) -> None:
         """處理調整金額指令（同步並行操作）。"""
         if not arguments:
-            self.logger.error("[錯誤] 指令格式錯誤，請使用: b <金額> (例如: b 100)")
+            self.logger.error("指令格式錯誤，請使用: b <金額> (例如: b 100)")
             return
         
         try:
             target_amount = float(arguments)
         except ValueError:
-            self.logger.error(f"[錯誤] 無效的金額: {arguments}，請輸入數字")
+            self.logger.error(f"無效的金額: {arguments}，請輸入數字")
             return
         
         active_browsers = [bt for bt in self._get_active_browsers() 
                           if bt.is_browser_alive() and bt.context]
         if not active_browsers:
-            self.logger.error("[錯誤] 沒有可用的瀏覽器")
+            self.logger.error("沒有可用的瀏覽器")
             return
         
-        self.logger.info(f"[資訊] 開始同步調整 {len(active_browsers)} 個瀏覽器金額到 {target_amount}...")
+        self.logger.info(f"開始同步調整 {len(active_browsers)} 個瀏覽器金額到 {target_amount}...")
         
         # 使用 ThreadPoolExecutor 同步並行調整所有瀏覽器
         results = {}
@@ -3595,7 +3678,7 @@ class GameControlCenter:
                 try:
                     results[bt.index] = future.result()
                 except Exception as e:
-                    self.logger.error(f"[錯誤] 瀏覽器 {bt.index} 調整金額失敗: {e}")
+                    self.logger.error(f"瀏覽器 {bt.index} 調整金額失敗: {e}")
                     results[bt.index] = False
         
         # 統計結果
@@ -3603,9 +3686,9 @@ class GameControlCenter:
         total = len(active_browsers)
         
         if success_count == total:
-            self.logger.info(f"[成功] 金額調整完成: 全部 {success_count} 個瀏覽器成功")
+            self.logger.info(f"金額調整完成: 全部 {success_count} 個瀏覽器成功")
         else:
-            self.logger.warning(f"[警告] 部分完成: {success_count}/{total} 個瀏覽器成功")
+            self.logger.warning(f"部分完成: {success_count}/{total} 個瀏覽器成功")
             for bt in active_browsers:
                 if not results.get(bt.index, False):
                     self.logger.error(f"       瀏覽器 {bt.index} ({bt.context.credential.username}) 失敗")
@@ -3620,7 +3703,7 @@ class GameControlCenter:
             是否繼續運行
         """
         if not arguments:
-            self.logger.error("[錯誤] 指令格式錯誤")
+            self.logger.error("指令格式錯誤")
             self.logger.info("       正確格式: s <最小>,<最大>")
             self.logger.info("       範例: s 1,2 → 每 1~2 秒自動執行一次")
             return True
@@ -3629,7 +3712,7 @@ class GameControlCenter:
         try:
             interval_parts = arguments.split(',')
             if len(interval_parts) != 2:
-                self.logger.error("[錯誤] 間隔格式錯誤，需要兩個數字")
+                self.logger.error("間隔格式錯誤，需要兩個數字")
                 self.logger.info("       範例: s 1,2 或 s 1.5,3")
                 return True
             
@@ -3637,22 +3720,22 @@ class GameControlCenter:
             max_interval = float(interval_parts[1].strip())
             
             if min_interval <= 0 or max_interval <= 0:
-                self.logger.error("[錯誤] 間隔時間必須大於 0")
+                self.logger.error("間隔時間必須大於 0")
                 return True
             
             if min_interval > max_interval:
-                self.logger.error("[錯誤] 最小間隔不能大於最大間隔")
+                self.logger.error("最小間隔不能大於最大間隔")
                 self.logger.info(f"       您輸入的: 最小={min_interval}, 最大={max_interval}")
                 return True
                 
         except ValueError:
-            self.logger.error("[錯誤] 間隔格式錯誤，請輸入有效的數字")
+            self.logger.error("間隔格式錯誤，請輸入有效的數字")
             self.logger.info("       範例: s 1,2 或 s 1.5,3")
             return True
         
         # 檢查是否已在運行
         if self.auto_press_running:
-            self.logger.warning("[警告] 自動按鍵已在運行中")
+            self.logger.warning("自動按鍵已在運行中")
             self.logger.info(f"       目前設定: {self.min_interval}~{self.max_interval} 秒")
             self.logger.info("       請先使用 'p' 暫停後再重新設定")
             return True
@@ -3664,7 +3747,7 @@ class GameControlCenter:
         active_count = len(self._get_active_browsers())
         
         self.logger.info("")
-        self.logger.info("[成功] 自動按鍵已啟動")
+        self.logger.info("自動按鍵已啟動")
         self.logger.info(f"       間隔時間: {min_interval}~{max_interval} 秒")
         self.logger.info(f"       瀏覽器數: {active_count} 個")
         self.logger.info("       暫停指令: p")
@@ -3689,7 +3772,7 @@ class GameControlCenter:
         self.logger.info(f"【截取模板】{display_name}")
         self.logger.info("=" * 60)
         self.logger.info("")
-        self.logger.info(f"[提示] 需要擷取 {display_name} 的參考圖片")
+        self.logger.info(f"需要擷取 {display_name} 的參考圖片")
         self.logger.info("       請確保目標遊戲視窗已顯示正確的畫面內容")
         self.logger.info("")
         
@@ -3697,7 +3780,7 @@ class GameControlCenter:
         active_browsers = self._get_active_browsers()
         
         if not active_browsers:
-            self.logger.error("[錯誤] 沒有可用的遊戲視窗")
+            self.logger.error("沒有可用的遊戲視窗")
             return None
         
         # 顯示可選擇的瀏覽器列表
@@ -3717,7 +3800,7 @@ class GameControlCenter:
             
             # 檢查是否要取消
             if user_input == 'q':
-                self.logger.info("[提示] 使用者取消擷取")
+                self.logger.info("使用者取消擷取")
                 return None
             
             # 解析瀏覽器編號
@@ -3730,19 +3813,19 @@ class GameControlCenter:
                         if bt.is_browser_alive() and bt.context:
                             return bt
                         else:
-                            self.logger.error(f"[錯誤] 瀏覽器 {browser_index} 已關閉")
+                            self.logger.error(f"瀏覽器 {browser_index} 已關閉")
                             return None
                 
-                self.logger.error(f"[錯誤] 無效的瀏覽器編號: {browser_index}")
+                self.logger.error(f"無效的瀏覽器編號: {browser_index}")
                 return None
                 
             except ValueError:
-                self.logger.error(f"[錯誤] 無效的輸入: {user_input}")
+                self.logger.error(f"無效的輸入: {user_input}")
                 return None
                 
         except (EOFError, KeyboardInterrupt):
             self.logger.info("")
-            self.logger.info("[提示] 使用者取消擷取")
+            self.logger.info("使用者取消擷取")
             return None
     
     def _handle_capture_betsize_command(self) -> None:
@@ -3755,7 +3838,7 @@ class GameControlCenter:
         
         # 2. 進入金額輸入模式
         self.logger.info("")
-        self.logger.info("[提示] 請輸入目前遊戲顯示的金額（例: 2, 10, 100）")
+        self.logger.info("請輸入目前遊戲顯示的金額（例: 2, 10, 100）")
         self.logger.info("   輸入 q 退出")
         self.logger.info("")
         
@@ -3766,39 +3849,39 @@ class GameControlCenter:
                 
                 # 輸入 q 則退出
                 if amount_input == 'q':
-                    self.logger.info("[提示] 退出金額模板工具")
+                    self.logger.info("退出金額模板工具")
                     break
                 
                 # 空白輸入則提示
                 if not amount_input:
-                    self.logger.warning("[警告] 請輸入金額或輸入 q 退出")
+                    self.logger.warning("請輸入金額或輸入 q 退出")
                     continue
                 
                 amount = float(amount_input)
                 
                 # 使用 Constants.GAME_BETSIZE 驗證金額
                 if amount not in Constants.GAME_BETSIZE:
-                    self.logger.warning(f"[警告] 金額 {amount} 不在標準列表中，但仍會建立模板")
+                    self.logger.warning(f"金額 {amount} 不在標準列表中，但仍會建立模板")
                 
                 # 檢查瀏覽器是否仍然有效
                 if not selected_browser.is_browser_alive():
-                    self.logger.error("[錯誤] 選中的瀏覽器已關閉")
+                    self.logger.error("選中的瀏覽器已關閉")
                     break
                 
                 # 擷取模板（使用 self._image_detector）
                 if self._image_detector.capture_betsize_template(selected_browser.context.driver, amount):
                     self.logger.info("")
                 else:
-                    self.logger.error("[錯誤] 模板截取失敗")
+                    self.logger.error("模板截取失敗")
                     
             except ValueError:
-                self.logger.error("[錯誤] 金額格式錯誤，請輸入有效數字（例如: 2, 10, 100）")
+                self.logger.error("金額格式錯誤，請輸入有效數字（例如: 2, 10, 100）")
             except (EOFError, KeyboardInterrupt):
                 self.logger.info("")
-                self.logger.info("[提示] 退出金額模板工具")
+                self.logger.info("退出金額模板工具")
                 break
             except Exception as e:
-                self.logger.error(f"[錯誤] 截取失敗: {e}")
+                self.logger.error(f"截取失敗: {e}")
     
     def _handle_capture_blackscreen_command(self) -> None:
         """處理截取黑屏模板指令。"""
@@ -3814,9 +3897,9 @@ class GameControlCenter:
             if self._image_detector.capture_blackscreen_template(selected_browser.context.driver):
                 self.logger.info("")
             else:
-                self.logger.error("[錯誤] 模板截取失敗")
+                self.logger.error("模板截取失敗")
         except Exception as e:
-            self.logger.error(f"[錯誤] 截取失敗: {e}")
+            self.logger.error(f"截取失敗: {e}")
     
     def _handle_capture_error_remind_command(self) -> None:
         """處理截取錯誤提醒模板指令。"""
@@ -3832,9 +3915,9 @@ class GameControlCenter:
             if self._image_detector.capture_error_remind_template(selected_browser.context.driver):
                 self.logger.info("")
             else:
-                self.logger.error("[錯誤] 模板截取失敗")
+                self.logger.error("模板截取失敗")
         except Exception as e:
-            self.logger.error(f"[錯誤] 截取失敗: {e}")
+            self.logger.error(f"截取失敗: {e}")
     
     def _handle_capture_lobby_return_command(self) -> None:
         """處理截取大廳返回提示模板指令。"""
@@ -3850,9 +3933,9 @@ class GameControlCenter:
             if self._image_detector.capture_lobby_return_template(selected_browser.context.driver):
                 self.logger.info("")
             else:
-                self.logger.error("[錯誤] 模板截取失敗")
+                self.logger.error("模板截取失敗")
         except Exception as e:
-            self.logger.error(f"[錯誤] 截取失敗: {e}")
+            self.logger.error(f"截取失敗: {e}")
     
     def start(self) -> None:
         """啟動控制面板。"""
@@ -3864,7 +3947,7 @@ class GameControlCenter:
         self.logger.info("")
         
         active_count = len(self._get_active_browsers())
-        self.logger.info(f"[成功] 已連接 {active_count} 個遊戲視窗")
+        self.logger.info(f"已連接 {active_count} 個遊戲視窗")
         self.logger.info("")
         
         # 啟動錯誤訊息監控
@@ -3877,21 +3960,26 @@ class GameControlCenter:
             while self.running:
                 try:
                     print(">>> ", end="", flush=True)
+                    FlushingStreamHandler.show_prompt = True
                     command = input().strip()
+                    FlushingStreamHandler.show_prompt = False
                     
                     if command:
                         if not self.process_command(command):
                             break
                     else:
-                        self.logger.warning("[警告] 請輸入指令（輸入 'h' 查看幫助）")
+                        self.logger.warning("請輸入指令（輸入 'h' 查看幫助）")
                         
                 except EOFError:
-                    self.logger.info("\n[資訊] 輸入結束，退出控制面板")
+                    FlushingStreamHandler.show_prompt = False
+                    self.logger.info("\n輸入結束，退出控制面板")
                     break
                 except KeyboardInterrupt:
-                    self.logger.info("\n[資訊] 使用者中斷，退出控制面板")
+                    FlushingStreamHandler.show_prompt = False
+                    self.logger.info("\n使用者中斷，退出控制面板")
                     break
         finally:
+            FlushingStreamHandler.show_prompt = False
             # 確保停止所有自動操作
             if self.auto_press_running:
                 self._stop_auto_press()
@@ -3900,7 +3988,7 @@ class GameControlCenter:
             self._stop_error_monitor()
             
             self.running = False
-            self.logger.info("[成功] 控制面板已關閉")
+            self.logger.info("控制面板已關閉")
     
     def stop(self) -> None:
         """停止控制面板。"""
@@ -3977,7 +4065,7 @@ class AutoSlotGameAppStarter:
             browser_count = self._step_determine_browser_count()
             
             if browser_count == 0:
-                self.logger.error("[錯誤] 沒有可用的用戶帳號，無法繼續")
+                self.logger.error("沒有可用的用戶帳號，無法繼續")
                 return False
             
             # 步驟 3: 啟動代理中繼伺服器
@@ -3989,7 +4077,7 @@ class AutoSlotGameAppStarter:
             return True
             
         except Exception as e:
-            self.logger.error(f"[錯誤] 初始化失敗: {e}")
+            self.logger.error(f"初始化失敗: {e}")
             return False
     
     def _step_load_config(self) -> None:
@@ -4009,11 +4097,11 @@ class AutoSlotGameAppStarter:
         
         # 讀取用戶資料
         self.credentials = self.config_reader.read_user_credentials()
-        self.logger.info(f"[成功] 讀取到 {len(self.credentials)} 個用戶帳號")
+        self.logger.info(f"讀取到 {len(self.credentials)} 個用戶帳號")
         
         # 讀取用戶規則
         self.rules = self.config_reader.read_bet_rules()
-        self.logger.info(f"[成功] 讀取到 {len(self.rules)} 條規則")
+        self.logger.info(f"讀取到 {len(self.rules)} 條規則")
         
         self.logger.info("")
     
@@ -4030,7 +4118,7 @@ class AutoSlotGameAppStarter:
         # 根據用戶數量決定瀏覽器數量，最多 MAX_BROWSER_COUNT 個
         browser_count = min(len(self.credentials), Constants.MAX_BROWSER_COUNT)
         
-        self.logger.info(f"[成功] 將開啟 {browser_count} 個瀏覽器")
+        self.logger.info(f"將開啟 {browser_count} 個瀏覽器")
         self.logger.info("")
         
         return browser_count
@@ -4065,7 +4153,7 @@ class AutoSlotGameAppStarter:
                     if port:
                         success_count += 1
                 except Exception as e:
-                    self.logger.warning(f"[警告] 瀏覽器 {i+1}: 無法解析代理配置 - {e}")
+                    self.logger.warning(f"瀏覽器 {i+1}: 無法解析代理配置 - {e}")
                     proxy_ports.append(None)
             else:
                 # 沒有代理配置
@@ -4074,9 +4162,9 @@ class AutoSlotGameAppStarter:
         
         # 統一輸出結果
         if success_count > 0:
-            self.logger.info(f"[成功] 已啟動 {success_count} 個代理中繼伺服器")
+            self.logger.info(f"已啟動 {success_count} 個代理中繼伺服器")
         if no_proxy_count > 0:
-            self.logger.info(f"[資訊] {no_proxy_count} 個瀏覽器無代理配置，使用直連網路")
+            self.logger.info(f"{no_proxy_count} 個瀏覽器無代理配置，使用直連網路")
         
         self.logger.info("")
         return proxy_ports
@@ -4100,7 +4188,7 @@ class AutoSlotGameAppStarter:
         self.logger.info("=" * 60)
         
         self.browser_manager = BrowserManager(logger=self.logger)
-        self.logger.info(f"[資訊] 正在開啟 {browser_count} 個遊戲視窗...")
+        self.logger.info(f"正在開啟 {browser_count} 個遊戲視窗...")
         
         # 1. 建立並啟動所有瀏覽器執行緒
         for i in range(browser_count):
@@ -4136,11 +4224,11 @@ class AutoSlotGameAppStarter:
         
         # 輸出結果
         if success_count == browser_count:
-            self.logger.info(f"[成功] 全部 {browser_count} 個瀏覽器已建立")
+            self.logger.info(f"全部 {browser_count} 個瀏覽器已建立")
         else:
-            self.logger.info(f"[完成] 成功建立 {success_count}/{browser_count} 個瀏覽器")
+            self.logger.info(f"成功建立 {success_count}/{browser_count} 個瀏覽器")
             for idx, err in failed_indices:
-                self.logger.error(f"[錯誤] 瀏覽器 {idx}: {err}")
+                self.logger.error(f"瀏覽器 {idx}: {err}")
         
         self.logger.info("")
     
@@ -4172,12 +4260,12 @@ class AutoSlotGameAppStarter:
         self.browser_threads.clear()
         
         if browser_count > 0:
-            self.logger.info(f"[成功] 已關閉 {browser_count} 個瀏覽器")
+            self.logger.info(f"已關閉 {browser_count} 個瀏覽器")
         
         # 停止所有代理伺服器
         if self.proxy_manager:
             self.proxy_manager.stop_all_servers()
-            self.logger.info("[成功] 已停止所有代理伺服器")
+            self.logger.info("已停止所有代理伺服器")
         
         self.logger.info("")
     
@@ -4316,7 +4404,7 @@ class AutoSlotGameAppStarter:
             for attempt in range(Constants.MAX_RETRY_ATTEMPTS):
                 try:
                     if attempt > 0:
-                        self.logger.info(f"[重試] 瀏覽器 {context.index} 導航第 {attempt + 1} 次嘗試...")
+                        self.logger.info(f"瀏覽器 {context.index} 導航第 {attempt + 1} 次嘗試...")
                         time.sleep(Constants.RETRY_INTERVAL)
                     
                     # 導航到登入頁面
@@ -4334,15 +4422,13 @@ class AutoSlotGameAppStarter:
                     
                 except Exception as e:
                     error_msg = str(e)
-                    is_network_error = any(keyword in error_msg.lower() for keyword in [
-                        'timeout', 'timed out', 'connection', 'network', 'err_'
-                    ])
+                    is_network_error = any(kw in error_msg.lower() for kw in Constants.NETWORK_ERROR_KEYWORDS)
                     
                     if attempt < Constants.MAX_RETRY_ATTEMPTS - 1 and is_network_error:
-                        self.logger.warning(f"[警告] 瀏覽器 {context.index} 頁面載入超時，準備重試...")
+                        self.logger.warning(f"瀏覽器 {context.index} 頁面載入超時，準備重試...")
                         continue
                     else:
-                        self.logger.warning(f"[警告] 瀏覽器 {context.index} 導航失敗: {e}")
+                        self.logger.warning(f"瀏覽器 {context.index} 導航失敗: {e}")
                         return False
             
             return False
@@ -4350,7 +4436,7 @@ class AutoSlotGameAppStarter:
         results = self.execute_on_all_browsers(navigate_task, timeout=Constants.ELEMENT_WAIT_TIMEOUT_LONG * 2)
         success_count = sum(1 for _, result, error in results if error is None and result)
         
-        self.logger.info(f"[成功] {success_count}/{len(self.browser_threads)} 個瀏覽器已導航到登入頁面")
+        self.logger.info(f"{success_count}/{len(self.browser_threads)} 個瀏覽器已導航到登入頁面")
         self.logger.info("")
     
     def perform_login(self) -> None:
@@ -4373,7 +4459,7 @@ class AutoSlotGameAppStarter:
             for attempt in range(Constants.MAX_RETRY_ATTEMPTS):
                 try:
                     if attempt > 0:
-                        self.logger.info(f"[重試] 瀏覽器 {context.index} 登入第 {attempt + 1} 次嘗試...")
+                        self.logger.info(f"瀏覽器 {context.index} 登入第 {attempt + 1} 次嘗試...")
                         time.sleep(Constants.RETRY_INTERVAL)
                     
                     # 1. 等待 loading 遮罩層消失（使用 JavaScript 檢測，避免多次 WebDriver 調用）
@@ -4403,7 +4489,7 @@ class AutoSlotGameAppStarter:
                         EC.element_to_be_clickable((By.XPATH, Constants.USERNAME_INPUT))
                     )
                     username_input.clear()
-                    time.sleep(0.5)
+                    time.sleep(Constants.SHORT_WAIT)
                     username_input.send_keys(credential.username)
                     
                     # 5. 輸入密碼
@@ -4411,7 +4497,7 @@ class AutoSlotGameAppStarter:
                         EC.element_to_be_clickable((By.XPATH, Constants.PASSWORD_INPUT))
                     )
                     password_input.clear()
-                    time.sleep(1)
+                    time.sleep(Constants.NORMAL_WAIT)
                     password_input.send_keys(credential.password)
                     
                     # 6. 點擊登入按鈕
@@ -4438,15 +4524,13 @@ class AutoSlotGameAppStarter:
                 except Exception as e:
                     error_msg = str(e)
                     # 判斷是否為網路相關錯誤（可重試）
-                    is_network_error = any(keyword in error_msg.lower() for keyword in [
-                        'timeout', 'timed out', 'connection', 'network', 'loading'
-                    ])
+                    is_network_error = any(kw in error_msg.lower() for kw in Constants.NETWORK_ERROR_KEYWORDS)
                     
                     if attempt < Constants.MAX_RETRY_ATTEMPTS - 1 and is_network_error:
-                        self.logger.warning(f"[警告] 瀏覽器 {context.index} 登入超時，準備重試...")
+                        self.logger.warning(f"瀏覽器 {context.index} 登入超時，準備重試...")
                         continue
                     else:
-                        self.logger.warning(f"[警告] 瀏覽器 {context.index} 登入失敗: {e}")
+                        self.logger.warning(f"瀏覽器 {context.index} 登入失敗: {e}")
                         return False
             
             return False
@@ -4454,7 +4538,7 @@ class AutoSlotGameAppStarter:
         results = self.execute_on_all_browsers(login_task, timeout=Constants.LOGIN_TASK_TIMEOUT)
         success_count = sum(1 for _, result, error in results if error is None and result)
         
-        self.logger.info(f"[成功] {success_count}/{len(self.browser_threads)} 個瀏覽器已完成登入")
+        self.logger.info(f"{success_count}/{len(self.browser_threads)} 個瀏覽器已完成登入")
         self.logger.info("")
     
     def navigate_to_game(self) -> None:
@@ -4476,7 +4560,7 @@ class AutoSlotGameAppStarter:
             for attempt in range(Constants.MAX_RETRY_ATTEMPTS):
                 try:
                     if attempt > 0:
-                        self.logger.info(f"[重試] 瀏覽器 {context.index} 進入遊戲第 {attempt + 1} 次嘗試...")
+                        self.logger.info(f"瀏覽器 {context.index} 進入遊戲第 {attempt + 1} 次嘗試...")
                         # 重試前刷新頁面
                         driver.refresh()
                         time.sleep(Constants.PAGE_LOAD_WAIT_LONG)
@@ -4496,7 +4580,7 @@ class AutoSlotGameAppStarter:
                             const overlays = document.querySelectorAll('[class*="overlay"], [class*="mask"]');
                             overlays.forEach(overlay => overlay.remove());
                         """)
-                        time.sleep(1)
+                        time.sleep(Constants.NORMAL_WAIT)
                     except Exception:
                         pass  # 沒有彈窗也沒關係
                     
@@ -4506,7 +4590,7 @@ class AutoSlotGameAppStarter:
                         EC.presence_of_element_located((By.XPATH, game_selector))
                     )
                     driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", game_element)
-                    time.sleep(1)
+                    time.sleep(Constants.NORMAL_WAIT)
                     driver.execute_script("arguments[0].click();", game_element)
                     time.sleep(Constants.PAGE_LOAD_WAIT_LONG)  # 等待遊戲載入
                     
@@ -4527,15 +4611,13 @@ class AutoSlotGameAppStarter:
                 except Exception as e:
                     error_msg = str(e)
                     # 判斷是否為網路相關錯誤（可重試）
-                    is_network_error = any(keyword in error_msg.lower() for keyword in [
-                        'timeout', 'timed out', 'connection', 'network', 'loading', 'stale'
-                    ])
+                    is_network_error = any(kw in error_msg.lower() for kw in Constants.NETWORK_ERROR_KEYWORDS)
                     
                     if attempt < Constants.MAX_RETRY_ATTEMPTS - 1 and is_network_error:
-                        self.logger.warning(f"[警告] 瀏覽器 {context.index} 進入遊戲超時，準備重試...")
+                        self.logger.warning(f"瀏覽器 {context.index} 進入遊戲超時，準備重試...")
                         continue
                     else:
-                        self.logger.warning(f"[警告] 瀏覽器 {context.index} 進入遊戲失敗: {e}")
+                        self.logger.warning(f"瀏覽器 {context.index} 進入遊戲失敗: {e}")
                         return False
             
             return False
@@ -4543,7 +4625,7 @@ class AutoSlotGameAppStarter:
         results = self.execute_on_all_browsers(game_task, timeout=Constants.GAME_NAVIGATION_TIMEOUT)
         success_count = sum(1 for _, result, error in results if error is None and result)
         
-        self.logger.info(f"[成功] {success_count}/{len(self.browser_threads)} 個瀏覽器已進入遊戲")
+        self.logger.info(f"{success_count}/{len(self.browser_threads)} 個瀏覽器已進入遊戲")
         self.logger.info("")
     
     def arrange_windows(self) -> None:
@@ -4571,7 +4653,7 @@ class AutoSlotGameAppStarter:
         results = self.execute_on_all_browsers(arrange_task)
         success_count = sum(1 for _, result, error in results if error is None and result)
         
-        self.logger.info(f"[成功] {success_count}/{len(self.browser_threads)} 個視窗已排列完成 ({columns} 列, {width}x{height})")
+        self.logger.info(f"{success_count}/{len(self.browser_threads)} 個視窗已排列完成 ({columns} 列, {width}x{height})")
         self.logger.info("")
     
     def execute_image_detection_flow(self) -> None:
@@ -4587,7 +4669,7 @@ class AutoSlotGameAppStarter:
         self.logger.info("=" * 60)
         
         if not self.browser_threads:
-            self.logger.error("[錯誤] 沒有可用的瀏覽器實例")
+            self.logger.error("沒有可用的瀏覽器實例")
             return
         
         # 初始化圖片檢測器
@@ -4612,11 +4694,11 @@ class AutoSlotGameAppStarter:
             x_ratio=Constants.GAME_CONFIRM_BUTTON_X_RATIO,
             y_ratio=Constants.GAME_CONFIRM_BUTTON_Y_RATIO,
             post_click_wait=3.0,
-            post_click_message="[成功] 所有瀏覽器已準備就緒"
+            post_click_message="所有瀏覽器已準備就緒"
         )
         
         self.logger.info("")
-        self.logger.info("[成功] 圖片檢測與初始化完成")
+        self.logger.info("圖片檢測與初始化完成")
         self.logger.info("")
     
     def _handle_image_detection_and_click(
@@ -4654,7 +4736,7 @@ class AutoSlotGameAppStarter:
         self._continuous_detect_until_found(image_detector, template_name, display_name)
         
         # 3. 等待一下後點擊
-        time.sleep(1)
+        time.sleep(Constants.NORMAL_WAIT)
         
         # 4. 使用 Canvas 比例計算座標並點擊（包含重試機制）
         def click_canvas_button(context: BrowserContext) -> bool:
@@ -4679,7 +4761,7 @@ class AutoSlotGameAppStarter:
                         """)
                         if rect:
                             break
-                        time.sleep(1)
+                        time.sleep(Constants.NORMAL_WAIT)
                     
                     if not rect:
                         if attempt < Constants.MAX_RETRY_ATTEMPTS - 1:
@@ -4691,7 +4773,7 @@ class AutoSlotGameAppStarter:
                         driver, rect, x_ratio, y_ratio
                     )
                     self.logger.debug(
-                        f"[除錯] 瀏覽器 {context.index} 已點擊 {display_name} "
+                        f"瀏覽器 {context.index} 已點擊 {display_name} "
                         f"(座標: {click_x:.0f}, {click_y:.0f})"
                     )
                     return True
@@ -4705,14 +4787,14 @@ class AutoSlotGameAppStarter:
                     if attempt < Constants.MAX_RETRY_ATTEMPTS - 1 and is_network_error:
                         continue
                     else:
-                        self.logger.error(f"[錯誤] 瀏覽器 {context.index} 點擊 {display_name} 失敗: {e}")
+                        self.logger.error(f"瀏覽器 {context.index} 點擊 {display_name} 失敗: {e}")
                         return False
             
             return False
         
         results = self.execute_on_all_browsers(click_canvas_button)
         success_count = sum(1 for _, result, error in results if error is None and result)
-        self.logger.info(f"[成功] {success_count}/{len(self.browser_threads)} 個瀏覽器已點擊 {display_name}")
+        self.logger.info(f"{success_count}/{len(self.browser_threads)} 個瀏覽器已點擊 {display_name}")
         
         # 5. 等待圖片消失
         self._wait_for_image_disappear(image_detector, template_name)
@@ -4742,7 +4824,7 @@ class AutoSlotGameAppStarter:
         attempt = 0
         total_browsers = len(self.browser_threads)
         
-        self.logger.info(f"[資訊] 開始檢測 {display_name}...")
+        self.logger.info(f"開始檢測 {display_name}...")
         
         while True:
             attempt += 1
@@ -4760,7 +4842,7 @@ class AutoSlotGameAppStarter:
             
             # 當所有瀏覽器都找到圖片時返回
             if found_count == total_browsers:
-                self.logger.info(f"[成功] 所有瀏覽器都已檢測到 {display_name}")
+                self.logger.info(f"所有瀏覽器都已檢測到 {display_name}")
                 return detection_results
             
             # 每 10 次檢測顯示一次進度
@@ -4787,16 +4869,16 @@ class AutoSlotGameAppStarter:
         """
         self.logger.info("")
         self.logger.info("=" * 60)
-        self.logger.info(f"[警告] 模板圖片不存在: {template_name}")
+        self.logger.info(f"模板圖片不存在: {template_name}")
         self.logger.info("=" * 60)
         self.logger.info("")
-        self.logger.info(f"[提示] 需要擷取 {display_name} 的參考圖片")
+        self.logger.info(f"需要擷取 {display_name} 的參考圖片")
         self.logger.info("   請確保目標瀏覽器的遊戲畫面已顯示目標內容")
         self.logger.info("")
         
         # 檢查是否有可用的瀏覽器
         if not self.browser_threads:
-            self.logger.error("[錯誤] 沒有可用的瀏覽器實例")
+            self.logger.error("沒有可用的瀏覽器實例")
             raise RuntimeError("沒有可用的瀏覽器實例")
         
         # 顯示可選擇的瀏覽器列表
@@ -4809,7 +4891,7 @@ class AutoSlotGameAppStarter:
                 available_browsers.append(thread)
         
         if not available_browsers:
-            self.logger.error("[錯誤] 沒有可用的瀏覽器")
+            self.logger.error("沒有可用的瀏覽器")
             raise RuntimeError("沒有可用的瀏覽器")
         
         self.logger.info("  q  - 取消")
@@ -4822,7 +4904,7 @@ class AutoSlotGameAppStarter:
             
             # 檢查是否要取消
             if user_input == 'q':
-                self.logger.warning("[警告] 使用者取消擷取")
+                self.logger.warning("使用者取消擷取")
                 raise KeyboardInterrupt("使用者取消")
             
             # 解析瀏覽器編號
@@ -4837,7 +4919,7 @@ class AutoSlotGameAppStarter:
                         break
                 
                 if selected_thread is None:
-                    self.logger.error(f"[錯誤] 無效的瀏覽器編號: {browser_index}")
+                    self.logger.error(f"無效的瀏覽器編號: {browser_index}")
                     # 遞迴重試
                     self._prompt_capture_template(image_detector, template_name, display_name)
                     return
@@ -4847,18 +4929,18 @@ class AutoSlotGameAppStarter:
                 image_detector.capture_screenshot(selected_thread.context.driver, template_path)
                 
                 self.logger.info("")
-                self.logger.info(f"[成功] 模板圖片已建立: {template_path}")
+                self.logger.info(f"模板圖片已建立: {template_path}")
                 self.logger.info("")
                 
             except ValueError:
-                self.logger.error(f"[錯誤] 無效的輸入: {user_input}")
+                self.logger.error(f"無效的輸入: {user_input}")
                 # 遞迴重試
                 self._prompt_capture_template(image_detector, template_name, display_name)
                 return
             
         except (EOFError, KeyboardInterrupt):
             self.logger.warning("")
-            self.logger.warning("[警告] 使用者取消擷取")
+            self.logger.warning("使用者取消擷取")
             raise
     
     def _wait_for_image_disappear(self, image_detector: ImageDetector, template_name: str) -> None:
@@ -4889,7 +4971,7 @@ class AutoSlotGameAppStarter:
             
             # 如果所有瀏覽器都沒有找到圖片，則返回
             if still_present_count == 0:
-                self.logger.info(f"[成功] 圖片已消失")
+                self.logger.info(f"圖片已消失")
                 return
             
             # 每 10 次檢測顯示一次進度
@@ -4910,7 +4992,7 @@ class AutoSlotGameAppStarter:
         self.logger.info("=" * 60)
         
         if not self.browser_threads:
-            self.logger.error("[錯誤] 沒有可用的瀏覽器實例")
+            self.logger.error("沒有可用的瀏覽器實例")
             return
         
         # 嘗試取得 Canvas 區域資訊（用於點擊座標計算）
@@ -4986,7 +5068,7 @@ def main() -> None:
             logger.info("=" * 60)
             logger.info("【初始化完成】")
             logger.info("=" * 60)
-            logger.info(f"[成功] 瀏覽器: {len(browser_threads)} | 用戶: {len(starter.get_credentials())} | 規則: {len(starter.get_rules())}")
+            logger.info(f"瀏覽器: {len(browser_threads)} | 用戶: {len(starter.get_credentials())} | 規則: {len(starter.get_rules())}")
             logger.info("")
             
             # 步驟 5: 導航到登入頁面
@@ -5007,24 +5089,24 @@ def main() -> None:
             logger.info("=" * 60)
             logger.info("【啟動完成】")
             logger.info("=" * 60)
-            logger.info("[成功] 所有瀏覽器已就緒")
+            logger.info("所有瀏覽器已就緒")
             logger.info("")
             
             # 步驟 10: 啟動遊戲控制面板（阻塞式，直到使用者退出）
             starter.start_control_center()
             
         else:
-            logger.error("[錯誤] 初始化失敗，程式退出")
+            logger.error("初始化失敗，程式退出")
             
     except KeyboardInterrupt:
         logger.info("")
-        logger.info("[資訊] 收到中斷信號，正在清理...")
+        logger.info("收到中斷信號，正在清理...")
     except Exception as e:
-        logger.error(f"[錯誤] 程式執行時發生錯誤: {e}")
+        logger.error(f"程式執行時發生錯誤: {e}")
     finally:
         # 清理資源
         starter.cleanup()
-        logger.info("[資訊] 程式已結束")
+        logger.info("程式已結束")
 
 
 if __name__ == "__main__":
