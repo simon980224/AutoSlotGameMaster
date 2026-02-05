@@ -2610,61 +2610,53 @@ class GameControlCenter:
                     self._error_monitor_stop_event.wait(timeout=Constants.ERROR_MONITOR_INTERVAL)
                     continue
                 
-                # ===== 同步檢測所有瀏覽器的黑屏 =====
+                # ===== 同時檢測所有瀏覽器的黑屏和錯誤訊息 =====
                 blackscreen_detected: Dict[int, bool] = {}
-                if blackscreen_template_exists:
-                    def detect_blackscreen_for_browser(bt: 'BrowserThread') -> Tuple[int, bool]:
-                        if not bt.is_browser_alive() or not bt.context:
-                            return (bt.index, False)
-                        try:
-                            def task(context: BrowserContext) -> Optional[Tuple[int, int, float]]:
-                                return self._image_detector.detect_in_browser(
+                error_detected: Dict[int, bool] = {}
+                
+                def detect_for_browser(bt: 'BrowserThread') -> Tuple[int, bool, bool]:
+                    """同時檢測單個瀏覽器的黑屏和錯誤訊息。
+                    
+                    回傳: (browser_index, 是否黑屏, 是否錯誤訊息)
+                    """
+                    if not bt.is_browser_alive() or not bt.context:
+                        return (bt.index, False, False)
+                    try:
+                        def task(context: BrowserContext) -> Tuple[bool, bool]:
+                            is_blackscreen = False
+                            is_error = False
+                            
+                            # 檢測黑屏
+                            if blackscreen_template_exists:
+                                result = self._image_detector.detect_in_browser(
                                     context.driver, Constants.BLACK_SCREEN
                                 )
-                            result = bt.execute_task(task)
-                            return (bt.index, result is not None)
-                        except Exception:
-                            return (bt.index, False)
-                    
-                    with ThreadPoolExecutor(max_workers=len(active_browsers)) as executor:
-                        futures = [executor.submit(detect_blackscreen_for_browser, bt) for bt in active_browsers]
-                        for future in futures:
-                            try:
-                                browser_index, detected = future.result(timeout=10)
-                                blackscreen_detected[browser_index] = detected
-                            except Exception:
-                                pass
-                
-                # ===== 同步檢測所有瀏覽器的錯誤訊息（僅對未偵測到黑屏的瀏覽器）=====
-                error_detected: Dict[int, bool] = {}
-                if error_template_exists:
-                    browsers_to_check_error = [
-                        bt for bt in active_browsers 
-                        if not blackscreen_detected.get(bt.index, False)
-                    ]
-                    
-                    if browsers_to_check_error:
-                        def detect_error_for_browser(bt: 'BrowserThread') -> Tuple[int, bool]:
-                            if not bt.is_browser_alive() or not bt.context:
-                                return (bt.index, False)
-                            try:
-                                def task(context: BrowserContext) -> Optional[Tuple[int, int, float]]:
-                                    return self._image_detector.detect_in_browser(
-                                        context.driver, Constants.ERROR_REMIND
-                                    )
-                                result = bt.execute_task(task)
-                                return (bt.index, result is not None)
-                            except Exception:
-                                return (bt.index, False)
+                                is_blackscreen = result is not None
+                            
+                            # 檢測錯誤訊息
+                            if error_template_exists:
+                                result = self._image_detector.detect_in_browser(
+                                    context.driver, Constants.ERROR_REMIND
+                                )
+                                is_error = result is not None
+                            
+                            return (is_blackscreen, is_error)
                         
-                        with ThreadPoolExecutor(max_workers=len(browsers_to_check_error)) as executor:
-                            futures = [executor.submit(detect_error_for_browser, bt) for bt in browsers_to_check_error]
-                            for future in futures:
-                                try:
-                                    browser_index, detected = future.result(timeout=10)
-                                    error_detected[browser_index] = detected
-                                except Exception:
-                                    pass
+                        is_blackscreen, is_error = bt.execute_task(task)
+                        return (bt.index, is_blackscreen, is_error)
+                    except Exception:
+                        return (bt.index, False, False)
+                
+                # 並行檢測所有瀏覽器
+                with ThreadPoolExecutor(max_workers=len(active_browsers)) as executor:
+                    futures = [executor.submit(detect_for_browser, bt) for bt in active_browsers]
+                    for future in futures:
+                        try:
+                            browser_index, is_blackscreen, is_error = future.result(timeout=10)
+                            blackscreen_detected[browser_index] = is_blackscreen
+                            error_detected[browser_index] = is_error
+                        except Exception:
+                            pass
                 
                 # ===== 處理檢測結果，啟動非同步恢復執行緒 =====
                 for bt in active_browsers:
