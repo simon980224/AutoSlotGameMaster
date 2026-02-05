@@ -13,10 +13,11 @@
 - 完善的錯誤處理與重試機制
 
 作者: 凡臻科技
-版本: 1.21.0
+版本: 1.22.0
 Python: 3.8+
 
 版本歷史:
+- v1.22.0: 新增免費遊戲類別 3（不朽覺醒 immortal_awake）並更新座標配置（類別 1 座標更新為 0.4,1.15；類別 2 座標更新為 0.53,1.25；新增類別 3 座標為 0.7,1.15；'f' 命令和規則解析支援三種類別選擇）
 - v1.21.0: 新增賽特二免費遊戲類別選擇功能（支援兩種類別：1=免費遊戲、2=覺醒之力；自動偵測遊戲版本：賽特一不需要選擇類別，賽特二需要選擇類別；'f' 命令和規則執行時根據遊戲版本自動處理；規則格式支援 f:金額 或 f:金額:類別）
 - v1.20.0: 新增預設自動啟動功能（程式啟動後 60 秒自動執行 'r 4' 命令開始 4 小時規則執行，用戶輸入任意命令可取消）
 - v1.19.0: 新增 lobby_return 檢測與自動恢復功能（點擊 game_return 後自動檢測 lobby_return，若出現則導航到 GAME_PAGE 並依序點擊 lobby_login、lobby_confirm 完成登入）
@@ -147,8 +148,8 @@ class Constants:
     # URL 配置
     # LOGIN_PAGE = "https://m.jfw-win.com/#/login?redirect=%2Fhome%2Fpage"
     LOGIN_PAGE = "https://www.sf-16888.com/#/login?redirect=%2Fhome%2Fpage"
-    GAME_PAGE = "https://www.sf-16888.com/#/home/loding?game_code=egyptian-mythology&factory_code=ATG&state=true&name=%E6%88%B0%E7%A5%9E%E8%B3%BD%E7%89%B9"
-    # GAME_PAGE = "https://www.sf-16888.com/#/home/loding?game_code=golden-seth&factory_code=ATG&state=true&name=戰神賽特2%20覺醒之力"
+    # GAME_PAGE = "https://www.sf-16888.com/#/home/loding?game_code=egyptian-mythology&factory_code=ATG&state=true&name=%E6%88%B0%E7%A5%9E%E8%B3%BD%E7%89%B9"
+    GAME_PAGE = "https://www.sf-16888.com/#/home/loding?game_code=golden-seth&factory_code=ATG&state=true&name=戰神賽特2%20覺醒之力"
     
     # 頁面元素選擇器
     USERNAME_INPUT = "//input[@placeholder='請輸入帳號']"
@@ -189,11 +190,14 @@ class Constants:
     BUY_FREE_GAME_CONFIRM_X_RATIO = 0.65  # 免費遊戲確認按鈕 X 座標比例（賽特一）
     BUY_FREE_GAME_CONFIRM_Y_RATIO = 1.2   # 免費遊戲確認按鈕 Y 座標比例（賽特一）
     # 賽特二免費遊戲類別座標 - 免費遊戲 (類別 1)
-    BUY_FREE_GAME_ONLY_FREEGAME_X_RATIO = 0.47   # 免費遊戲 X 座標比例
+    BUY_FREE_GAME_ONLY_FREEGAME_X_RATIO = 0.4   # 免費遊戲 X 座標比例
     BUY_FREE_GAME_ONLY_FREEGAME_Y_RATIO = 1.15  # 免費遊戲 Y 座標比例
     # 賽特二免費遊戲類別座標 - 覚醒之力 (類別 2)
-    BUY_FREE_GAME_AWAKE_POWER_X_RATIO = 0.66    # 覚醒之力 X 座標比例
-    BUY_FREE_GAME_AWAKE_POWER_Y_RATIO = 1.15    # 覚醒之力 Y 座標比例
+    BUY_FREE_GAME_AWAKE_POWER_X_RATIO = 0.53    # 覚醒之力 X 座標比例
+    BUY_FREE_GAME_AWAKE_POWER_Y_RATIO = 1.25    # 覚醒之力 Y 座標比例
+    # 賽特二免費遊戲類別座標 - 不朽覺醒 (類別 3)
+    BUY_FREE_GAME_IMMORTAL_AWAKE_X_RATIO = 0.7  # 不朽覺醒 X 座標比例
+    BUY_FREE_GAME_IMMORTAL_AWAKE_Y_RATIO = 1.15 # 不朽覺醒 Y 座標比例
     BUY_FREE_GAME_WAIT_SECONDS = 10  # 購買後等待秒數
     
     # 遊戲版本判斷關鍵字
@@ -501,9 +505,9 @@ class BetRule:
                 raise ValueError(f"最小間隔不能大於最大間隔: {self.min_seconds} > {self.max_seconds}")
         
         elif self.rule_type == 'f':
-            # 購買免費遊戲規則驗證（賽特二時需要指定類別 1 或 2，賽特一可不指定）
-            if self.free_game_type is not None and self.free_game_type not in [1, 2]:
-                raise ValueError(f"免費遊戲類別必須是 1(免費遊戲) 或 2(覺醒之力): {self.free_game_type}")
+            # 購買免費遊戲規則驗證（賽特二時需要指定類別 1、2 或 3，賽特一可不指定）
+            if self.free_game_type is not None and self.free_game_type not in [1, 2, 3]:
+                raise ValueError(f"免費遊戲類別必須是 1(免費遊戲)、2(覺醒之力) 或 3(不朽覺醒): {self.free_game_type}")
         
         else:
             raise ValueError(f"無效的規則類型: {self.rule_type}，必須是 'a'、's' 或 'f'")
@@ -990,7 +994,7 @@ class ConfigReader:
                 elif rule_type == 'f':
                     # 購買免費遊戲規則: f:金額 或 f:金額:類別
                     # 賽特一: f:金額 (不需類別)
-                    # 賽特二: f:金額:類別 (1=免費遊戲, 2=覺醒之力)
+                    # 賽特二: f:金額:類別 (1=免費遊戲, 2=覺醒之力, 3=不朽覺醒)
                     amount = float(parts[1].strip())
                     free_game_type = None  # 賽特一不需要類別
                     
@@ -1904,6 +1908,11 @@ class SyncBrowserOperator:
                 confirm_x_ratio = Constants.BUY_FREE_GAME_AWAKE_POWER_X_RATIO
                 confirm_y_ratio = Constants.BUY_FREE_GAME_AWAKE_POWER_Y_RATIO
                 type_name = "覺醒之力"
+            elif free_game_type == 3:
+                # 賽特二 - 不朽覺醒
+                confirm_x_ratio = Constants.BUY_FREE_GAME_IMMORTAL_AWAKE_X_RATIO
+                confirm_y_ratio = Constants.BUY_FREE_GAME_IMMORTAL_AWAKE_Y_RATIO
+                type_name = "不朽覺醒"
             else:
                 # 賽特一
                 confirm_x_ratio = Constants.BUY_FREE_GAME_CONFIRM_X_RATIO
@@ -1980,6 +1989,10 @@ class SyncBrowserOperator:
                     # 賽特二 - 覺醒之力
                     confirm_x_ratio = Constants.BUY_FREE_GAME_AWAKE_POWER_X_RATIO
                     confirm_y_ratio = Constants.BUY_FREE_GAME_AWAKE_POWER_Y_RATIO
+                elif free_game_type == 3:
+                    # 賽特二 - 不朽覺醒
+                    confirm_x_ratio = Constants.BUY_FREE_GAME_IMMORTAL_AWAKE_X_RATIO
+                    confirm_y_ratio = Constants.BUY_FREE_GAME_IMMORTAL_AWAKE_Y_RATIO
                 else:
                     # 賽特一
                     confirm_x_ratio = Constants.BUY_FREE_GAME_CONFIRM_X_RATIO
@@ -5207,9 +5220,10 @@ class GameControlCenter:
                         self.logger.info("請選擇免費遊戲類別:")
                         self.logger.info("  1 - 免費遊戲")
                         self.logger.info("  2 - 覺醒之力")
+                        self.logger.info("  3 - 不朽覺醒")
                         
                         try:
-                            print("請輸入類別 (1 或 2) > ", end="", flush=True)
+                            print("請輸入類別 (1、2 或 3) > ", end="", flush=True)
                             type_input = input().strip()
                             
                             if type_input == '1':
@@ -5218,8 +5232,11 @@ class GameControlCenter:
                             elif type_input == '2':
                                 free_game_type = 2
                                 type_name = "覺醒之力"
+                            elif type_input == '3':
+                                free_game_type = 3
+                                type_name = "不朽覺醒"
                             else:
-                                self.logger.error(f"無效的類別: {type_input}，請輸入 1 或 2")
+                                self.logger.error(f"無效的類別: {type_input}，請輸入 1、2 或 3")
                                 return True
                             
                             self.logger.info(f"已選擇: {type_name}")
