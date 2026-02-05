@@ -214,11 +214,14 @@ class Constants:
     BUY_FREE_GAME_CONFIRM_X_RATIO = 0.65  # 免費遊戲確認按鈕 X 座標比例（預設）
     BUY_FREE_GAME_CONFIRM_Y_RATIO = 0.9   # 免費遊戲確認按鈕 Y 座標比例（預設）
     # 免費遊戲類別座標 - only_freegame (類別 1)
-    BUY_FREE_GAME_ONLY_FREEGAME_X_RATIO = 0.4   # only_freegame 確認按鈕 X 座標比例
+    BUY_FREE_GAME_ONLY_FREEGAME_X_RATIO = 0.3   # only_freegame 確認按鈕 X 座標比例
     BUY_FREE_GAME_ONLY_FREEGAME_Y_RATIO = 0.85  # only_freegame 確認按鈕 Y 座標比例
     # 免費遊戲類別座標 - awake_power (類別 2)
-    BUY_FREE_GAME_AWAKE_POWER_X_RATIO = 0.61    # awake_power 確認按鈕 X 座標比例
-    BUY_FREE_GAME_AWAKE_POWER_Y_RATIO = 0.85    # awake_power 確認按鈕 Y 座標比例
+    BUY_FREE_GAME_AWAKE_POWER_X_RATIO = 0.5     # awake_power 確認按鈕 X 座標比例
+    BUY_FREE_GAME_AWAKE_POWER_Y_RATIO = 0.95    # awake_power 確認按鈕 Y 座標比例
+    # 免費遊戲類別座標 - immortal_awake (類別 3)
+    BUY_FREE_GAME_IMMORTAL_AWAKE_X_RATIO = 0.7  # immortal_awake 確認按鈕 X 座標比例
+    BUY_FREE_GAME_IMMORTAL_AWAKE_Y_RATIO = 0.85 # immortal_awake 確認按鈕 Y 座標比例
     BUY_FREE_GAME_WAIT_SECONDS = 10  # 購買後等待秒數
     
     # game_return 返回確認按鈕座標比例
@@ -477,7 +480,7 @@ class BetRule:
     支援三種類型:
     - 'a' (自動旋轉): amount, spin_count
     - 's' (標準規則): amount, duration, min_seconds, max_seconds
-    - 'f' (購買免費遊戲): amount, free_game_type (1=only_freegame, 2=awake_power)
+    - 'f' (購買免費遊戲): amount, free_game_type (1=only_freegame, 2=awake_power, 3=immortal_awake)
     
     前綴說明:
     - 帶 '-' 前綴（如 -a:2:10）: 只執行一次
@@ -489,7 +492,7 @@ class BetRule:
     duration: Optional[int] = None  # 's' 類型使用（分鐘）
     min_seconds: Optional[float] = None  # 's' 類型使用
     max_seconds: Optional[float] = None  # 's' 類型使用
-    free_game_type: Optional[int] = None  # 'f' 類型使用 (1=only_freegame, 2=awake_power)
+    free_game_type: Optional[int] = None  # 'f' 類型使用 (1=only_freegame, 2=awake_power, 3=immortal_awake)
     once_only: bool = False  # 是否只執行一次（帶 '-' 前綴的規則）
     
     def __post_init__(self) -> None:
@@ -518,9 +521,9 @@ class BetRule:
         elif self.rule_type == 'f':
             # 購買免費遊戲規則驗證
             if self.free_game_type is None:
-                raise ValueError("購買免費遊戲規則必須指定類別 (1 或 2)")
-            if self.free_game_type not in [1, 2]:
-                raise ValueError(f"免費遊戲類別必須是 1 (免費遊戲) 或 2 (覺醒之力): {self.free_game_type}")
+                raise ValueError("購買免費遊戲規則必須指定類別 (1、2 或 3)")
+            if self.free_game_type not in [1, 2, 3]:
+                raise ValueError(f"免費遊戲類別必須是 1 (免費遊戲)、2 (覺醒之力) 或 3 (不朽覺醒): {self.free_game_type}")
         
         else:
             raise ValueError(f"無效的規則類型: {self.rule_type}，必須是 'a'、's' 或 'f'")
@@ -1022,7 +1025,7 @@ class ConfigReader:
                     
                 elif rule_type == 'f':
                     # 購買免費遊戲規則: f:金額:類別
-                    # 類別: 1=only_freegame, 2=awake_power
+                    # 類別: 1=only_freegame, 2=awake_power, 3=immortal_awake
                     if len(parts) < 3:
                         self.logger.warning(f"第 {line_number} 行缺少免費遊戲類別（格式: f:金額:類別）")
                         continue
@@ -1030,8 +1033,8 @@ class ConfigReader:
                     amount = float(parts[1].strip())
                     free_game_type = int(parts[2].strip())
                     
-                    if free_game_type not in [1, 2]:
-                        self.logger.warning(f"第 {line_number} 行無效的免費遊戲類別 '{free_game_type}'（必須是 1 或 2）")
+                    if free_game_type not in [1, 2, 3]:
+                        self.logger.warning(f"第 {line_number} 行無效的免費遊戲類別 '{free_game_type}'（必須是 1、2 或 3）")
                         continue
                     
                     rules.append(BetRule(
@@ -2121,7 +2124,7 @@ class SyncBrowserOperator:
         Args:
             context: 瀏覽器上下文
             canvas_rect: Canvas 區域資訊 {"x", "y", "w", "h"}
-            free_game_type: 免費遊戲類別 (1=only_freegame, 2=awake_power)
+            free_game_type: 免費遊戲類別 (1=only_freegame, 2=awake_power, 3=immortal_awake)
             
         Returns:
             是否成功
@@ -2143,7 +2146,12 @@ class SyncBrowserOperator:
             
             # === 第二次點擊（確認按鈕） ===
             # 根據類別選擇座標
-            if free_game_type == 2:
+            if free_game_type == 3:
+                # 不朽覺醒類別
+                confirm_x_ratio = Constants.BUY_FREE_GAME_IMMORTAL_AWAKE_X_RATIO
+                confirm_y_ratio = Constants.BUY_FREE_GAME_IMMORTAL_AWAKE_Y_RATIO
+                type_name = "不朽覺醒"
+            elif free_game_type == 2:
                 # 覺醒之力類別
                 confirm_x_ratio = Constants.BUY_FREE_GAME_AWAKE_POWER_X_RATIO
                 confirm_y_ratio = Constants.BUY_FREE_GAME_AWAKE_POWER_Y_RATIO
@@ -2189,7 +2197,7 @@ class SyncBrowserOperator:
         Args:
             browser_contexts: 瀏覽器上下文列表
             canvas_rect: Canvas 區域資訊
-            free_game_type: 免費遊戲類別 (1=only_freegame, 2=awake_power)
+            free_game_type: 免費遊戲類別 (1=only_freegame, 2=awake_power, 3=immortal_awake)
             timeout: 超時時間
             
         Returns:
@@ -2213,7 +2221,11 @@ class SyncBrowserOperator:
                 
                 # === 第二次點擊（確認按鈕） ===
                 # 根據類別選擇座標
-                if free_game_type == 2:
+                if free_game_type == 3:
+                    # immortal_awake 類別
+                    confirm_x_ratio = Constants.BUY_FREE_GAME_IMMORTAL_AWAKE_X_RATIO
+                    confirm_y_ratio = Constants.BUY_FREE_GAME_IMMORTAL_AWAKE_Y_RATIO
+                elif free_game_type == 2:
                     # awake_power 類別
                     confirm_x_ratio = Constants.BUY_FREE_GAME_AWAKE_POWER_X_RATIO
                     confirm_y_ratio = Constants.BUY_FREE_GAME_AWAKE_POWER_Y_RATIO
@@ -5505,9 +5517,10 @@ class GameControlCenter:
                     self.logger.info("請選擇免費遊戲類別:")
                     self.logger.info("  1 - 免費遊戲")
                     self.logger.info("  2 - 覺醒之力")
+                    self.logger.info("  3 - 不朽覺醒")
                     
                     try:
-                        print("請輸入類別 (1 或 2) > ", end="", flush=True)
+                        print("請輸入類別 (1、2 或 3) > ", end="", flush=True)
                         type_input = input().strip()
                         
                         if type_input == '1':
@@ -5516,8 +5529,11 @@ class GameControlCenter:
                         elif type_input == '2':
                             free_game_type = 2
                             type_name = "覺醒之力"
+                        elif type_input == '3':
+                            free_game_type = 3
+                            type_name = "不朽覺醒"
                         else:
-                            self.logger.error(f"無效的類別: {type_input}，請輸入 1 或 2")
+                            self.logger.error(f"無效的類別: {type_input}，請輸入 1、2 或 3")
                             return True
                         
                         self.logger.info(f"已選擇: {type_name}")
