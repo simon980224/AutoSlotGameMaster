@@ -13,10 +13,11 @@
 - 完善的錯誤處理與重試機制
 
 作者: 凡臻科技
-版本: 1.22.0
+版本: 1.22.1
 Python: 3.8+
 
 版本歷史:
+- v1.22.1: 提高圖片匹配閾值（MATCH_THRESHOLD 從 0.8 提高至 0.9，提升 lobby_login、lobby_confirm 等圖片檢測準確度，減少誤判）
 - v1.22.0: 新增免費遊戲類別 3（不朽覺醒 immortal_awake）並更新座標配置（類別 1 座標更新為 0.4,1.15；類別 2 座標更新為 0.53,1.25；新增類別 3 座標為 0.7,1.15；'f' 命令和規則解析支援三種類別選擇）
 - v1.21.0: 新增賽特二免費遊戲類別選擇功能（支援兩種類別：1=免費遊戲、2=覺醒之力；自動偵測遊戲版本：賽特一不需要選擇類別，賽特二需要選擇類別；'f' 命令和規則執行時根據遊戲版本自動處理；規則格式支援 f:金額 或 f:金額:類別）
 - v1.20.0: 新增預設自動啟動功能（程式啟動後 60 秒自動執行 'r 4' 命令開始 4 小時規則執行，用戶輸入任意命令可取消）
@@ -127,7 +128,7 @@ __all__ = [
 class Constants:
     """系統常量"""
     # 版本資訊
-    VERSION = "1.21.0"
+    VERSION = "1.22.1"
     SYSTEM_NAME = "金富翁遊戲自動化系統"
     
     DEFAULT_LIB_PATH = "lib"
@@ -170,7 +171,7 @@ class Constants:
     ERROR_MESSAGE_LEFT = "error_message_left.png"  # 左側錯誤訊息模板
     ERROR_MESSAGE_RIGHT = "error_message_right.png"  # 右側錯誤訊息模板
     BLACK_SCREEN = "black_screen.png"  # 黑屏模板
-    MATCH_THRESHOLD = 0.8  # 圖片匹配閾值
+    MATCH_THRESHOLD = 0.9  # 圖片匹配閾值
     BETSIZE_MATCH_THRESHOLD = 0.85  # 金額識別匹配閾值
     DETECTION_INTERVAL = 1.0  # 檢測間隔（秒）
     MAX_DETECTION_ATTEMPTS = 60  # 最大檢測次數
