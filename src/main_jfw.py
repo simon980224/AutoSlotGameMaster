@@ -13,10 +13,11 @@
 - 完善的錯誤處理與重試機制
 
 作者: 凡臻科技
-版本: 1.22.1
+版本: 1.22.2
 Python: 3.8+
 
 版本歷史:
+- v1.22.2: 修復多執行緒環境下的輸出緩衝阻塞問題（新增 FlushingStreamHandler 每次輸出後自動刷新；設置 PYTHONUNBUFFERED 環境變數；將 stdout/stderr 設為行緩衝模式，確保 'r' 功能運行時日誌能即時顯示，無需按 Enter）
 - v1.22.1: 提高圖片匹配閾值（MATCH_THRESHOLD 從 0.8 提高至 0.9，提升 lobby_login、lobby_confirm 等圖片檢測準確度，減少誤判）
 - v1.22.0: 新增免費遊戲類別 3（不朽覺醒 immortal_awake）並更新座標配置（類別 1 座標更新為 0.4,1.15；類別 2 座標更新為 0.53,1.25；新增類別 3 座標為 0.7,1.15；'f' 命令和規則解析支援三種類別選擇）
 - v1.21.0: 新增賽特二免費遊戲類別選擇功能（支援兩種類別：1=免費遊戲、2=覺醒之力；自動偵測遊戲版本：賽特一不需要選擇類別，賽特二需要選擇類別；'f' 命令和規則執行時根據遊戲版本自動處理；規則格式支援 f:金額 或 f:金額:類別）
@@ -57,6 +58,7 @@ Python: 3.8+
 
 import logging
 import sys
+import os
 import platform
 import socket
 import select
@@ -70,6 +72,22 @@ from contextlib import contextmanager, suppress
 from concurrent.futures import ThreadPoolExecutor, as_completed, Future
 from enum import Enum
 import threading
+
+# 設置環境變數禁用 Python 輸出緩衝，確保所有輸出立即刷新
+# 這對於多執行緒環境下避免輸出阻塞非常重要
+os.environ['PYTHONUNBUFFERED'] = '1'
+
+# 強制設置 stdout/stderr 為行緩衝模式（如果支援的話）
+if hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+    except Exception:
+        pass
+if hasattr(sys.stderr, 'reconfigure'):
+    try:
+        sys.stderr.reconfigure(line_buffering=True)
+    except Exception:
+        pass
 
 # Selenium WebDriver 相關
 from selenium import webdriver
@@ -731,6 +749,22 @@ class ColoredFormatter(logging.Formatter):
         return super().format(record)
 
 
+class FlushingStreamHandler(logging.StreamHandler):
+    """自動刷新的 StreamHandler，解決多執行緒環境下的緩衝阻塞問題。"""
+    
+    def emit(self, record: logging.LogRecord) -> None:
+        """輸出日誌記錄並強制刷新緩衝區。
+        
+        Args:
+            record: 日誌記錄物件
+        """
+        try:
+            super().emit(record)
+            self.flush()  # 每次輸出後立即刷新
+        except Exception:
+            self.handleError(record)
+
+
 class LoggerFactory:
     """Logger 工廠類別 - 使用單例模式優化效能"""
     
@@ -772,7 +806,8 @@ class LoggerFactory:
                 if cls._formatter is None:
                     cls._formatter = ColoredFormatter()
                 
-                console_handler = logging.StreamHandler(sys.stdout)
+                # 使用 FlushingStreamHandler 解決多執行緒環境下的緩衝阻塞問題
+                console_handler = FlushingStreamHandler(sys.stdout)
                 console_handler.setLevel(level.value)
                 console_handler.setFormatter(cls._formatter)
                 logger.addHandler(console_handler)
