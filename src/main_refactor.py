@@ -34,6 +34,7 @@
 import base64
 import io
 import logging
+import os
 import select
 import socket
 import sys
@@ -45,6 +46,23 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Protocol, Set, Tuple, Union
+
+# =============================================================================
+# 全域輸出緩衝設置 - 避免多執行緒環境下的輸出阻塞
+# =============================================================================
+os.environ['PYTHONUNBUFFERED'] = '1'
+
+# 強制設置 stdout/stderr 為行緩衝模式（如果支援的話）
+if hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+    except Exception:
+        pass
+if hasattr(sys.stderr, 'reconfigure'):
+    try:
+        sys.stderr.reconfigure(line_buffering=True)
+    except Exception:
+        pass
 
 # =============================================================================
 # 第三方庫 - 圖片處理
