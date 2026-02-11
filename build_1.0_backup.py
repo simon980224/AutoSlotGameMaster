@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """
-戰神賽特自動化系統 打包腳本
-使用 PyInstaller 將 main.py 打包成 Windows 可執行檔
+戰神賽特自動化系統 打包腳本（備份版）
+使用 PyInstaller 將 main_1.0_backup.py 打包成 Windows 可執行檔
 
 執行方式：
-    python build.py
+    python build_refactor.py
 
 需要安裝：
     pip install pyinstaller
 
 作者: 凡臻科技
-版本: 2.0.0
-更新: 2025-02-11 - 更新為 main.py（原 main_refactor.py）的打包腳本
+版本: 1.0.0
+更新: 2025-02-11 - 針對 main_1.0_backup.py 舊版本的打包腳本
 """
 
 import os
@@ -79,7 +79,7 @@ def check_requirements() -> bool:
     print_step("檢查", "驗證必要檔案...")
     
     required_files = [
-        'src/main.py',
+        'src/main_1.0_backup.py',
         'sett.ico',  # 使用 .ico 格式圖示
         'requirements.txt'
     ]
@@ -138,7 +138,7 @@ def build_executable() -> bool:
     # PyInstaller 命令參數
     cmd = [
         'pyinstaller',
-        '--name=SettAutoGame',                # 可執行檔名稱（戰神賽特自動化）
+        '--name=AutoSlotGameMaster',          # 可執行檔名稱（舊版）
         '--onefile',                          # 打包成單一檔案
         '--console',                          # 保留控制台視窗
         '--icon=sett.ico',                    # 設定圖示（.ico 格式，包含多種尺寸）
@@ -166,7 +166,7 @@ def build_executable() -> bool:
         '--collect-data=webdriver_manager',
         # 注意：移除 --add-data 選項，讓 img 和 lib 目錄放在 exe 旁邊
         # 這樣使用者可以方便地編輯配置檔案和圖片模板
-        'src/main.py'                         # 主程式入口
+        'src/main_1.0_backup.py'              # 主程式入口（舊版）
     ]
     
     try:
@@ -263,12 +263,12 @@ def show_result() -> None:
     print_step("完成", "構建結果")
     
     dist_path = Path('dist')
-    exe_file = dist_path / 'SettAutoGame.exe'
+    exe_file = dist_path / 'AutoSlotGameMaster.exe'
     
     if exe_file.exists():
         file_size = exe_file.stat().st_size / (1024 * 1024)  # 轉換為 MB
         
-        print(f"  ✓ 可執行檔: dist/SettAutoGame.exe")
+        print(f"  ✓ 可執行檔: dist/AutoSlotGameMaster.exe")
         print(f"  ✓ 檔案大小: {file_size:.2f} MB")
         
         # 檢查目錄結構
@@ -282,7 +282,7 @@ def show_result() -> None:
         
         print("\n目錄結構:")
         print("  dist/")
-        print("  ├── SettAutoGame.exe")
+        print("  ├── AutoSlotGameMaster.exe")
         print("  ├── img/")
         print("  └── lib/")
         
@@ -294,7 +294,7 @@ def show_result() -> None:
 def main():
     """主函式"""
     print("\n" + "="*70)
-    print(" 戰神賽特自動化系統 v2.0.0 打包工具")
+    print(" AutoSlotGameMaster v1.0.0 打包工具（舊版備份）")
     print("="*70)
     
     # 1. 清理舊的構建檔案
