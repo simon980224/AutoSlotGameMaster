@@ -23,7 +23,7 @@
         $ python main_refactor.py
 
 版本資訊:
-    版本: 2.1.0
+    版本: 2.0.0
     作者: 凡臻科技
     授權: MIT License
 
