@@ -1067,6 +1067,8 @@ class FlushingStreamHandler(logging.StreamHandler):
     
     # 類別變數：控制是否顯示提示符
     show_prompt: bool = False
+    # 類別變數：控制是否啟用清除行功能（某些終端可能不支援）
+    enable_line_clear: bool = True
     
     def emit(self, record: logging.LogRecord) -> None:
         """輸出日誌記錄並強制刷新緩衝區。
@@ -1076,7 +1078,9 @@ class FlushingStreamHandler(logging.StreamHandler):
         """
         try:
             # 清除當前行（避免與 >>> 提示混在一起）
-            self.stream.write('\r\033[K')
+            if FlushingStreamHandler.enable_line_clear and FlushingStreamHandler.show_prompt:
+                # 使用 \r 回到行首，然後用空格覆蓋提示符
+                self.stream.write('\r    \r')
             super().emit(record)
             # 如果需要顯示提示符，重新輸出
             if FlushingStreamHandler.show_prompt:
