@@ -196,6 +196,7 @@ class Constants:
     # =========================================================================
     # 遊戲種類選擇：True = 賽特一, False = 賽特二
     IS_SETTE_1: bool = True
+    IS_SETTE_1: bool = False  # --- IGNORE ---
     
     # 遊戲識別碼（根據版本自動設定）
     GAME_PATTERN_SETTE_1: str = "ATG-egyptian-mythology"
