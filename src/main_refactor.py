@@ -23,9 +23,10 @@
         $ python main_refactor.py
 
 版本資訊:
-    版本: 2.0.0
+    版本: 2.1.0
     作者: 凡臻科技
     授權: MIT License
+
 """
 
 # =============================================================================
@@ -115,8 +116,10 @@ class Constants:
     # =========================================================================
     # 日誌格式配置
     # =========================================================================
-    LOG_SEPARATOR: str = "=" * 60    # 日誌分隔線
+    LOG_SEPARATOR: str = "=" * 60     # 日誌分隔線（主要分隔）
+    LOG_SEPARATOR_LIGHT: str = "-" * 60  # 日誌分隔線（次要分隔）
     LOG_INDENT: str = "       "       # 日誌縮排前綴（7 個空格）
+    LOG_BULLET: str = "  •"           # 日誌項目符號
     
     # =========================================================================
     # 配置檔案路徑
@@ -143,6 +146,11 @@ class Constants:
     DEFAULT_IMPLICIT_WAIT: int = 60
     SERVER_SOCKET_TIMEOUT: float = 1.0
     CLEANUP_PROCESS_TIMEOUT: int = 10
+    QUIT_WAIT_TIME: float = 10.0  # 關閉前等待時間
+    
+    # 自動啟動配置
+    AUTO_START_DELAY: float = 120.0  # 自動啟動延遲時間（秒）= 2 分鐘
+    AUTO_START_COMMAND: str = "r 4"  # 自動啟動命令（執行 4 小時規則）
     
     # =========================================================================
     # 網路容錯配置
@@ -168,7 +176,7 @@ class Constants:
     # 執行緒與瀏覽器配置
     # =========================================================================
     MAX_THREAD_WORKERS: int = 10
-    MAX_BROWSER_COUNT: int = 12
+    MAX_BROWSER_COUNT: int = 16
     
     # =========================================================================
     # 視窗配置
@@ -250,6 +258,7 @@ class Constants:
     AUTO_SPIN_100_X_RATIO: float = 0.57       # 100 次按鈕 X 座標比例
     AUTO_SPIN_100_Y_RATIO: float = 0.5        # 100 次按鈕 Y 座標比例
     AUTO_SPIN_MENU_WAIT: float = 1.0          # 自動旋轉選單等待時間（秒）
+    AUTO_SPIN_VALID_COUNTS: Tuple[int, ...] = (10, 50, 100)  # 有效的自動旋轉次數
     
     # =========================================================================
     # 購買免費遊戲按鈕座標比例
@@ -261,12 +270,17 @@ class Constants:
     BUY_FREE_GAME_CONFIRM_Y_RATIO: float = 0.9    # 免費遊戲確認按鈕 Y 座標比例（賽特一）
     
     # 賽特二專用：免費遊戲類別座標 - only_freegame (類別 1)
-    BUY_FREE_GAME_ONLY_FREEGAME_X_RATIO: float = 0.4    # 免費遊戲確認按鈕 X 座標比例
+    BUY_FREE_GAME_ONLY_FREEGAME_X_RATIO: float = 0.3    # 免費遊戲確認按鈕 X 座標比例
     BUY_FREE_GAME_ONLY_FREEGAME_Y_RATIO: float = 0.85   # 免費遊戲確認按鈕 Y 座標比例
     
     # 賽特二專用：免費遊戲類別座標 - awake_power (類別 2)
-    BUY_FREE_GAME_AWAKE_POWER_X_RATIO: float = 0.61     # 覺醒之力確認按鈕 X 座標比例
-    BUY_FREE_GAME_AWAKE_POWER_Y_RATIO: float = 0.85     # 覺醒之力確認按鈕 Y 座標比例
+    BUY_FREE_GAME_AWAKE_POWER_X_RATIO: float = 0.5      # 覺醒之力確認按鈕 X 座標比例
+    BUY_FREE_GAME_AWAKE_POWER_Y_RATIO: float = 0.95     # 覺醒之力確認按鈕 Y 座標比例
+    
+    # 賽特二專用：免費遊戲類別座標 - immortal_awake (類別 3)
+    BUY_FREE_GAME_IMMORTAL_AWAKE_X_RATIO: float = 0.7   # 不朽覺醒確認按鈕 X 座標比例
+    BUY_FREE_GAME_IMMORTAL_AWAKE_Y_RATIO: float = 0.85  # 不朽覺醒確認按鈕 Y 座標比例
+    FREE_GAME_VALID_TYPES: Tuple[int, ...] = (1, 2, 3)  # 有效的免費遊戲類別
     
     # 購買後等待與結算配置
     BUY_FREE_GAME_WAIT_SECONDS: int = 10              # 購買後等待秒數
@@ -281,6 +295,13 @@ class Constants:
     AUTO_SKIP_CLICK_INTERVAL: int = 30
     ERROR_MONITOR_INTERVAL: float = 3.0  # 錯誤訊息監控間隔（秒）
     BLACKSCREEN_CONSECUTIVE_THRESHOLD: int = 5  # 黑屏連續檢測次數閾值（達到後導航到登入頁）
+    
+    # =========================================================================
+    # 規則執行配置
+    # =========================================================================
+    RULE_SWITCH_WAIT: float = 1.0              # 規則切換等待時間（秒）
+    RULE_PROGRESS_INTERVAL: int = 60           # 規則進度顯示間隔（秒）
+    AUTO_PRESS_THREAD_JOIN_TIMEOUT: float = 2.0  # 自動按鍵執行緒結束等待時間
     
     # -------------------------------------------------------------------------
     # 金額模板配置
@@ -468,7 +489,12 @@ class BetRule:
     支援三種規則類型:
         - ``'a'`` (自動旋轉): 指定金額和旋轉次數
         - ``'s'`` (標準規則): 指定金額、持續時間、最小/最大間隔
-        - ``'f'`` (購買免費遊戲): 僅指定金額
+        - ``'f'`` (購買免費遊戲): 指定金額和類別
+
+    前綴說明:
+        - 帶 ``'-'`` 前綴（如 ``-a:2:10``）: 只執行一次
+        - 不帶前綴（如 ``a:2:10``）: 循環執行
+        - 帶 ``'#'`` 前綴: 略過此規則（註釋）
 
     屬性:
         rule_type: 規則類型，可為 ``'a'``、``'s'`` 或 ``'f'``。
@@ -477,6 +503,9 @@ class BetRule:
         duration: 持續時間（分鐘），僅 ``'s'`` 類型使用。
         min_seconds: 最小間隔秒數，僅 ``'s'`` 類型使用。
         max_seconds: 最大間隔秒數，僅 ``'s'`` 類型使用。
+        free_game_type: 免費遊戲類別，僅 ``'f'`` 類型使用。
+            1=免費遊戲, 2=覺醒之力, 3=不朽覺醒（賽特二專用）
+        once_only: 是否只執行一次（帶 ``'-'`` 前綴的規則）。
 
     異常:
         ValueError: 當規則參數無效時。
@@ -485,6 +514,7 @@ class BetRule:
         >>> rule = BetRule(rule_type='a', amount=10, spin_count=50)
         >>> rule = BetRule(rule_type='s', amount=20, duration=30,
         ...                min_seconds=1.0, max_seconds=3.0)
+        >>> rule = BetRule(rule_type='f', amount=8, free_game_type=1)
     """
     rule_type: str
     amount: float
@@ -492,6 +522,8 @@ class BetRule:
     duration: Optional[int] = None
     min_seconds: Optional[float] = None
     max_seconds: Optional[float] = None
+    free_game_type: Optional[int] = None
+    once_only: bool = False
 
     def __post_init__(self) -> None:
         """驗證資料完整性。"""
@@ -501,8 +533,9 @@ class BetRule:
         if self.rule_type == 'a':
             if self.spin_count is None:
                 raise ValueError("自動旋轉規則必須指定次數")
-            if self.spin_count not in [10, 50, 100]:
-                raise ValueError(f"自動旋轉次數必須是 10、50 或 100: {self.spin_count}")
+            if self.spin_count not in Constants.AUTO_SPIN_VALID_COUNTS:
+                valid_counts = ", ".join(str(c) for c in Constants.AUTO_SPIN_VALID_COUNTS)
+                raise ValueError(f"自動旋轉次數必須是 {valid_counts}: {self.spin_count}")
 
         elif self.rule_type == 's':
             if self.duration is None or self.duration <= 0:
@@ -515,8 +548,13 @@ class BetRule:
                 raise ValueError(f"最小間隔不能大於最大間隔: {self.min_seconds} > {self.max_seconds}")
 
         elif self.rule_type == 'f':
-            # 購買免費遊戲規則驗證（只需要金額）
-            pass
+            # 購買免費遊戲規則驗證
+            # 賽特一不需要類別，賽特二需要類別（1=免費遊戲, 2=覺醒之力, 3=不朽覺醒）
+            if self.free_game_type is not None and self.free_game_type not in Constants.FREE_GAME_VALID_TYPES:
+                valid_types = ", ".join(str(t) for t in Constants.FREE_GAME_VALID_TYPES)
+                raise ValueError(
+                    f"免費遊戲類別必須是 {valid_types}: {self.free_game_type}"
+                )
 
         else:
             raise ValueError(f"無效的規則類型: {self.rule_type}，必須是 'a'、's' 或 'f'")
@@ -1351,17 +1389,41 @@ class ConfigReader:
     ) -> List[BetRule]:
         """讀取下注規則檔案。
         
-        支援三種格式:
-        - a:金額:次數 (自動旋轉規則)
-        - s:金額:時間(分鐘):最小(秒數):最大(秒數) (標準規則)
-        - f:金額 (購買免費遊戲)
+        執行模式前綴:
+            - (無前綴): 循環執行
+            - ``-``: 執行一次後跳過
+            - ``#``: 略過此規則（註釋）
+        
+        支援三種規則格式:
+            - ``s:金額:最小間隔,最大間隔:時間(分鐘)`` (定時旋轉)
+            - ``a:金額:次數`` (自動旋轉)
+            - ``f:金額`` 或 ``f:金額:類別`` (購買免費遊戲)
+              類別: 1=免費遊戲, 2=覺醒之力, 3=不朽覺醒
+        
+        回傳:
+            有效的規則列表
         """
         rules = []
-        lines = self._read_file_lines(filename, skip_header=True)
+        lines = self._read_file_lines(filename, skip_header=False)
         
-        for line_number, line in enumerate(lines, start=2):
+        for line_number, line in enumerate(lines, start=1):
             try:
-                parts = line.split(':')
+                # 跳過空行和註釋行（# 開頭）
+                stripped_line = line.strip()
+                if not stripped_line or stripped_line.startswith('#'):
+                    continue
+                
+                # 解析執行模式前綴
+                once_only = False
+                if stripped_line.startswith('-'):
+                    once_only = True
+                    stripped_line = stripped_line[1:]  # 移除前綴
+                
+                # 再次檢查是否為空
+                if not stripped_line:
+                    continue
+                
+                parts = stripped_line.split(':')
                 
                 if len(parts) < 2:
                     self.logger.warning(f"第 {line_number} 行格式不完整: {line}")
@@ -1370,6 +1432,7 @@ class ConfigReader:
                 rule_type = parts[0].strip().lower()
                 
                 if rule_type == 'a':
+                    # 自動旋轉規則: a:金額:次數
                     if len(parts) < 3:
                         self.logger.warning(f"第 {line_number} 行格式不完整: {line}")
                         continue
@@ -1380,33 +1443,70 @@ class ConfigReader:
                     rules.append(BetRule(
                         rule_type='a',
                         amount=amount,
-                        spin_count=spin_count
+                        spin_count=spin_count,
+                        once_only=once_only
                     ))
                     
                 elif rule_type == 's':
-                    if len(parts) < 5:
+                    # 定時旋轉規則: s:金額:最小間隔,最大間隔:時間(分鐘)
+                    if len(parts) < 4:
                         self.logger.warning(f"第 {line_number} 行格式不完整: {line}")
                         continue
                     
                     amount = float(parts[1].strip())
-                    duration = int(parts[2].strip())
-                    min_seconds = float(parts[3].strip())
-                    max_seconds = float(parts[4].strip())
+                    
+                    # 解析間隔時間（格式: 最小,最大）
+                    interval_str = parts[2].strip()
+                    if ',' in interval_str:
+                        interval_parts = interval_str.split(',')
+                        min_seconds = float(interval_parts[0].strip())
+                        max_seconds = float(interval_parts[1].strip())
+                    else:
+                        # 如果沒有逗號，視為舊格式（duration:min:max）
+                        # 嘗試解析為舊格式: s:金額:時間:最小:最大
+                        if len(parts) >= 5:
+                            duration = int(parts[2].strip())
+                            min_seconds = float(parts[3].strip())
+                            max_seconds = float(parts[4].strip())
+                            
+                            rules.append(BetRule(
+                                rule_type='s',
+                                amount=amount,
+                                duration=duration,
+                                min_seconds=min_seconds,
+                                max_seconds=max_seconds,
+                                once_only=once_only
+                            ))
+                            continue
+                        else:
+                            self.logger.warning(f"第 {line_number} 行間隔格式錯誤: {line}")
+                            continue
+                    
+                    duration = int(parts[3].strip())
                     
                     rules.append(BetRule(
                         rule_type='s',
                         amount=amount,
                         duration=duration,
                         min_seconds=min_seconds,
-                        max_seconds=max_seconds
+                        max_seconds=max_seconds,
+                        once_only=once_only
                     ))
                     
                 elif rule_type == 'f':
+                    # 購買免費遊戲規則: f:金額 或 f:金額:類別
                     amount = float(parts[1].strip())
+                    
+                    # 解析類別（可選）
+                    free_game_type = None
+                    if len(parts) >= 3:
+                        free_game_type = int(parts[2].strip())
                     
                     rules.append(BetRule(
                         rule_type='f',
-                        amount=amount
+                        amount=amount,
+                        free_game_type=free_game_type,
+                        once_only=once_only
                     ))
                     
                 else:
@@ -1720,7 +1820,7 @@ class LocalProxyServerManager:
         try:
             server = SimpleProxyServer(local_port, upstream_proxy, self.logger)
             
-            def run_server():
+            def run_server() -> None:
                 try:
                     server.start()
                 except Exception as e:
@@ -1764,10 +1864,10 @@ class LocalProxyServerManager:
             with ThreadPoolExecutor(max_workers=min(len(ports), Constants.MAX_THREAD_WORKERS)) as executor:
                 executor.map(self.stop_proxy_server, ports)
     
-    def __enter__(self):
+    def __enter__(self) -> 'LocalProxyServerManager':
         return self
     
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
         self.stop_all_servers()
         return False
 
@@ -1986,6 +2086,65 @@ class ImageDetector:
             是否存在。
         """
         return self.get_template_path(template_name).exists()
+
+    def capture_canvas_screenshot(
+        self, 
+        driver: WebDriver, 
+        save_path: Optional[Path] = None
+    ) -> Optional[np.ndarray]:
+        """只截取 Canvas 區域的畫面。
+
+        參數:
+            driver: WebDriver 實例。
+            save_path: 儲存路徑（可選）
+            
+        回傳:
+            OpenCV 格式的圖片陣列 (BGR)，失敗時回傳 None
+        """
+        try:
+            # 取得 Canvas 區域
+            rect = BrowserHelper.get_canvas_rect(driver)
+            if not rect:
+                self.logger.warning("無法取得 Canvas 區域")
+                return None
+            
+            # 取得完整截圖
+            full_screenshot = self.capture_screenshot(driver)
+            
+            # 裁切 Canvas 區域
+            x = int(rect['x'])
+            y = int(rect['y'])
+            w = int(rect['w'])
+            h = int(rect['h'])
+            
+            # 確保座標有效
+            height, width = full_screenshot.shape[:2]
+            x = max(0, min(x, width))
+            y = max(0, min(y, height))
+            w = min(w, width - x)
+            h = min(h, height - y)
+            
+            canvas_screenshot = full_screenshot[y:y+h, x:x+w]
+            
+            # 如果指定了儲存路徑，則儲存圖片
+            if save_path:
+                save_path.parent.mkdir(parents=True, exist_ok=True)
+                
+                # 使用支援 Unicode 路徑的方式儲存圖片
+                is_success, buffer = cv2.imencode('.png', canvas_screenshot)
+                if is_success:
+                    with open(save_path, 'wb') as f:
+                        f.write(buffer.tobytes())
+                    self.logger.info(f"截圖已儲存 {save_path}")
+                else:
+                    self.logger.error("圖片編碼失敗")
+                    return None
+            
+            return canvas_screenshot
+            
+        except Exception as e:
+            self.logger.error(f"Canvas 截圖失敗: {e}")
+            return None
 
     def capture_screenshot(self, driver: WebDriver, save_path: Optional[Path] = None) -> np.ndarray:
         """截取瀏覽器畫面。
@@ -2701,12 +2860,14 @@ class GameControlCenter:
         self.running: bool = False
         self.auto_press_running: bool = False
         self.error_monitor_running: bool = False
+        self.rule_running: bool = False
 
         # 執行緒控制
         self._stop_event = threading.Event()
         self._error_monitor_stop_event = threading.Event()
         self.auto_press_threads: Dict[int, threading.Thread] = {}
         self._error_monitor_thread: Optional[threading.Thread] = None
+        self._rule_thread: Optional[threading.Thread] = None
 
         # 正在恢復中的瀏覽器（避免重複觸發恢復）
         self._recovering_browsers: Set[int] = set()
@@ -2718,6 +2879,75 @@ class GameControlCenter:
         # 自動按鍵間隔時間
         self.min_interval: float = 1.0
         self.max_interval: float = 2.0
+        
+        # 規則執行時間控制
+        self._rule_execution_start_time: Optional[float] = None
+        self._rule_execution_max_hours: Optional[float] = None
+        
+        # 自動啟動控制
+        self._auto_start_timer: Optional[threading.Timer] = None
+        self._user_has_input: bool = False
+
+    # -------------------------------------------------------------------------
+    # 通用輔助方法
+    # -------------------------------------------------------------------------
+
+    def _execute_on_active_browsers(
+        self,
+        task_func: Callable[['BrowserContext'], Any],
+        operation_name: str = "操作",
+        show_result: bool = True
+    ) -> Dict[int, Any]:
+        """對所有活躍瀏覽器並行執行任務（DRY 統一方法）。
+        
+        此方法封裝了重複的 ThreadPoolExecutor 並行執行模式，
+        統一處理瀏覽器過濾、結果收集和日誌輸出。
+        
+        參數:
+            task_func: 任務函數，接收 BrowserContext 作為參數
+            operation_name: 操作名稱（用於日誌輸出）
+            show_result: 是否顯示執行結果統計
+            
+        回傳:
+            字典，key 為瀏覽器索引，value 為執行結果（True/False 或具體值）
+        """
+        active_browsers = [
+            bt for bt in self._get_active_browsers()
+            if bt.is_browser_alive() and bt.context
+        ]
+        
+        if not active_browsers:
+            self.logger.warning(f"沒有可用的瀏覽器執行{operation_name}")
+            return {}
+        
+        results: Dict[int, Any] = {}
+        
+        with ThreadPoolExecutor(max_workers=len(active_browsers)) as executor:
+            futures = {
+                executor.submit(bt.execute_task, task_func): bt
+                for bt in active_browsers
+            }
+            
+            for future in futures:
+                bt = futures[future]
+                try:
+                    results[bt.index] = future.result()
+                except Exception as e:
+                    username = bt.context.credential.username if bt.context else "Unknown"
+                    self.logger.error(f"瀏覽器 {bt.index} ({username}) {operation_name}失敗: {e}")
+                    results[bt.index] = False
+        
+        # 顯示結果統計
+        if show_result:
+            success_count = sum(1 for v in results.values() if v)
+            total = len(active_browsers)
+            
+            if success_count == total:
+                self.logger.info(f"{operation_name}完成: 全部 {success_count} 個瀏覽器成功")
+            else:
+                self.logger.warning(f"{operation_name}部分完成: {success_count}/{total} 個瀏覽器成功")
+        
+        return results
 
     def _get_active_browsers(self) -> List['BrowserThread']:
         """取得所有活躍的瀏覽器執行緒。
@@ -2932,7 +3162,7 @@ class GameControlCenter:
                 return
             self._recovering_browsers.add(browser_index)
         
-        def recovery_task():
+        def recovery_task() -> None:
             try:
                 if recovery_type == "blackscreen":
                     self._handle_blackscreen_recovery(bt)
@@ -3436,6 +3666,21 @@ class GameControlCenter:
 【自動操作】
   s <最小>,<最大>     開始自動按鍵（設定隨機間隔秒數）
                       範例: s 1,2 → 每 1~2 秒自動下注一次
+
+  r <小時數>          執行規則檔案中的規則
+                      r 0      → 無限執行所有規則
+                      r 0.5    → 執行 30 分鐘後自動停止
+                      r 2      → 執行 2 小時後自動停止
+
+                      規則格式說明（用戶規則.txt）:
+                      - s:金額:最小,最大:時間  定時旋轉
+                      - a:金額:次數            自動旋轉
+                      - f:金額 或 f:金額:類別  購買免費遊戲
+                      
+                      前綴說明:
+                      - (無前綴) 循環執行
+                      - -        執行一次
+                      - #        略過（註釋）
                    
   p                   暫停所有目前運行的自動操作
 
@@ -3453,7 +3698,7 @@ class GameControlCenter:
                       f 1      → 第 1 個瀏覽器
                       f 1,2,3  → 第 1、2、3 個瀏覽器
                       【賽特一】自動購買免費遊戲
-                      【賽特二】1=免費遊戲, 2=覺醒之力
+                      【賽特二】1=免費遊戲, 2=覺醒之力, 3=不朽覺醒
 
 【截圖工具】
   t                   截取金額模板（進入互動模式）
@@ -3572,6 +3817,661 @@ class GameControlCenter:
         
         self.auto_press_threads.clear()
         self.auto_press_running = False
+
+    # -------------------------------------------------------------------------
+    # 規則執行功能
+    # -------------------------------------------------------------------------
+
+    def _start_rule_execution(self, max_hours: Optional[float] = None) -> None:
+        """啟動規則執行。
+        
+        執行邏輯:
+        1. 先執行所有帶 '-' 前綴的規則（once_only=True）
+        2. 然後循環執行所有不帶 '-' 前綴的規則（once_only=False）
+        
+        參數:
+            max_hours: 最大執行時間（小時），None 表示無限制
+        """
+        if self.rule_running:
+            self.logger.warning("規則執行已在運行中")
+            return
+        
+        if self.auto_press_running:
+            self.logger.warning("自動按鍵正在運行，請先使用 'p' 暫停")
+            return
+        
+        # 檢查是否有規則
+        if not self.bet_rules:
+            self.logger.error("沒有可執行的規則，請檢查 用戶規則.txt")
+            return
+        
+        # 設定時間控制
+        self._rule_execution_start_time = time.time()
+        self._rule_execution_max_hours = max_hours
+        
+        # 顯示規則列表
+        self.logger.info("")
+        self.logger.info(Constants.LOG_SEPARATOR)
+        self.logger.info("【載入的規則】")
+        self.logger.info(Constants.LOG_SEPARATOR)
+        
+        for i, rule in enumerate(self.bet_rules, 1):
+            prefix = "[單次]" if rule.once_only else "[循環]"
+            if rule.rule_type == 'a':
+                self.logger.info(
+                    f"  {i}. {prefix} 自動旋轉 | 金額 {rule.amount}, 次數 {rule.spin_count}"
+                )
+            elif rule.rule_type == 's':
+                self.logger.info(
+                    f"  {i}. {prefix} 定時旋轉 | 金額 {rule.amount}, "
+                    f"間隔 {rule.min_seconds}~{rule.max_seconds} 秒, "
+                    f"持續 {rule.duration} 分鐘"
+                )
+            elif rule.rule_type == 'f':
+                type_name = self._get_free_game_type_name(rule.free_game_type)
+                self.logger.info(
+                    f"  {i}. {prefix} 免費遊戲 | 金額 {rule.amount}, 類別: {type_name}"
+                )
+        
+        self.logger.info("")
+        
+        # 清除停止事件
+        self._stop_event.clear()
+        
+        # 顯示啟動訊息
+        if max_hours is not None:
+            self.logger.info(f"規則執行已啟動（將在 {max_hours} 小時後自動停止，按 'p' 可暫停）")
+        else:
+            self.logger.info("規則執行已啟動（按 'p' 可暫停）")
+        self.logger.info("")
+        
+        # 啟動規則執行執行緒
+        self._rule_thread = threading.Thread(
+            target=self._rule_execution_loop,
+            daemon=True,
+            name="RuleExecutionThread"
+        )
+        self._rule_thread.start()
+        self.rule_running = True
+
+    def _stop_rule_execution(self) -> None:
+        """停止規則執行。"""
+        if not self.rule_running:
+            self.logger.warning("規則執行未在運行")
+            return
+        
+        self.logger.info("正在停止規則執行...")
+        
+        # 設置停止事件
+        self._stop_event.set()
+        
+        # 停止所有自動按鍵執行緒
+        if self.auto_press_threads:
+            self.logger.info("停止自動按鍵執行緒...")
+            stopped_count = 0
+            for browser_index, thread in self.auto_press_threads.items():
+                if thread and thread.is_alive():
+                    thread.join(timeout=Constants.AUTO_PRESS_THREAD_JOIN_TIMEOUT)
+                    if not thread.is_alive():
+                        stopped_count += 1
+                else:
+                    stopped_count += 1
+            
+            self.logger.info(f"已停止 {stopped_count}/{len(self.auto_press_threads)} 個瀏覽器的自動按鍵")
+            self.auto_press_threads.clear()
+            self.auto_press_running = False
+        
+        # 等待規則執行緒結束
+        if self._rule_thread and self._rule_thread.is_alive():
+            self._rule_thread.join(timeout=5.0)
+            
+            if self._rule_thread.is_alive():
+                self.logger.warning("規則執行執行緒未能正常結束")
+        
+        self.rule_running = False
+        self._rule_thread = None
+        
+        # 清理時間控制狀態
+        self._rule_execution_start_time = None
+        self._rule_execution_max_hours = None
+        
+        self.logger.info("規則執行已停止")
+
+    def _rule_execution_loop(self) -> None:
+        """規則執行主循環（在獨立執行緒中運行）。
+        
+        執行邏輯:
+        1. 先執行所有帶 '-' 前綴的規則（once_only=True）
+        2. 然後循環執行所有不帶 '-' 前綴的規則（once_only=False）
+        """
+        if not self.bet_rules:
+            self.logger.error("沒有可執行的規則")
+            return
+        
+        self.logger.info(f"開始執行規則，共 {len(self.bet_rules)} 條")
+        
+        # 分離只執行一次的規則和需要循環的規則
+        once_rules = [r for r in self.bet_rules if r.once_only]
+        loop_rules = [r for r in self.bet_rules if not r.once_only]
+        
+        # === 第一階段: 執行所有帶 '-' 前綴的規則（只執行一次）===
+        if once_rules:
+            self.logger.info(f"[階段 1] 執行 {len(once_rules)} 條單次規則...")
+            
+            for rule_index, rule in enumerate(once_rules):
+                if self._stop_event.is_set():
+                    self.logger.info("收到停止信號")
+                    break
+                
+                # 檢查時間限制
+                if self._check_time_limit():
+                    break
+                
+                try:
+                    self._execute_single_rule(rule, rule_index + 1, len(once_rules))
+                except Exception as e:
+                    self.logger.error(f"執行單次規則時發生錯誤: {e}")
+                    continue
+                
+                # 規則之間短暫暫停
+                if rule_index < len(once_rules) - 1:
+                    time.sleep(Constants.RULE_SWITCH_WAIT)
+            
+            self.logger.info("[階段 1 完成] 所有單次規則已執行")
+            time.sleep(Constants.RULE_SWITCH_WAIT)
+        
+        # === 第二階段: 循環執行不帶 '-' 前綴的規則 ===
+        if not loop_rules:
+            self.logger.warning("沒有循環規則，規則執行結束")
+            self.rule_running = False
+            return
+        
+        self.logger.info(f"[階段 2] 開始循環執行 {len(loop_rules)} 條規則...")
+        
+        rule_index = 0
+        while not self._stop_event.is_set() and self.rule_running:
+            # 檢查時間限制
+            if self._check_time_limit():
+                break
+            
+            try:
+                current_rule = loop_rules[rule_index]
+                
+                self._execute_single_rule(current_rule, rule_index + 1, len(loop_rules))
+                
+                # 檢查是否被停止
+                if self._stop_event.is_set():
+                    self.logger.info("收到停止信號")
+                    break
+                
+                # 顯示完成訊息
+                self.logger.info(f"規則 {rule_index + 1} 執行完成")
+                
+                # 移動到下一條規則（循環）
+                rule_index = (rule_index + 1) % len(loop_rules)
+                
+                # 顯示下一步提示
+                if rule_index == 0:
+                    self.logger.info("所有規則執行完畢，回到第一條規則...")
+                else:
+                    self.logger.info("準備執行下一條規則...")
+                
+                # 規則之間短暫暫停
+                time.sleep(Constants.RULE_SWITCH_WAIT)
+                
+            except Exception as e:
+                self.logger.error(f"執行規則時發生錯誤: {e}")
+                # 確保清理自動按鍵執行緒
+                self.auto_press_threads.clear()
+                self.auto_press_running = False
+                if self._stop_event.wait(timeout=5.0):
+                    break
+        
+        # 最終清理
+        if self.auto_press_running:
+            for browser_index, thread in self.auto_press_threads.items():
+                if thread and thread.is_alive():
+                    thread.join(timeout=Constants.AUTO_PRESS_THREAD_JOIN_TIMEOUT)
+        
+        self.auto_press_threads.clear()
+        self.auto_press_running = False
+        
+        self.logger.info("")
+        self.logger.info("規則執行已停止")
+        self.rule_running = False
+        
+        # 清理時間控制狀態
+        self._rule_execution_start_time = None
+        self._rule_execution_max_hours = None
+
+    def _check_time_limit(self) -> bool:
+        """檢查是否超過時間限制。
+        
+        回傳:
+            True 表示已超過時間限制，應該停止執行
+        """
+        if self._rule_execution_max_hours is None:
+            return False
+        
+        if self._rule_execution_start_time is None:
+            return False
+        
+        elapsed_hours = (time.time() - self._rule_execution_start_time) / 3600
+        
+        if elapsed_hours >= self._rule_execution_max_hours:
+            self.logger.info(f"已達到執行時間上限 ({self._rule_execution_max_hours} 小時)，停止執行")
+            return True
+        
+        return False
+
+    def _get_free_game_type_name(self, free_game_type: Optional[int]) -> str:
+        """取得免費遊戲類別名稱。"""
+        if free_game_type is None:
+            return "預設"
+        elif free_game_type == 1:
+            return "免費遊戲"
+        elif free_game_type == 2:
+            return "覺醒之力"
+        elif free_game_type == 3:
+            return "不朽覺醒"
+        else:
+            return f"未知({free_game_type})"
+
+    def _execute_single_rule(self, rule: BetRule, rule_num: int, total_rules: int) -> None:
+        """執行單條規則。
+        
+        根據規則類型分派到對應的執行方法。
+        
+        參數:
+            rule: 規則物件
+            rule_num: 規則編號（顯示用）
+            total_rules: 總規則數（顯示用）
+        """
+        if rule.rule_type == 'a':
+            self._execute_auto_spin_rule(rule, rule_num, total_rules)
+        elif rule.rule_type == 's':
+            self._execute_standard_rule(rule, rule_num, total_rules)
+        elif rule.rule_type == 'f':
+            self._execute_free_game_rule(rule, rule_num, total_rules)
+
+    def _execute_auto_spin_rule(self, rule: BetRule, rule_num: int, total_rules: int) -> None:
+        """執行自動旋轉規則 ('a' 類型)。
+        
+        參數:
+            rule: 自動旋轉規則
+            rule_num: 規則編號（顯示用）
+            total_rules: 總規則數（顯示用）
+        """
+        prefix = "[單次]" if rule.once_only else "[循環]"
+        
+        self.logger.info("")
+        self.logger.info(Constants.LOG_SEPARATOR)
+        self.logger.info(
+            f"【自動旋轉規則 {rule_num}/{total_rules}】{prefix} "
+            f"金額 {rule.amount}, 次數 {rule.spin_count}"
+        )
+        self.logger.info(Constants.LOG_SEPARATOR)
+        self.logger.info("")
+        
+        # 檢查停止信號
+        if self._stop_event.is_set():
+            self.logger.info("[中斷] 收到停止信號，跳過當前規則")
+            return
+        
+        # 步驟 1: 調整金額
+        self.logger.info(f"[步驟 1/2] 調整金額到 {rule.amount}...")
+        if not self._adjust_all_browsers_betsize(rule.amount):
+            return
+        
+        # 檢查停止信號
+        if self._stop_event.is_set():
+            self.logger.info("[中斷] 收到停止信號")
+            return
+        
+        # 步驟 2: 設定自動旋轉（使用內建的 'a' 命令邏輯）
+        self.logger.info(f"[步驟 2/2] 設定自動旋轉 {rule.spin_count} 次...")
+        self._execute_auto_spin_for_all(rule.spin_count)
+
+    def _execute_standard_rule(self, rule: BetRule, rule_num: int, total_rules: int) -> None:
+        """執行標準規則 ('s' 類型，定時旋轉）。
+        
+        參數:
+            rule: 標準規則
+            rule_num: 規則編號（顯示用）
+            total_rules: 總規則數（顯示用）
+        """
+        prefix = "[單次]" if rule.once_only else "[循環]"
+        
+        # === 步驟 1: 確保自動按鍵已完全停止 ===
+        if self.auto_press_running:
+            self.logger.info("停止自動按鍵...")
+            self._stop_event.set()
+            
+            for browser_index, thread in list(self.auto_press_threads.items()):
+                if thread and thread.is_alive():
+                    thread.join(timeout=Constants.AUTO_PRESS_THREAD_JOIN_TIMEOUT)
+            
+            self.auto_press_threads.clear()
+            self.auto_press_running = False
+            time.sleep(Constants.RULE_SWITCH_WAIT)
+            self.logger.info("自動按鍵已停止")
+            self._stop_event.clear()
+        
+        # 顯示規則資訊
+        self.logger.info("")
+        self.logger.info(Constants.LOG_SEPARATOR)
+        self.logger.info(
+            f"【定時旋轉規則 {rule_num}/{total_rules}】{prefix} "
+            f"金額 {rule.amount}, 持續 {rule.duration} 分鐘, "
+            f"間隔 {rule.min_seconds}~{rule.max_seconds} 秒"
+        )
+        self.logger.info(Constants.LOG_SEPARATOR)
+        self.logger.info("")
+        
+        # 檢查停止信號
+        if self._stop_event.is_set():
+            self.logger.info("[中斷] 收到停止信號，跳過當前規則")
+            return
+        
+        # === 步驟 2: 調整所有瀏覽器的下注金額 ===
+        self.logger.info(f"[步驟 1/2] 調整金額到 {rule.amount}...")
+        if not self._adjust_all_browsers_betsize(rule.amount):
+            return
+        
+        # 檢查停止信號
+        if self._stop_event.is_set():
+            self.logger.info("[中斷] 收到停止信號")
+            return
+        
+        # === 步驟 3: 啟動自動按鍵 ===
+        self.logger.info(
+            f"[步驟 2/2] 啟動自動按鍵 (持續 {rule.duration} 分鐘, "
+            f"間隔 {rule.min_seconds}~{rule.max_seconds} 秒)"
+        )
+        
+        # 設置每個瀏覽器的隨機間隔
+        self.min_interval = rule.min_seconds
+        self.max_interval = rule.max_seconds
+        
+        # 清除停止事件（確保自動按鍵可以運行）
+        self._stop_event.clear()
+        
+        # 取得活躍的瀏覽器
+        active_browsers = self._get_active_browsers()
+        
+        # 為每個瀏覽器啟動自動按鍵執行緒
+        for i, bt in enumerate(active_browsers, 1):
+            thread = threading.Thread(
+                target=self._auto_press_loop_single,
+                args=(bt, i),
+                daemon=True,
+                name=f"RuleAutoPress-{i}"
+            )
+            self.auto_press_threads[i] = thread
+            thread.start()
+        
+        self.auto_press_running = True
+        
+        # === 步驟 4: 等待指定時間 ===
+        wait_seconds = rule.duration * 60
+        elapsed_time = 0
+        check_interval = 1.0
+        
+        while elapsed_time < wait_seconds and not self._stop_event.is_set():
+            if self._stop_event.wait(timeout=check_interval):
+                break
+            elapsed_time += check_interval
+            
+            # 每 60 秒顯示一次剩餘時間
+            if int(elapsed_time) % Constants.RULE_PROGRESS_INTERVAL == 0 and elapsed_time > 0:
+                remaining_minutes = int((wait_seconds - elapsed_time) / 60)
+                if remaining_minutes > 0:
+                    self.logger.info(f"剩餘 {remaining_minutes} 分鐘...")
+
+    def _execute_free_game_rule(self, rule: BetRule, rule_num: int, total_rules: int) -> None:
+        """執行購買免費遊戲規則 ('f' 類型)。
+        
+        參數:
+            rule: 免費遊戲規則
+            rule_num: 規則編號（顯示用）
+            total_rules: 總規則數（顯示用）
+        """
+        prefix = "[單次]" if rule.once_only else "[循環]"
+        
+        # === 步驟 1: 確保自動按鍵已完全停止 ===
+        if self.auto_press_running:
+            self.logger.info("停止自動按鍵...")
+            self._stop_event.set()
+            
+            for browser_index, thread in list(self.auto_press_threads.items()):
+                if thread and thread.is_alive():
+                    thread.join(timeout=Constants.AUTO_PRESS_THREAD_JOIN_TIMEOUT)
+            
+            self.auto_press_threads.clear()
+            self.auto_press_running = False
+            time.sleep(Constants.RULE_SWITCH_WAIT)
+            self.logger.info("自動按鍵已停止")
+            self._stop_event.clear()
+        
+        # 顯示規則資訊
+        type_name = self._get_free_game_type_name(rule.free_game_type)
+        
+        self.logger.info("")
+        self.logger.info(Constants.LOG_SEPARATOR)
+        self.logger.info(
+            f"【免費遊戲規則 {rule_num}/{total_rules}】{prefix} "
+            f"金額 {rule.amount} | 類別: {type_name}"
+        )
+        self.logger.info(Constants.LOG_SEPARATOR)
+        self.logger.info("")
+        
+        # 檢查停止信號
+        if self._stop_event.is_set():
+            self.logger.info("[中斷] 收到停止信號，跳過當前規則")
+            return
+        
+        # === 步驟 2: 調整所有瀏覽器的下注金額 ===
+        self.logger.info(f"[步驟 1/2] 調整金額到 {rule.amount}...")
+        if not self._adjust_all_browsers_betsize(rule.amount):
+            return
+        
+        # 檢查停止信號
+        if self._stop_event.is_set():
+            self.logger.info("[中斷] 收到停止信號")
+            return
+        
+        # === 步驟 3: 購買免費遊戲 ===
+        self.logger.info("[步驟 2/2] 開始購買免費遊戲...")
+        self._execute_buy_free_game_for_all(rule.free_game_type)
+        
+        self.logger.info("免費遊戲進行中，自動跳過功能會處理結算畫面")
+
+    def _adjust_all_browsers_betsize(self, target_amount: float) -> bool:
+        """調整所有瀏覽器的下注金額。
+        
+        參數:
+            target_amount: 目標金額
+            
+        回傳:
+            是否全部成功
+        """
+        # 提前驗證金額是否有效
+        if target_amount not in Constants.GAME_BETSIZE:
+            self.logger.error(f"目標金額 {target_amount} 不在可用金額列表中")
+            return False
+        
+        active_browsers = [bt for bt in self._get_active_browsers() 
+                          if bt.is_browser_alive() and bt.context]
+        if not active_browsers:
+            self.logger.error("沒有可用的瀏覽器")
+            return False
+        
+        # 使用 ThreadPoolExecutor 同步並行調整所有瀏覽器
+        results = {}
+        with ThreadPoolExecutor(max_workers=len(active_browsers)) as executor:
+            futures = {
+                executor.submit(
+                    self._image_detector.adjust_betsize,
+                    bt.context.driver,
+                    target_amount,
+                    self._stop_event  # 傳入停止事件
+                ): bt for bt in active_browsers
+            }
+            
+            for future in futures:
+                bt = futures[future]
+                try:
+                    results[bt.index] = future.result()
+                except Exception as e:
+                    self.logger.error(f"瀏覽器 {bt.index} 調整金額失敗: {e}")
+                    results[bt.index] = False
+        
+        # 統計結果
+        success_count = sum(1 for v in results.values() if v)
+        total = len(active_browsers)
+        
+        if success_count == total:
+            self.logger.info(f"金額調整完成: 全部 {success_count} 個瀏覽器成功")
+            return True
+        else:
+            self.logger.warning(f"部分完成: {success_count}/{total} 個瀏覽器成功")
+            return success_count > 0
+
+    def _execute_auto_spin_for_all(self, spin_count: int) -> None:
+        """對所有瀏覽器執行自動旋轉設定。
+        
+        參數:
+            spin_count: 旋轉次數（必須在 AUTO_SPIN_VALID_COUNTS 中）
+        """
+        # 根據次數選擇對應的座標比例
+        count_ratio_map = {
+            10: (Constants.AUTO_SPIN_10_X_RATIO, Constants.AUTO_SPIN_10_Y_RATIO),
+            50: (Constants.AUTO_SPIN_50_X_RATIO, Constants.AUTO_SPIN_50_Y_RATIO),
+            100: (Constants.AUTO_SPIN_100_X_RATIO, Constants.AUTO_SPIN_100_Y_RATIO)
+        }
+        count_x_ratio, count_y_ratio = count_ratio_map.get(spin_count, (0.5, 0.5))
+        
+        def auto_spin_task(context: BrowserContext) -> bool:
+            """在單個瀏覽器中執行自動旋轉設定。"""
+            driver = context.driver
+            
+            rect = BrowserHelper.get_canvas_rect(driver)
+            if not rect:
+                return False
+            
+            # 第一次點擊：自動旋轉按鈕
+            BrowserHelper.click_canvas_position(
+                driver, rect,
+                Constants.AUTO_SPIN_BUTTON_X_RATIO,
+                Constants.AUTO_SPIN_BUTTON_Y_RATIO
+            )
+            
+            time.sleep(Constants.AUTO_SPIN_MENU_WAIT)
+            
+            # 第二次點擊：選擇次數
+            BrowserHelper.click_canvas_position(
+                driver, rect,
+                count_x_ratio,
+                count_y_ratio
+            )
+            
+            return True
+        
+        # 使用統一的並行執行方法
+        self._execute_on_active_browsers(auto_spin_task, "自動旋轉設定")
+
+    def _create_buy_free_game_task(
+        self, 
+        free_game_type: Optional[int]
+    ) -> Callable[[BrowserContext], bool]:
+        """建立購買免費遊戲的任務函數（DRY 抽取）。
+        
+        此方法將重複的購買免費遊戲邏輯抽取為可重用的任務函數，
+        供 _execute_buy_free_game_for_all 和 _handle_free_game_command 使用。
+        
+        參數:
+            free_game_type: 免費遊戲類別
+            
+        回傳:
+            任務函數
+        """
+        is_sette_1 = Constants.IS_SETTE_1
+        
+        def buy_free_game_task(context: BrowserContext) -> bool:
+            """在單個瀏覽器中購買免費遊戲。"""
+            driver = context.driver
+            
+            rect = BrowserHelper.get_canvas_rect(driver)
+            if not rect:
+                return False
+            
+            # 第一次點擊：免費遊戲區域按鈕
+            BrowserHelper.click_canvas_position(
+                driver, rect,
+                Constants.BUY_FREE_GAME_BUTTON_X_RATIO,
+                Constants.BUY_FREE_GAME_BUTTON_Y_RATIO
+            )
+            time.sleep(Constants.FREE_GAME_CLICK_WAIT)
+            
+            # 第二次點擊：確認按鈕（根據遊戲類型選擇座標）
+            confirm_x_ratio, confirm_y_ratio = self._get_free_game_confirm_coords(
+                is_sette_1, free_game_type
+            )
+            
+            BrowserHelper.click_canvas_position(
+                driver, rect,
+                confirm_x_ratio,
+                confirm_y_ratio
+            )
+            
+            # 購買完成後等待並按空白鍵開始
+            time.sleep(Constants.BUY_FREE_GAME_WAIT_SECONDS)
+            BrowserHelper.execute_cdp_space_key(driver)
+            
+            return True
+        
+        return buy_free_game_task
+
+    def _get_free_game_confirm_coords(
+        self, 
+        is_sette_1: bool, 
+        free_game_type: Optional[int]
+    ) -> Tuple[float, float]:
+        """取得免費遊戲確認按鈕座標（DRY 抽取）。
+        
+        參數:
+            is_sette_1: 是否為賽特一
+            free_game_type: 免費遊戲類別
+            
+        回傳:
+            (x_ratio, y_ratio) 座標比例
+        """
+        if is_sette_1:
+            return (Constants.BUY_FREE_GAME_CONFIRM_X_RATIO, 
+                    Constants.BUY_FREE_GAME_CONFIRM_Y_RATIO)
+        
+        # 賽特二：根據類別選擇座標
+        if free_game_type == 3:
+            return (Constants.BUY_FREE_GAME_IMMORTAL_AWAKE_X_RATIO,
+                    Constants.BUY_FREE_GAME_IMMORTAL_AWAKE_Y_RATIO)
+        elif free_game_type == 2:
+            return (Constants.BUY_FREE_GAME_AWAKE_POWER_X_RATIO,
+                    Constants.BUY_FREE_GAME_AWAKE_POWER_Y_RATIO)
+        else:
+            return (Constants.BUY_FREE_GAME_ONLY_FREEGAME_X_RATIO,
+                    Constants.BUY_FREE_GAME_ONLY_FREEGAME_Y_RATIO)
+
+    def _execute_buy_free_game_for_all(self, free_game_type: Optional[int]) -> None:
+        """對所有瀏覽器執行購買免費遊戲。
+        
+        參數:
+            free_game_type: 免費遊戲類別（1=免費遊戲, 2=覺醒之力, 3=不朽覺醒, None=賽特一預設）
+        """
+        # 建立任務函數
+        buy_free_game_task = self._create_buy_free_game_task(free_game_type)
+        
+        # 使用統一的並行執行方法
+        self._execute_on_active_browsers(buy_free_game_task, "免費遊戲購買")
     
     def process_command(self, command: str) -> bool:
         """處理用戶指令。
@@ -3605,8 +4505,14 @@ class GameControlCenter:
                 return self._handle_start_command(command_arguments)
             
             elif cmd == 'p':
-                # 暫停指令
-                if self.auto_press_running:
+                # 暫停指令 - 可暫停自動按鍵或規則執行
+                if self.rule_running:
+                    self._stop_rule_execution()
+                    self.logger.info("")
+                    self.logger.info("已暫停規則執行")
+                    self.logger.info("")
+                    self.show_help()
+                elif self.auto_press_running:
                     self._stop_auto_press()
                     self.logger.info("")
                     self.logger.info("已暫停自動按鍵")
@@ -3614,6 +4520,11 @@ class GameControlCenter:
                     self.show_help()
                 else:
                     self.logger.warning("目前沒有運行中的自動操作")
+                    self.logger.info("       提示: 使用 's 1,2' 啟動自動按鍵，或使用 'r 0' 啟動規則執行")
+            
+            elif cmd == 'r':
+                # 執行規則
+                self._handle_rule_command(command_arguments)
             
             elif cmd == 'b':
                 # 調整金額
@@ -3651,6 +4562,49 @@ class GameControlCenter:
             self.logger.error(f"處理指令時發生錯誤: {e}")
         
         return True
+
+    def _handle_rule_command(self, arguments: str) -> None:
+        """處理規則執行指令。
+        
+        參數:
+            arguments: 指令參數（執行時間，0 表示無限執行）
+        """
+        if self.rule_running:
+            self.logger.warning("規則執行已在運行中，請先使用 'p' 暫停")
+            return
+        
+        if self.auto_press_running:
+            self.logger.warning("自動按鍵正在運行，請先使用 'p' 暫停")
+            return
+        
+        # 檢查是否提供參數
+        if not arguments:
+            self.logger.warning("指令格式錯誤，請使用: r <小時數>")
+            self.logger.info("       r 0      → 無限執行所有規則")
+            self.logger.info("       r 0.5    → 執行 30 分鐘後自動停止")
+            self.logger.info("       r 2      → 執行 2 小時後自動停止")
+            return
+        
+        # 解析小時參數
+        try:
+            hours = float(arguments)
+            if hours < 0:
+                self.logger.warning(f"執行時間不能小於 0: {hours}")
+                return
+            
+            # hours == 0 代表無限執行
+            max_hours = None if hours == 0 else hours
+            
+            if max_hours is None:
+                self.logger.info("設定規則執行模式: 無限執行")
+            else:
+                self.logger.info(f"設定規則執行時間: {max_hours} 小時")
+                
+        except ValueError:
+            self.logger.warning(f"無效的小時數: {arguments}，請輸入數字")
+            return
+        
+        self._start_rule_execution(max_hours=max_hours)
     
     def _handle_quit_command(self, arguments: str) -> bool:
         """處理關閉瀏覽器指令。
@@ -3664,7 +4618,7 @@ class GameControlCenter:
             是否繼續運行
         """
         if not arguments:
-            self.logger.error("指令格式錯誤，請使用: q <編號>")
+            self.logger.warning("指令格式錯誤，請使用: q <編號>")
             self.logger.info("       q 0 - 關閉所有瀏覽器並退出")
             self.logger.info("       q 1 - 關閉第 1 個瀏覽器")
             self.logger.info("       q 1,2,3 - 關閉第 1、2、3 個瀏覽器")
@@ -3695,11 +4649,11 @@ class GameControlCenter:
                             target_browsers.append(bt)
                             break
                     if not target_browsers:
-                        self.logger.error(f"瀏覽器 {index} 不存在或已關閉")
+                        self.logger.warning(f"瀏覽器 {index} 不存在或已關閉")
                         return True
             
             if not target_browsers:
-                self.logger.error("沒有有效的瀏覽器可關閉")
+                self.logger.warning("沒有有效的瀏覽器可關閉")
                 return True
             
             # 顯示執行資訊
@@ -3728,8 +4682,8 @@ class GameControlCenter:
                     username = bt.context.credential.username if bt.context else "Unknown"
                     self.logger.warning(f"瀏覽器 {bt.index} ({username}) 導航失敗: {e}")
             
-            self.logger.info("等待 10 秒後關閉...")
-            time.sleep(10)
+            self.logger.info(f"等待 {int(Constants.QUIT_WAIT_TIME)} 秒後關閉...")
+            time.sleep(Constants.QUIT_WAIT_TIME)
             
             # 關閉瀏覽器
             closed_count = 0
@@ -3757,116 +4711,48 @@ class GameControlCenter:
                 self.logger.info(f"剩餘 {remaining} 個瀏覽器仍在運行")
         
         except ValueError:
-            self.logger.error(f"無效的編號: {arguments}，請輸入數字")
+            self.logger.warning(f"無效的編號: {arguments}，請輸入數字")
         
         return True
     
     def _handle_auto_spin_command(self, arguments: str) -> None:
         """處理自動旋轉指令。
         
-        設定所有瀏覽器的自動旋轉功能，支援 10、50、100 次。
+        設定所有瀏覽器的自動旋轉功能，使用統一的執行方法遵循 DRY 原則。
         
         參數:
             arguments: 指令參數（旋轉次數）
         """
         if not arguments:
-            self.logger.error("指令格式錯誤")
+            valid_counts = ", ".join(str(c) for c in Constants.AUTO_SPIN_VALID_COUNTS)
+            self.logger.warning("指令格式錯誤")
             self.logger.info("       正確格式: a <次數>")
-            self.logger.info("       範例: a 10 → 自動旋轉 10 次")
+            self.logger.info(f"       可選次數: {valid_counts}")
             return
         
         # 解析次數參數
         try:
             spin_count = int(arguments.strip())
         except ValueError:
-            self.logger.error("次數格式錯誤，請輸入有效的數字")
-            self.logger.info("       可選次數: 10, 50, 100")
+            valid_counts = ", ".join(str(c) for c in Constants.AUTO_SPIN_VALID_COUNTS)
+            self.logger.warning("次數格式錯誤，請輸入有效的數字")
+            self.logger.info(f"       可選次數: {valid_counts}")
             return
         
         # 驗證次數是否有效
-        if spin_count not in [10, 50, 100]:
-            self.logger.error("無效的次數")
+        if spin_count not in Constants.AUTO_SPIN_VALID_COUNTS:
+            valid_counts = ", ".join(str(c) for c in Constants.AUTO_SPIN_VALID_COUNTS)
+            self.logger.warning("無效的次數")
             self.logger.info(f"       您輸入的: {spin_count}")
-            self.logger.info("       可選次數: 10, 50, 100")
+            self.logger.info(f"       可選次數: {valid_counts}")
             return
-        
-        # 取得活躍的瀏覽器
-        active_browsers = [bt for bt in self._get_active_browsers() 
-                          if bt.is_browser_alive() and bt.context]
-        if not active_browsers:
-            self.logger.error("沒有可用的瀏覽器")
-            return
-        
-        # 根據次數選擇對應的座標比例
-        count_ratio_map = {
-            10: (Constants.AUTO_SPIN_10_X_RATIO, Constants.AUTO_SPIN_10_Y_RATIO),
-            50: (Constants.AUTO_SPIN_50_X_RATIO, Constants.AUTO_SPIN_50_Y_RATIO),
-            100: (Constants.AUTO_SPIN_100_X_RATIO, Constants.AUTO_SPIN_100_Y_RATIO)
-        }
-        count_x_ratio, count_y_ratio = count_ratio_map[spin_count]
-        
-        def auto_spin_task(context: BrowserContext) -> bool:
-            """在單個瀏覽器中執行自動旋轉設定。"""
-            driver = context.driver
-            
-            # 取得 Canvas 區域
-            rect = BrowserHelper.get_canvas_rect(driver)
-            if not rect:
-                return False
-            
-            # 第一次點擊：自動旋轉按鈕（開啟選單）
-            BrowserHelper.click_canvas_position(
-                driver, rect,
-                Constants.AUTO_SPIN_BUTTON_X_RATIO,
-                Constants.AUTO_SPIN_BUTTON_Y_RATIO
-            )
-            
-            # 等待選單出現
-            time.sleep(Constants.AUTO_SPIN_MENU_WAIT)
-            
-            # 第二次點擊：選擇次數
-            BrowserHelper.click_canvas_position(
-                driver, rect,
-                count_x_ratio,
-                count_y_ratio
-            )
-            
-            return True
-        
-        # 使用 ThreadPoolExecutor 並行執行所有瀏覽器
-        results = {}
-        with ThreadPoolExecutor(max_workers=len(active_browsers)) as executor:
-            futures = {
-                executor.submit(bt.execute_task, auto_spin_task): bt 
-                for bt in active_browsers
-            }
-            
-            for future in futures:
-                bt = futures[future]
-                try:
-                    results[bt.index] = future.result()
-                except Exception as e:
-                    username = bt.context.credential.username if bt.context else "Unknown"
-                    self.logger.error(f"瀏覽器 {bt.index} ({username}) 設定失敗: {e}")
-                    results[bt.index] = False
-        
-        # 統計結果
-        success_count = sum(1 for v in results.values() if v)
-        total = len(active_browsers)
         
         self.logger.info("")
-        if success_count == total:
-            self.logger.info("自動旋轉已啟動")
-            self.logger.info(f"       旋轉次數: {spin_count} 次")
-            self.logger.info(f"       瀏覽器數: {success_count} 個")
-        else:
-            self.logger.warning("自動旋轉部分啟動")
-            self.logger.info(f"       旋轉次數: {spin_count} 次")
-            self.logger.info(f"       成功數量: {success_count}/{total} 個")
-            for bt in active_browsers:
-                if not results.get(bt.index, False):
-                    username = bt.context.credential.username if bt.context else "Unknown"
-                    self.logger.error(f"       失敗: 瀏覽器 {bt.index} ({username})")
+        self.logger.info(f"設定自動旋轉 {spin_count} 次...")
+        
+        # 使用統一的執行方法（DRY 原則）
+        self._execute_auto_spin_for_all(spin_count)
+        
         self.logger.info("")
     
     def _handle_free_game_command(self, arguments: str) -> None:
@@ -3874,13 +4760,13 @@ class GameControlCenter:
         
         根據 GAME_PATTERN 自動判斷遊戲種類：
         - 賽特一：直接購買免費遊戲
-        - 賽特二：需要選擇類別（1=免費遊戲, 2=覺醒之力）
+        - 賽特二：需要選擇類別（1=免費遊戲, 2=覺醒之力, 3=不朽覺醒）
         
         參數:
             arguments: 指令參數（瀏覽器編號）
         """
         if not arguments:
-            self.logger.error("指令格式錯誤")
+            self.logger.warning("指令格式錯誤")
             self.logger.info("       正確格式: f <編號>")
             self.logger.info("       f 0      → 所有瀏覽器")
             self.logger.info("       f 1      → 第 1 個瀏覽器")
@@ -3922,15 +4808,15 @@ class GameControlCenter:
                             target_browsers.append(bt)
                             break
                     if not target_browsers:
-                        self.logger.error(f"瀏覽器 {idx} 不存在或已關閉")
+                        self.logger.warning(f"瀏覽器 {idx} 不存在或已關閉")
                         return
         except ValueError:
-            self.logger.error("編號格式錯誤，請輸入數字")
+            self.logger.warning("編號格式錯誤，請輸入數字")
             self.logger.info("       範例: f 0 或 f 1 或 f 1,2,3")
             return
         
         if not target_browsers:
-            self.logger.error("沒有有效的瀏覽器可執行操作")
+            self.logger.warning("沒有有效的瀏覽器可執行操作")
             return
         
         # 判斷遊戲種類
@@ -3943,6 +4829,7 @@ class GameControlCenter:
             self.logger.info("請選擇免費遊戲類別:")
             self.logger.info("       1 - 免費遊戲")
             self.logger.info("       2 - 覺醒之力")
+            self.logger.info("       3 - 不朽覺醒")
             self.logger.info("       q - 取消")
             self.logger.info("")
             
@@ -3954,13 +4841,12 @@ class GameControlCenter:
                 if type_input == 'q':
                     self.logger.info("已取消操作")
                     return
-                elif type_input == '1':
-                    free_game_type = 1
-                elif type_input == '2':
-                    free_game_type = 2
+                elif type_input in ('1', '2', '3'):
+                    free_game_type = int(type_input)
                 else:
-                    self.logger.error(f"無效的類別: {type_input}")
-                    self.logger.info("       請輸入 1 或 2")
+                    valid_types = ", ".join(str(t) for t in Constants.FREE_GAME_VALID_TYPES)
+                    self.logger.warning(f"無效的類別: {type_input}")
+                    self.logger.info(f"       請輸入 {valid_types}")
                     return
                     
             except (EOFError, KeyboardInterrupt):
@@ -3979,52 +4865,12 @@ class GameControlCenter:
         if is_sette_1:
             self.logger.info("       遊戲種類: 賽特一")
         else:
-            type_name = "免費遊戲" if free_game_type == 1 else "覺醒之力"
+            type_name = self._get_free_game_type_name(free_game_type)
             self.logger.info(f"       遊戲種類: 賽特二")
             self.logger.info(f"       購買類別: {type_name}")
         
-        def buy_free_game_task(context: BrowserContext) -> bool:
-            """在單個瀏覽器中購買免費遊戲。"""
-            driver = context.driver
-            
-            # 取得 Canvas 區域
-            rect = BrowserHelper.get_canvas_rect(driver)
-            if not rect:
-                return False
-            
-            # === 第一次點擊：免費遊戲區域按鈕 ===
-            BrowserHelper.click_canvas_position(
-                driver, rect,
-                Constants.BUY_FREE_GAME_BUTTON_X_RATIO,
-                Constants.BUY_FREE_GAME_BUTTON_Y_RATIO
-            )
-            time.sleep(Constants.FREE_GAME_CLICK_WAIT)
-            
-            # === 第二次點擊：確認按鈕 ===
-            if is_sette_1:
-                # 賽特一：直接點擊確認按鈕
-                confirm_x_ratio = Constants.BUY_FREE_GAME_CONFIRM_X_RATIO
-                confirm_y_ratio = Constants.BUY_FREE_GAME_CONFIRM_Y_RATIO
-            else:
-                # 賽特二：根據類別選擇座標
-                if free_game_type == 2:
-                    confirm_x_ratio = Constants.BUY_FREE_GAME_AWAKE_POWER_X_RATIO
-                    confirm_y_ratio = Constants.BUY_FREE_GAME_AWAKE_POWER_Y_RATIO
-                else:
-                    confirm_x_ratio = Constants.BUY_FREE_GAME_ONLY_FREEGAME_X_RATIO
-                    confirm_y_ratio = Constants.BUY_FREE_GAME_ONLY_FREEGAME_Y_RATIO
-            
-            BrowserHelper.click_canvas_position(
-                driver, rect,
-                confirm_x_ratio,
-                confirm_y_ratio
-            )
-            
-            # === 購買完成後等待並按空白鍵開始 ===
-            time.sleep(Constants.BUY_FREE_GAME_WAIT_SECONDS)
-            BrowserHelper.execute_cdp_space_key(driver)
-            
-            return True
+        # 使用統一的任務函數（DRY 原則）
+        buy_free_game_task = self._create_buy_free_game_task(free_game_type)
         
         # 使用 ThreadPoolExecutor 並行執行
         results = {}
@@ -4124,60 +4970,33 @@ class GameControlCenter:
         self.logger.info("")
 
     def _handle_betsize_command(self, arguments: str) -> None:
-        """處理調整金額指令（同步並行操作）。"""
+        """處理調整金額指令。
+        
+        使用 _adjust_all_browsers_betsize 方法，遵循 DRY 原則。
+        
+        參數:
+            arguments: 指令參數（目標金額）
+        """
         if not arguments:
-            self.logger.error("指令格式錯誤，請使用: b <金額> (例如: b 100)")
+            self.logger.warning("指令格式錯誤，請使用: b <金額>")
+            self.logger.info("       範例: b 2, b 10, b 100")
             return
         
         try:
             target_amount = float(arguments)
         except ValueError:
-            self.logger.error(f"無效的金額: {arguments}，請輸入數字")
+            self.logger.warning(f"無效的金額: {arguments}，請輸入數字")
             return
         
-        # 提前驗證金額是否有效（避免每個瀏覽器都輸出錯誤）
+        # 提前驗證金額是否有效
         if target_amount not in Constants.GAME_BETSIZE:
-            self.logger.error(f"目標金額 {target_amount} 不在可用金額列表中")
+            self.logger.warning(f"目標金額 {target_amount} 不在可用金額列表中")
             return
         
-        active_browsers = [bt for bt in self._get_active_browsers() 
-                          if bt.is_browser_alive() and bt.context]
-        if not active_browsers:
-            self.logger.error("沒有可用的瀏覽器")
-            return
+        self.logger.info(f"開始調整金額到 {target_amount}...")
         
-        self.logger.info(f"開始同步調整 {len(active_browsers)} 個瀏覽器金額到 {target_amount}...")
-        
-        # 使用 ThreadPoolExecutor 同步並行調整所有瀏覽器
-        results = {}
-        with ThreadPoolExecutor(max_workers=len(active_browsers)) as executor:
-            futures = {
-                executor.submit(
-                    self._image_detector.adjust_betsize,
-                    bt.context.driver,
-                    target_amount
-                ): bt for bt in active_browsers
-            }
-            
-            for future in futures:
-                bt = futures[future]
-                try:
-                    results[bt.index] = future.result()
-                except Exception as e:
-                    self.logger.error(f"瀏覽器 {bt.index} 調整金額失敗: {e}")
-                    results[bt.index] = False
-        
-        # 統計結果
-        success_count = sum(1 for v in results.values() if v)
-        total = len(active_browsers)
-        
-        if success_count == total:
-            self.logger.info(f"金額調整完成: 全部 {success_count} 個瀏覽器成功")
-        else:
-            self.logger.warning(f"部分完成: {success_count}/{total} 個瀏覽器成功")
-            for bt in active_browsers:
-                if not results.get(bt.index, False):
-                    self.logger.error(f"       瀏覽器 {bt.index} ({bt.context.credential.username}) 失敗")
+        # 使用統一的調整方法（DRY 原則）
+        self._adjust_all_browsers_betsize(target_amount)
 
     def _handle_start_command(self, arguments: str) -> bool:
         """處理開始自動按鍵指令。
@@ -4189,7 +5008,7 @@ class GameControlCenter:
             是否繼續運行
         """
         if not arguments:
-            self.logger.error("指令格式錯誤")
+            self.logger.warning("指令格式錯誤")
             self.logger.info("       正確格式: s <最小>,<最大>")
             self.logger.info("       範例: s 1,2 → 每 1~2 秒自動執行一次")
             return True
@@ -4198,7 +5017,7 @@ class GameControlCenter:
         try:
             interval_parts = arguments.split(',')
             if len(interval_parts) != 2:
-                self.logger.error("間隔格式錯誤，需要兩個數字")
+                self.logger.warning("間隔格式錯誤，需要兩個數字")
                 self.logger.info("       範例: s 1,2 或 s 1.5,3")
                 return True
             
@@ -4206,16 +5025,16 @@ class GameControlCenter:
             max_interval = float(interval_parts[1].strip())
             
             if min_interval <= 0 or max_interval <= 0:
-                self.logger.error("間隔時間必須大於 0")
+                self.logger.warning("間隔時間必須大於 0")
                 return True
             
             if min_interval > max_interval:
-                self.logger.error("最小間隔不能大於最大間隔")
+                self.logger.warning("最小間隔不能大於最大間隔")
                 self.logger.info(f"       您輸入的: 最小={min_interval}, 最大={max_interval}")
                 return True
                 
         except ValueError:
-            self.logger.error("間隔格式錯誤，請輸入有效的數字")
+            self.logger.warning("間隔格式錯誤，請輸入有效的數字")
             self.logger.info("       範例: s 1,2 或 s 1.5,3")
             return True
         
@@ -4254,9 +5073,9 @@ class GameControlCenter:
             選中的 BrowserThread，取消則返回 None
         """
         self.logger.info("")
-        self.logger.info("=" * 60)
+        self.logger.info(Constants.LOG_SEPARATOR)
         self.logger.info(f"【截取模板】{display_name}")
-        self.logger.info("=" * 60)
+        self.logger.info(Constants.LOG_SEPARATOR)
         self.logger.info("")
         self.logger.info(f"需要擷取 {display_name} 的參考圖片")
         self.logger.info("       請確保目標遊戲視窗已顯示正確的畫面內容")
@@ -4299,14 +5118,14 @@ class GameControlCenter:
                         if bt.is_browser_alive() and bt.context:
                             return bt
                         else:
-                            self.logger.error(f"瀏覽器 {browser_index} 已關閉")
+                            self.logger.warning(f"瀏覽器 {browser_index} 已關閉")
                             return None
                 
-                self.logger.error(f"無效的瀏覽器編號: {browser_index}")
+                self.logger.warning(f"無效的瀏覽器編號: {browser_index}")
                 return None
                 
             except ValueError:
-                self.logger.error(f"無效的輸入: {user_input}")
+                self.logger.warning(f"無效的輸入: {user_input}")
                 return None
                 
         except (EOFError, KeyboardInterrupt):
@@ -4361,7 +5180,7 @@ class GameControlCenter:
                     self.logger.error("模板截取失敗")
                     
             except ValueError:
-                self.logger.error("金額格式錯誤，請輸入有效數字（例如: 2, 10, 100）")
+                self.logger.warning("金額格式錯誤，請輸入有效數字（例如: 2, 10, 100）")
             except (EOFError, KeyboardInterrupt):
                 self.logger.info("")
                 self.logger.info("退出金額模板工具")
@@ -4423,9 +5242,9 @@ class GameControlCenter:
         """啟動控制面板。"""
         self.running = True
         self.logger.info("")
-        self.logger.info("=" * 60)
+        self.logger.info(Constants.LOG_SEPARATOR)
         self.logger.info("           【遊戲控制面板】已啟動")
-        self.logger.info("=" * 60)
+        self.logger.info(Constants.LOG_SEPARATOR)
         self.logger.info("")
         
         active_count = len(self._get_active_browsers())
@@ -4438,6 +5257,25 @@ class GameControlCenter:
         # 自動顯示幫助訊息
         self.show_help()
         
+        # 啟動自動執行計時器
+        delay_minutes = int(Constants.AUTO_START_DELAY / 60)
+        self.logger.info("")
+        self.logger.info(f"⏰ 將在 {delay_minutes} 分鐘後自動執行 '{Constants.AUTO_START_COMMAND}' 命令")
+        self.logger.info("   如需取消，請輸入任意命令")
+        self.logger.info("")
+        
+        def auto_execute_command() -> None:
+            """自動執行預設命令。"""
+            if not self._user_has_input and self.running:
+                self.logger.info("")
+                self.logger.info(f"⏰ {delay_minutes} 分鐘已到，自動執行 '{Constants.AUTO_START_COMMAND}' 命令...")
+                self.logger.info("")
+                self.process_command(Constants.AUTO_START_COMMAND)
+        
+        self._auto_start_timer = threading.Timer(Constants.AUTO_START_DELAY, auto_execute_command)
+        self._auto_start_timer.daemon = True
+        self._auto_start_timer.start()
+        
         try:
             while self.running:
                 try:
@@ -4445,6 +5283,13 @@ class GameControlCenter:
                     FlushingStreamHandler.show_prompt = True
                     command = input().strip()
                     FlushingStreamHandler.show_prompt = False
+                    
+                    # 記錄用戶已經輸入過命令，取消自動執行
+                    if not self._user_has_input:
+                        self._user_has_input = True
+                        if self._auto_start_timer and self._auto_start_timer.is_alive():
+                            self._auto_start_timer.cancel()
+                            self.logger.info(f"[提示] 已取消自動執行 '{Constants.AUTO_START_COMMAND}' 命令")
                     
                     if command:
                         if not self.process_command(command):
@@ -4462,6 +5307,11 @@ class GameControlCenter:
                     break
         finally:
             FlushingStreamHandler.show_prompt = False
+            
+            # 取消自動執行計時器
+            if self._auto_start_timer and self._auto_start_timer.is_alive():
+                self._auto_start_timer.cancel()
+            
             # 確保停止所有自動操作
             if self.auto_press_running:
                 self._stop_auto_press()
@@ -4571,9 +5421,9 @@ class AutoSlotGameAppStarter:
         異常:
             ConfigurationError: 配置檔案格式錯誤時拋出。
         """
-        self.logger.info("=" * 60)
+        self.logger.info(Constants.LOG_SEPARATOR)
         self.logger.info("【步驟 1】載入配置檔案")
-        self.logger.info("=" * 60)
+        self.logger.info(Constants.LOG_SEPARATOR)
         
         self.config_reader = ConfigReader(logger=self.logger)
         
@@ -4593,9 +5443,9 @@ class AutoSlotGameAppStarter:
         回傳:
             瀏覽器數量
         """
-        self.logger.info("=" * 60)
+        self.logger.info(Constants.LOG_SEPARATOR)
         self.logger.info("【步驟 2】啟動瀏覽器")
-        self.logger.info("=" * 60)
+        self.logger.info(Constants.LOG_SEPARATOR)
         
         # 根據用戶數量決定瀏覽器數量，最多 MAX_BROWSER_COUNT 個
         browser_count = min(len(self.credentials), Constants.MAX_BROWSER_COUNT)
@@ -4614,9 +5464,9 @@ class AutoSlotGameAppStarter:
         回傳:
             每個瀏覽器對應的本機代理埠號列表
         """
-        self.logger.info("=" * 60)
+        self.logger.info(Constants.LOG_SEPARATOR)
         self.logger.info("【步驟 3】啟動代理中繼伺服器")
-        self.logger.info("=" * 60)
+        self.logger.info(Constants.LOG_SEPARATOR)
         
         self.proxy_manager = LocalProxyServerManager(logger=self.logger)
         proxy_ports: List[Optional[int]] = []
@@ -4665,9 +5515,9 @@ class AutoSlotGameAppStarter:
             browser_count: 瀏覽器數量
             proxy_ports: 代理埠號列表
         """
-        self.logger.info("=" * 60)
+        self.logger.info(Constants.LOG_SEPARATOR)
         self.logger.info("【步驟 4】建立瀏覽器實例")
-        self.logger.info("=" * 60)
+        self.logger.info(Constants.LOG_SEPARATOR)
         
         self.browser_manager = BrowserManager(logger=self.logger)
         self.logger.info(f"正在開啟 {browser_count} 個遊戲視窗...")
@@ -4725,9 +5575,9 @@ class AutoSlotGameAppStarter:
         
         此方法應在程式結束時呼叫，確保資源正確釋放。
         """
-        self.logger.info("=" * 60)
+        self.logger.info(Constants.LOG_SEPARATOR)
         self.logger.info("【清理資源】")
-        self.logger.info("=" * 60)
+        self.logger.info(Constants.LOG_SEPARATOR)
         
         browser_count = len(self.browser_threads)
         
@@ -4875,9 +5725,9 @@ class AutoSlotGameAppStarter:
         - 頁面載入失敗時自動重試
         - 驗證頁面是否正確載入
         """
-        self.logger.info("=" * 60)
+        self.logger.info(Constants.LOG_SEPARATOR)
         self.logger.info("【步驟 5】導航到登入頁面")
-        self.logger.info("=" * 60)
+        self.logger.info(Constants.LOG_SEPARATOR)
         
         def navigate_task(context: BrowserContext) -> bool:
             driver = context.driver
@@ -4926,9 +5776,9 @@ class AutoSlotGameAppStarter:
         - Loading 遮罩等待時間增加
         - 關鍵步驟失敗時自動重試
         """
-        self.logger.info("=" * 60)
+        self.logger.info(Constants.LOG_SEPARATOR)
         self.logger.info("【步驟 6】執行登入操作")
-        self.logger.info("=" * 60)
+        self.logger.info(Constants.LOG_SEPARATOR)
         
         def login_task(context: BrowserContext) -> bool:
             driver = context.driver
@@ -5015,9 +5865,9 @@ class AutoSlotGameAppStarter:
         - 延長搜尋結果載入時間
         - 關鍵步驟失敗時自動重試
         """
-        self.logger.info("=" * 60)
+        self.logger.info(Constants.LOG_SEPARATOR)
         self.logger.info("【步驟 7】導航到遊戲頁面")
-        self.logger.info("=" * 60)
+        self.logger.info(Constants.LOG_SEPARATOR)
         
         def game_task(context: BrowserContext) -> bool:
             driver = context.driver
@@ -5081,9 +5931,9 @@ class AutoSlotGameAppStarter:
     
     def arrange_windows(self) -> None:
         """步驟 8: 調整視窗排列"""
-        self.logger.info("=" * 60)
+        self.logger.info(Constants.LOG_SEPARATOR)
         self.logger.info("【步驟 8】調整視窗排列")
-        self.logger.info("=" * 60)
+        self.logger.info(Constants.LOG_SEPARATOR)
         
         width = Constants.DEFAULT_WINDOW_WIDTH
         height = Constants.DEFAULT_WINDOW_HEIGHT
@@ -5115,9 +5965,9 @@ class AutoSlotGameAppStarter:
         1. 檢測 game_login → 點擊
         2. 檢測 game_confirm → 點擊
         """
-        self.logger.info("=" * 60)
+        self.logger.info(Constants.LOG_SEPARATOR)
         self.logger.info("【步驟 9】執行圖片檢測流程")
-        self.logger.info("=" * 60)
+        self.logger.info(Constants.LOG_SEPARATOR)
         
         if not self.browser_threads:
             self.logger.error("沒有可用的瀏覽器實例")
@@ -5301,9 +6151,9 @@ class AutoSlotGameAppStarter:
             display_name: 顯示名稱
         """
         self.logger.info("")
-        self.logger.info("=" * 60)
+        self.logger.info(Constants.LOG_SEPARATOR)
         self.logger.info(f"模板圖片不存在: {template_name}")
-        self.logger.info("=" * 60)
+        self.logger.info(Constants.LOG_SEPARATOR)
         self.logger.info("")
         self.logger.info(f"需要擷取 {display_name} 的參考圖片")
         self.logger.info("   請確保目標瀏覽器的遊戲畫面已顯示目標內容")
@@ -5352,21 +6202,27 @@ class AutoSlotGameAppStarter:
                         break
                 
                 if selected_thread is None:
-                    self.logger.error(f"無效的瀏覽器編號: {browser_index}")
+                    self.logger.warning(f"無效的瀏覽器編號: {browser_index}")
                     # 遞迴重試
                     self._prompt_capture_template(image_detector, template_name, display_name)
                     return
                 
-                # 擷取並儲存模板
+                # 擷取並儲存模板（只截取 Canvas 區域）
                 template_path = image_detector.get_template_path(template_name)
-                image_detector.capture_screenshot(selected_thread.context.driver, template_path)
+                result = image_detector.capture_canvas_screenshot(
+                    selected_thread.context.driver, 
+                    template_path
+                )
                 
-                self.logger.info("")
-                self.logger.info(f"模板圖片已建立: {template_path}")
-                self.logger.info("")
+                if result is not None:
+                    self.logger.info("")
+                    self.logger.info(f"模板圖片已建立（Canvas 區域）: {template_path}")
+                    self.logger.info("")
+                else:
+                    self.logger.error("模板截取失敗，無法取得 Canvas 區域")
                 
             except ValueError:
-                self.logger.error(f"無效的輸入: {user_input}")
+                self.logger.warning(f"無效的輸入: {user_input}")
                 # 遞迴重試
                 self._prompt_capture_template(image_detector, template_name, display_name)
                 return
@@ -5420,9 +6276,9 @@ class AutoSlotGameAppStarter:
         建立並啟動 GameControlCenter 實例，提供互動式命令列介面。
         ClickLobbyConfirm --> StartControlCenter[啟動遊戲控制面板]
         """
-        self.logger.info("=" * 60)
+        self.logger.info(Constants.LOG_SEPARATOR)
         self.logger.info("【步驟 10】啟動遊戲控制面板")
-        self.logger.info("=" * 60)
+        self.logger.info(Constants.LOG_SEPARATOR)
         
         if not self.browser_threads:
             self.logger.error("沒有可用的瀏覽器實例")
@@ -5479,10 +6335,10 @@ def main() -> None:
     # logger = LoggerFactory.get_logger(level=LogLevel.DEBUG)
     
     logger.info("")
-    logger.info("=" * 60)
+    logger.info(Constants.LOG_SEPARATOR)
     logger.info(f"【{Constants.SYSTEM_NAME}】")
     logger.info(f"  版本: {Constants.VERSION}")
-    logger.info("=" * 60)
+    logger.info(Constants.LOG_SEPARATOR)
     logger.info("")
     
     # 建立啟動器
@@ -5493,9 +6349,9 @@ def main() -> None:
         if starter.initialize():
             browser_threads = starter.get_browser_threads()
             
-            logger.info("=" * 60)
+            logger.info(Constants.LOG_SEPARATOR)
             logger.info("【初始化完成】")
-            logger.info("=" * 60)
+            logger.info(Constants.LOG_SEPARATOR)
             logger.info(f"瀏覽器: {len(browser_threads)} | 用戶: {len(starter.get_credentials())} | 規則: {len(starter.get_rules())}")
             logger.info("")
             
@@ -5514,9 +6370,9 @@ def main() -> None:
             # 步驟 9: 執行圖片檢測流程
             starter.execute_image_detection_flow()
             
-            logger.info("=" * 60)
+            logger.info(Constants.LOG_SEPARATOR)
             logger.info("【啟動完成】")
-            logger.info("=" * 60)
+            logger.info(Constants.LOG_SEPARATOR)
             logger.info("所有瀏覽器已就緒")
             logger.info("")
             
