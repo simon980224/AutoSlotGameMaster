@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <a href="#"><img src="https://img.shields.io/badge/version-2.0.0-brightgreen.svg" alt="Version"></a>
+  <a href="#"><img src="https://img.shields.io/badge/version-2.0.2-brightgreen.svg" alt="Version"></a>
   <a href="#"><img src="https://img.shields.io/badge/python-3.8%2B-blue.svg" alt="Python"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License"></a>
   <a href="#"><img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg" alt="Platform"></a>
@@ -204,6 +204,27 @@ GAME_LOGIN_BUTTON_Y_RATIO: float = 0.9   # 相對於 canvas 高度
 | pillow            | ≥10.0.0 | 截圖處理          |
 | numpy             | ≥1.24.0 | 數值計算          |
 | pyinstaller       | ≥6.0.0  | 打包工具          |
+
+---
+
+## 📜 版本歷程
+
+### 2.0.2 (2026-02-12)
+
+- 新增: 根據 LOGIN_PAGE 自動切換 sett2 遊戲識別碼（fin88,richpanda 使用專用識別碼）
+
+### 2.0.1 (2026-02-12)
+
+- 修復: 暫停規則執行(p)後，手動指令(如 b、a)失效的問題
+- 原因: `_stop_rule_execution` 未重置 `_stop_event`，導致後續操作被誤判為已停止
+
+### 2.0.0 (2026-02-01)
+
+- 重構: 全面模組化架構設計
+- 新增: 多視窗同步操作功能
+- 新增: 智慧圖片識別系統
+- 新增: 互動式控制面板
+- 新增: 錯誤監控與自動恢復機制
 
 ---
 

@@ -23,21 +23,9 @@
         $ python main_refactor.py
 
 版本資訊:
-    版本: 2.0.1
+    版本: 2.0.2
     作者: 凡臻科技
     授權: MIT License
-
-版本歷程:
-    2.0.1 (2026-02-12):
-        - 修復: 暫停規則執行(p)後，手動指令(如 b、a)失效的問題
-        - 原因: _stop_rule_execution 未重置 _stop_event，導致後續操作被誤判為已停止
-    
-    2.0.0 (2026-02-01):
-        - 重構: 全面模組化架構設計
-        - 新增: 多視窗同步操作功能
-        - 新增: 智慧圖片識別系統
-        - 新增: 互動式控制面板
-        - 新增: 錯誤監控與自動恢復機制
 
 """
 
@@ -161,7 +149,7 @@ class Constants:
     QUIT_WAIT_TIME: float = 10.0  # 關閉前等待時間
     
     # 自動啟動配置
-    AUTO_START_DELAY: float = 120.0  # 自動啟動延遲時間（秒）= 2 分鐘
+    AUTO_START_DELAY: float = 60.0  # 自動啟動延遲時間（秒）= 1 分鐘
     AUTO_START_COMMAND: str = "r 4"  # 自動啟動命令（執行 4 小時規則）
     
     # =========================================================================
@@ -201,8 +189,8 @@ class Constants:
     # 代理商配置
     # =========================================================================
     # TODO: 更新為正式代理商網址
-    # LOGIN_PAGE: str = "https://www.fin88.app/"
-    LOGIN_PAGE: str = "https://richpanda.vip"  # --- IGNORE ---
+    LOGIN_PAGE: str = "https://www.fin88.app/"
+    # LOGIN_PAGE: str = "https://richpanda.vip"  # --- IGNORE ---
 
     # =========================================================================
     # 遊戲配置
@@ -213,12 +201,19 @@ class Constants:
     
     # 遊戲識別碼（根據版本自動設定）
     GAME_PATTERN_SETTE_1: str = "ATG-egyptian-mythology"
-    GAME_PATTERN_SETTE_2: str = "feb91c659e820a0405aabc1520c24d12"
+    GAME_PATTERN_SETTE_2_FIN88: str = "feb91c659e820a0405aabc1520c24d12"
+    GAME_PATTERN_SETTE_2_RICHPANDA: str = "af48d779dc07d08d07a526d0076db801"
     
     @classmethod
     def get_game_pattern(cls) -> str:
         """取得當前遊戲種類的識別碼。"""
-        return cls.GAME_PATTERN_SETTE_1 if cls.IS_SETTE_1 else cls.GAME_PATTERN_SETTE_2
+        if cls.IS_SETTE_1:
+            return cls.GAME_PATTERN_SETTE_1
+        else:
+            # 根據 LOGIN_PAGE 決定 sett2 的識別碼
+            if "richpanda" in cls.LOGIN_PAGE.lower():
+                return cls.GAME_PATTERN_SETTE_2_RICHPANDA
+            return cls.GAME_PATTERN_SETTE_2_FIN88
     
     # =========================================================================
     # 登入相關 XPath
