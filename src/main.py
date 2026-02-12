@@ -23,9 +23,21 @@
         $ python main_refactor.py
 
 版本資訊:
-    版本: 2.0.0
+    版本: 2.0.1
     作者: 凡臻科技
     授權: MIT License
+
+版本歷程:
+    2.0.1 (2026-02-12):
+        - 修復: 暫停規則執行(p)後，手動指令(如 b、a)失效的問題
+        - 原因: _stop_rule_execution 未重置 _stop_event，導致後續操作被誤判為已停止
+    
+    2.0.0 (2026-02-01):
+        - 重構: 全面模組化架構設計
+        - 新增: 多視窗同步操作功能
+        - 新增: 智慧圖片識別系統
+        - 新增: 互動式控制面板
+        - 新增: 錯誤監控與自動恢復機制
 
 """
 
@@ -110,7 +122,7 @@ class Constants:
     # =========================================================================
     # 版本資訊
     # =========================================================================
-    VERSION: str = "2.0.0"
+    VERSION: str = "2.0.1"
     SYSTEM_NAME: str = "戰神賽特自動化系統"
     
     # =========================================================================
@@ -196,7 +208,7 @@ class Constants:
     # =========================================================================
     # 遊戲種類選擇：True = 賽特一, False = 賽特二
     IS_SETTE_1: bool = True
-    IS_SETTE_1: bool = False  # --- IGNORE ---
+    # IS_SETTE_1: bool = False  # --- IGNORE ---
     
     # 遊戲識別碼（根據版本自動設定）
     GAME_PATTERN_SETTE_1: str = "ATG-egyptian-mythology"
@@ -3939,6 +3951,9 @@ class GameControlCenter:
         # 清理時間控制狀態
         self._rule_execution_start_time = None
         self._rule_execution_max_hours = None
+        
+        # 重置停止事件，確保後續手動指令可以正常執行
+        self._stop_event.clear()
         
         self.logger.info("規則執行已停止")
 
