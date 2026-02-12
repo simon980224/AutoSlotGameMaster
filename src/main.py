@@ -201,7 +201,8 @@ class Constants:
     # 代理商配置
     # =========================================================================
     # TODO: 更新為正式代理商網址
-    LOGIN_PAGE: str = "https://www.fin88.app/"
+    # LOGIN_PAGE: str = "https://www.fin88.app/"
+    LOGIN_PAGE: str = "https://richpanda.vip"  # --- IGNORE ---
 
     # =========================================================================
     # 遊戲配置
@@ -230,7 +231,7 @@ class Constants:
     PASSWORD_INPUT: str = "//input[@placeholder='請輸入您的登入密碼']"
     LOGIN_BUTTON: str = (
         "//button[contains(@class, 'custom-button') and @type='submit' "
-        "and text()='登入遊戲']"
+        "and (text()='登入遊戲' or .//span[text()='登入遊戲'])]"
     )
     
     # =========================================================================
