@@ -1,87 +1,55 @@
 # ============================================================================
 # AutoSlotGameMaster - Python Dependencies
 # ============================================================================
-# 專案版本: 1.0.0
+# 專案版本: 2.0.0
 # Python 版本: 3.8+
-# 最後更新: 2025-01-22
+# 最後更新: 2026-02-12
 # ============================================================================
 
-# 核心依賴
+# 核心依賴 - 瀏覽器自動化
 # ----------------------------------------------------------------------------
+selenium>=4.25.0              # 瀏覽器自動化框架（Chrome DevTools Protocol）
+webdriver-manager>=4.0.0      # ChromeDriver 自動管理
 
-# Selenium - 瀏覽器自動化框架
-# 用於控制 Chrome 瀏覽器、執行 JavaScript、使用 Chrome DevTools Protocol
-selenium>=4.25.0
-
-# WebDriver Manager - 自動管理瀏覽器驅動程式
-# 當本地 chromedriver 不可用時，自動下載對應版本的驅動程式
-webdriver-manager>=4.0.0
-
-# 圖片處理
+# 核心依賴 - 圖片識別
 # ----------------------------------------------------------------------------
-
-# Pillow (PIL Fork) - Python 圖片處理函式庫
-# 用於截圖處理、圖片裁切、格式轉換
-pillow>=10.0.0
-
-# OpenCV - 電腦視覺函式庫
-# 用於模板匹配（matchTemplate）、圖片識別、座標定位
-opencv-python>=4.8.0
-
-# NumPy - 數值計算函式庫
-# 用於圖片陣列處理、OpenCV 依賴項
-numpy>=1.24.0
+pillow>=10.0.0                # 截圖處理、圖片裁切
+opencv-python>=4.8.0          # 模板匹配（cv2.matchTemplate）
+numpy>=1.24.0                 # 圖片陣列處理
 
 # 打包工具（開發用）
 # ----------------------------------------------------------------------------
-
-# PyInstaller - Python 應用程式打包工具
-# 用於將專案打包成獨立的可執行檔（.exe）
-# 執行: pip install pyinstaller
-# 使用: python build.py
-pyinstaller>=6.0.0
+pyinstaller>=6.0.0            # 打包成執行檔（python build.py）
 
 # ============================================================================
-# 安裝說明
+# 快速開始
 # ============================================================================
-# 
-# 1. 基本安裝（執行應用程式）:
-#    pip install -r requirements.txt
 #
-# 2. 開發環境安裝（包含打包工具）:
-#    pip install -r requirements.txt
-#    pip install pyinstaller>=6.0.0
+# 安裝依賴:
+#   pip install -r requirements.txt
 #
-# 3. 使用虛擬環境（建議）:
-#    python -m venv venv
-#    source venv/bin/activate  # macOS/Linux
-#    venv\Scripts\activate     # Windows
-#    pip install -r requirements.txt
+# 使用虛擬環境（建議）:
+#   python -m venv venv
+#   source venv/bin/activate    # macOS/Linux
+#   venv\Scripts\activate       # Windows
+#   pip install -r requirements.txt
 #
 # ============================================================================
 # 版本相容性
 # ============================================================================
 #
-# Python 3.8+  - 必須（使用了 Protocol, TypedDict 等特性）
-# Chrome 131+  - 建議（針對新版本優化）
-# ChromeDriver - 需與 Chrome 版本匹配
+# Python 3.8+   - 必須（Protocol, dataclass 等特性）
+# Chrome 131+   - 建議
+# ChromeDriver  - 由 webdriver-manager 自動管理
 #
 # ============================================================================
 # 故障排除
 # ============================================================================
 #
-# 1. OpenCV 安裝問題:
-#    - Windows: pip install opencv-python --only-binary :all:
-#    - macOS: brew install opencv (可選)
-#    - Linux: apt-get install python3-opencv
+# OpenCV 安裝失敗:
+#   pip install opencv-python --only-binary :all:
 #
-# 2. NumPy 版本衝突:
-#    - 確保 NumPy 版本 >= 1.24.0
-#    - 如遇相容性問題: pip install numpy --upgrade
-#
-# 3. Selenium 驅動問題:
-#    - 確認 chromedriver 在專案根目錄
-#    - macOS/Linux: chmod +x chromedriver
-#    - 或讓 webdriver-manager 自動下載
+# NumPy 版本衝突:
+#   pip install numpy --upgrade
 #
 # ============================================================================
