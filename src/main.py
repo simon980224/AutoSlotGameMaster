@@ -1908,7 +1908,7 @@ class BrowserHelper:
     
     # JavaScript 程式碼常數（避免重複定義）
     JS_CLOSE_POPUPS: str = """
-        const popups = document.querySelectorAll('.popup-container, .popup-wrap, .popup-account-container');
+        const popups = document.querySelectorAll('.popup-container, .popup-wrap, .popup-account-container, .ads-pop-container');
         popups.forEach(popup => {
             popup.style.display = 'none';
             popup.style.visibility = 'hidden';
