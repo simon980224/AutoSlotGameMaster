@@ -1,6 +1,6 @@
 MIT License
 
-Copyright (c) 2025 simon980224
+Copyright (c) 2025-2026 凡臻科技
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,93 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
-================================================================================
-                          AutoSlotGameMaster
-                    金富翁遊戲自動化系統 - MIT 授權
-================================================================================
-
-專案名稱: AutoSlotGameMaster
-版本: 1.0.0
-作者: simon980224
-專案網址: https://github.com/simon980224/AutoSlotGameMaster
-
-本軟體採用 MIT 授權條款，這意味著：
-
-✅ 允許的使用方式：
-  - 商業使用 (Commercial use)
-  - 修改 (Modification)
-  - 分發 (Distribution)
-  - 私人使用 (Private use)
-
-⚠️ 條件限制：
-  - 必須在軟體副本中包含授權聲明和版權聲明
-  - 必須保留原作者的版權資訊
-
-❌ 責任限制：
-  - 軟體以「現狀」提供，不提供任何明示或暗示的保證
-  - 作者不對使用本軟體造成的任何損害負責
-
-================================================================================
-                              免責聲明
-================================================================================
-
-重要提示：
-
-1. 教育用途
-   本專案僅供學習、研究和技術交流使用。
-
-2. 使用者責任
-   使用者需自行承擔使用本軟體的所有風險和責任。
-   請確保您的使用方式符合當地法律法規。
-
-3. 服務條款
-   請遵守目標網站的使用條款和服務協議。
-   自動化操作可能違反某些網站的服務條款。
-
-4. 數據安全
-   請妥善保管您的帳號密碼和 Proxy 資訊。
-   建議定期更換密碼並使用強密碼。
-
-5. 不當使用
-   禁止將本軟體用於任何非法、不道德或違反服務條款的目的。
-   作者對任何不當使用行為不承擔責任。
-
-================================================================================
-                            第三方依賴授權
-================================================================================
-
-本專案使用以下開源軟體，各自遵循其原始授權條款：
-
-• Selenium (Apache License 2.0)
-  https://github.com/SeleniumHQ/selenium
-
-• OpenCV (Apache License 2.0)
-  https://github.com/opencv/opencv-python
-
-• Pillow (HPND License)
-  https://github.com/python-pillow/Pillow
-
-• NumPy (BSD License)
-  https://github.com/numpy/numpy
-
-• webdriver-manager (Apache License 2.0)
-  https://github.com/SergeyPirogov/webdriver_manager
-
-• PyInstaller (GPL License with exception)
-  https://github.com/pyinstaller/pyinstaller
-
-感謝所有開源專案的貢獻者！
-
-================================================================================
-                              聯絡方式
-================================================================================
-
-如有問題、建議或發現 Bug，請透過以下方式聯絡：
-
-• GitHub Issues: https://github.com/simon980224/AutoSlotGameMaster/issues
-• GitHub Discussions: https://github.com/simon980224/AutoSlotGameMaster/discussions
-
-================================================================================
-
-最後更新日期: 2025-01-22
