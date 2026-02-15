@@ -165,11 +165,14 @@ class Constants:
     PROXY_SELECT_TIMEOUT = 1.0
     
     # URL 配置
-    # LOGIN_PAGE = "https://m.jfw-win.com/#/login?redirect=%2Fhome%2Fpage"
-    LOGIN_PAGE = "https://www.sf-16888.com/#/login?redirect=%2Fhome%2Fpage"
+    LOGIN_PAGE = "https://m.jfw-win.com/#/login?redirect=%2Fhome%2Fpage"
+    GAME_PAGE = "https://m.jfw-win.com/#/home/play-game?url=https%3A%2F%2Fplay.godeezone2.com%2Fegames%2F0d867f78041db6ae402cde213e5ebab12b8d6f98%2Fgame%2F%3Ft%3D01b9806d8b23405e9978cf5fed96e363%26gn%3Degyptian-mythology%26l%3Dzh-tw%26ct%3Dslot%26gt%3Dslot-erase-any-times-1%26socket_url%3Dsocket.godeezone2.com%26ts%3D1771030967941%26view_mode%3Dlandscape%26wv%3Dundefined%26gv%3D260120&factory_code=ATG&game_code=egyptian-mythology"
+    # GAME_PAGE = "https://m.jfw-win.com/#/home/play-game?url=https%3A%2F%2Fplay.godeezone2.com%2Fegames%2F2b4bc379f93f9c6c0dc2f9c09c95ea96b6b84372%2Fgame%2F%3Ft%3Dc9b17489f2b549ff9be68ff6422b34cc%26gn%3Dgolden-seth%26l%3Dzh-tw%26ct%3Dslot%26gt%3Dslot-erase-any-times-2%26socket_url%3Dsocket.godeezone2.com%26ts%3D1771031036431%26view_mode%3Dlandscape%26wv%3D2%26gv%3D260204&factory_code=ATG&game_code=golden-seth"
+
+    # LOGIN_PAGE = "https://www.sf-16888.com/#/login?redirect=%2Fhome%2Fpage"
     # GAME_PAGE = "https://www.sf-16888.com/#/home/loding?game_code=egyptian-mythology&factory_code=ATG&state=true&name=%E6%88%B0%E7%A5%9E%E8%B3%BD%E7%89%B9"
-    GAME_PAGE = "https://www.sf-16888.com/#/home/loding?game_code=golden-seth&factory_code=ATG&state=true&name=戰神賽特2%20覺醒之力"
-    
+    # GAME_PAGE = "https://www.sf-16888.com/#/home/loding?game_code=golden-seth&factory_code=ATG&state=true&name=戰神賽特2%20覺醒之力"
+
     # 頁面元素選擇器
     USERNAME_INPUT = "//input[@placeholder='請輸入帳號']"
     PASSWORD_INPUT = "//input[@placeholder='請輸入密碼']"
@@ -313,6 +316,14 @@ class Constants:
     BETSIZE_CROP_MARGIN_X = 40  # 金額模板水平裁切邊距
     BETSIZE_CROP_MARGIN_Y = 10  # 金額模板垂直裁切邊距
     TEMPLATE_CROP_MARGIN = 20    # 通用模板裁切邊距（用於 lobby_confirm、error_message 等）
+    
+    # Cloudflare Turnstile 驗證配置
+    CLOUDFLARE_IFRAME_XPATH = "//iframe[contains(@src, 'challenges.cloudflare.com') or contains(@title, 'cloudflare')]"  # Cloudflare iframe 選擇器
+    CLOUDFLARE_CHECKBOX_SELECTOR = "input[type='checkbox']"  # Cloudflare checkbox CSS 選擇器
+    CLOUDFLARE_BODY_SELECTOR = "body"  # Cloudflare iframe body 選擇器
+    CLOUDFLARE_WAIT_TIMEOUT = 10  # 等待 Cloudflare iframe 出現的超時時間（秒）
+    CLOUDFLARE_CHECKBOX_WAIT = 3  # 等待 checkbox 可點擊的時間（秒）
+    CLOUDFLARE_COMPLETE_WAIT = 5  # 點擊後等待驗證完成的時間（秒）
     
     # 遊戲金額配置（使用 frozenset 提升查詢效率）
     GAME_BETSIZE = frozenset((
@@ -1814,6 +1825,85 @@ class SyncBrowserOperator:
             操作結果列表
         """
         return self.navigate_all(browser_contexts, Constants.LOGIN_PAGE, timeout)
+    
+    def handle_cloudflare_all(
+        self,
+        browser_contexts: List[BrowserContext],
+        timeout: Optional[float] = None
+    ) -> List[OperationResult]:
+        """同步處理所有瀏覽器的 Cloudflare Turnstile 驗證。
+        
+        自動檢測並點擊 Cloudflare 驗證 checkbox。
+        如果沒有 Cloudflare 驗證則跳過。
+        
+        Args:
+            browser_contexts: 瀏覽器上下文列表
+            timeout: 超時時間
+            
+        Returns:
+            操作結果列表
+        """
+        def cloudflare_operation(context: BrowserContext, index: int, total: int) -> bool:
+            driver = context.driver
+            
+            try:
+                # 嘗試查找 Cloudflare iframe
+                try:
+                    cloudflare_iframe = WebDriverWait(driver, Constants.CLOUDFLARE_WAIT_TIMEOUT).until(
+                        EC.presence_of_element_located((By.XPATH, Constants.CLOUDFLARE_IFRAME_XPATH))
+                    )
+                except:
+                    # 沒有找到 Cloudflare 驗證，直接返回成功
+                    self.logger.info(f"瀏覽器 {index}/{total}: 未檢測到 Cloudflare 驗證，跳過")
+                    return True
+                
+                self.logger.info(f"瀏覽器 {index}/{total}: 檢測到 Cloudflare 驗證，嘗試點擊...")
+                
+                # 切換到 Cloudflare iframe
+                driver.switch_to.frame(cloudflare_iframe)
+                
+                try:
+                    # 等待並點擊 checkbox
+                    time.sleep(Constants.CLOUDFLARE_CHECKBOX_WAIT)
+                    
+                    # 嘗試點擊 checkbox（方法 1：直接查找 checkbox）
+                    try:
+                        checkbox = driver.find_element(By.CSS_SELECTOR, Constants.CLOUDFLARE_CHECKBOX_SELECTOR)
+                        checkbox.click()
+                        self.logger.info(f"瀏覽器 {index}/{total}: 已點擊 Cloudflare checkbox")
+                    except:
+                        # 方法 2：點擊 iframe 中的 body 區域（某些版本的 Turnstile）
+                        try:
+                            body = driver.find_element(By.CSS_SELECTOR, Constants.CLOUDFLARE_BODY_SELECTOR)
+                            body.click()
+                            self.logger.info(f"瀏覽器 {index}/{total}: 已點擊 Cloudflare 區域")
+                        except:
+                            self.logger.warning(f"瀏覽器 {index}/{total}: 無法點擊 Cloudflare 元素")
+                    
+                    # 等待驗證完成
+                    time.sleep(Constants.CLOUDFLARE_COMPLETE_WAIT)
+                    
+                finally:
+                    # 切回主頁面
+                    driver.switch_to.default_content()
+                
+                return True
+                
+            except Exception as e:
+                self.logger.warning(f"瀏覽器 {index}/{total}: Cloudflare 處理異常 - {e}")
+                # 確保切回主頁面
+                try:
+                    driver.switch_to.default_content()
+                except:
+                    pass
+                return True  # 即使出錯也返回 True，不阻塞後續流程
+        
+        return self.execute_sync(
+            browser_contexts,
+            cloudflare_operation,
+            "Cloudflare 驗證處理",
+            timeout=timeout
+        )
     
     def navigate_to_game_page(
         self,
@@ -6076,6 +6166,16 @@ class AutoSlotGameApp:
                 self.browser_contexts
             )
             self.logger.info("[成功] 登入頁面載入完成")
+            self.logger.info("")
+            time.sleep(Constants.DEFAULT_WAIT_SECONDS)
+            
+            # 步驟 5.5: 處理 Cloudflare 驗證（如有）
+            self.logger.info("【步驟 5.5/8】處理 Cloudflare 驗證")
+            self.logger.info("")
+            cloudflare_results = self.browser_operator.handle_cloudflare_all(
+                self.browser_contexts
+            )
+            self.logger.info("[成功] Cloudflare 驗證處理完成")
             self.logger.info("")
             time.sleep(Constants.DEFAULT_WAIT_SECONDS)
             
