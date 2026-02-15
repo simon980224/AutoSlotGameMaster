@@ -23,7 +23,7 @@
         $ python main_refactor.py
 
 版本資訊:
-    版本: 2.0.2
+    版本: 2.0.3
     作者: 凡臻科技
     授權: MIT License
 
@@ -110,7 +110,7 @@ class Constants:
     # =========================================================================
     # 版本資訊
     # =========================================================================
-    VERSION: str = "2.0.1"
+    VERSION: str = "2.0.3"
     SYSTEM_NAME: str = "戰神賽特自動化系統"
     
     # =========================================================================
@@ -301,7 +301,7 @@ class Constants:
     # =========================================================================
     # 控制面板配置
     # =========================================================================
-    AUTO_SKIP_CLICK_INTERVAL: int = 30
+    AUTO_SKIP_CLICK_INTERVAL: int = 10
     ERROR_MONITOR_INTERVAL: float = 3.0  # 錯誤訊息監控間隔（秒）
     BLACKSCREEN_CONSECUTIVE_THRESHOLD: int = 5  # 黑屏連續檢測次數閾值（達到後導航到登入頁）
     
@@ -2900,6 +2900,9 @@ class GameControlCenter:
         # 自動啟動控制
         self._auto_start_timer: Optional[threading.Timer] = None
         self._user_has_input: bool = False
+        
+        # 自動跳過點擊暫停控制（金額調整期間暫停）
+        self._skip_click_paused: bool = False
 
     # -------------------------------------------------------------------------
     # 通用輔助方法
@@ -3118,7 +3121,11 @@ class GameControlCenter:
                     last_skip_click_time = current_time
                     skip_click_count += 1
                     
-                    # 對所有活躍瀏覽器執行跳過點擊（排除正在恢復中的）
+                    # 如果正在調整金額，跳過自動點擊
+                    if self._skip_click_paused:
+                        continue
+                    
+                    # 對所有活躍瀏覽器執行按空白鍵（排除正在恢復中的）
                     for bt in active_browsers:
                         if self._error_monitor_stop_event.is_set():
                             break
@@ -3126,22 +3133,12 @@ class GameControlCenter:
                             if not bt.is_browser_alive() or not bt.context:
                                 continue
                             
-                            def skip_click_task(context: BrowserContext) -> bool:
-                                """執行跳過點擊。"""
-                                driver = context.driver
-                                rect = BrowserHelper.get_canvas_rect(driver)
-                                if not rect:
-                                    return False
-                                
-                                # 使用 GAME_LOGIN 按鈕座標作為跳過點擊位置
-                                BrowserHelper.click_canvas_position(
-                                    driver, rect,
-                                    Constants.GAME_LOGIN_BUTTON_X_RATIO,
-                                    Constants.GAME_LOGIN_BUTTON_Y_RATIO
-                                )
+                            def press_space_task(context: BrowserContext) -> bool:
+                                """執行按空白鍵。"""
+                                BrowserHelper.execute_cdp_space_key(context.driver)
                                 return True
                             
-                            bt.execute_task(skip_click_task, timeout=5)
+                            bt.execute_task(press_space_task, timeout=5)
                         except Exception:
                             # 靜默處理錯誤，避免日誌過多
                             pass
@@ -4322,25 +4319,32 @@ class GameControlCenter:
             self.logger.error("沒有可用的瀏覽器")
             return False
         
+        # 暫停自動跳過點擊，避免在調整金額期間觸發下注
+        self._skip_click_paused = True
+        
         # 使用 ThreadPoolExecutor 同步並行調整所有瀏覽器
         results = {}
-        with ThreadPoolExecutor(max_workers=len(active_browsers)) as executor:
-            futures = {
-                executor.submit(
-                    self._image_detector.adjust_betsize,
-                    bt.context.driver,
-                    target_amount,
-                    self._stop_event  # 傳入停止事件
-                ): bt for bt in active_browsers
-            }
-            
-            for future in futures:
-                bt = futures[future]
-                try:
-                    results[bt.index] = future.result()
-                except Exception as e:
-                    self.logger.error(f"瀏覽器 {bt.index} 調整金額失敗: {e}")
-                    results[bt.index] = False
+        try:
+            with ThreadPoolExecutor(max_workers=len(active_browsers)) as executor:
+                futures = {
+                    executor.submit(
+                        self._image_detector.adjust_betsize,
+                        bt.context.driver,
+                        target_amount,
+                        self._stop_event  # 傳入停止事件
+                    ): bt for bt in active_browsers
+                }
+                
+                for future in futures:
+                    bt = futures[future]
+                    try:
+                        results[bt.index] = future.result()
+                    except Exception as e:
+                        self.logger.error(f"瀏覽器 {bt.index} 調整金額失敗: {e}")
+                        results[bt.index] = False
+        finally:
+            # 恢復自動跳過點擊
+            self._skip_click_paused = False
         
         # 統計結果
         success_count = sum(1 for v in results.values() if v)
@@ -4350,8 +4354,8 @@ class GameControlCenter:
             self.logger.info(f"金額調整完成: 全部 {success_count} 個瀏覽器成功")
             return True
         else:
-            self.logger.warning(f"部分完成: {success_count}/{total} 個瀏覽器成功")
-            return success_count > 0
+            self.logger.error(f"金額調整失敗: 僅 {success_count}/{total} 個瀏覽器成功，必須全部成功才能繼續")
+            return False
 
     def _execute_auto_spin_for_all(self, spin_count: int) -> None:
         """對所有瀏覽器執行自動旋轉設定。
