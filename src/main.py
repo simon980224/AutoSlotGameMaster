@@ -301,7 +301,7 @@ class Constants:
     # =========================================================================
     # 控制面板配置
     # =========================================================================
-    AUTO_SKIP_CLICK_INTERVAL: int = 10
+    AUTO_SKIP_CLICK_INTERVAL: int = 30
     ERROR_MONITOR_INTERVAL: float = 3.0  # 錯誤訊息監控間隔（秒）
     BLACKSCREEN_CONSECUTIVE_THRESHOLD: int = 5  # 黑屏連續檢測次數閾值（達到後導航到登入頁）
     
