@@ -110,7 +110,7 @@ class Constants:
     # =========================================================================
     # 版本資訊
     # =========================================================================
-    VERSION: str = "2.0.3"
+    VERSION: str = "2.0.4"
     SYSTEM_NAME: str = "戰神賽特自動化系統"
     
     # =========================================================================
@@ -254,6 +254,10 @@ class Constants:
     GAME_LOGIN_BUTTON_Y_RATIO: float = 0.9
     GAME_CONFIRM_BUTTON_X_RATIO: float = 0.74
     GAME_CONFIRM_BUTTON_Y_RATIO: float = 0.85
+    
+    # 自動跳過點擊座標比例（關閉按鈕）
+    AUTO_SKIP_CLICK_X_RATIO: float = 0.5
+    AUTO_SKIP_CLICK_Y_RATIO: float = 0.72
     
     # =========================================================================
     # 自動旋轉按鈕座標比例
@@ -3125,7 +3129,7 @@ class GameControlCenter:
                     if self._skip_click_paused:
                         continue
                     
-                    # 對所有活躍瀏覽器執行按空白鍵（排除正在恢復中的）
+                    # 對所有活躍瀏覽器執行點擊關閉按鈕（排除正在恢復中的）
                     for bt in active_browsers:
                         if self._error_monitor_stop_event.is_set():
                             break
@@ -3133,12 +3137,22 @@ class GameControlCenter:
                             if not bt.is_browser_alive() or not bt.context:
                                 continue
                             
-                            def press_space_task(context: BrowserContext) -> bool:
-                                """執行按空白鍵。"""
-                                BrowserHelper.execute_cdp_space_key(context.driver)
+                            def skip_click_task(context: BrowserContext) -> bool:
+                                """執行點擊關閉按鈕。"""
+                                driver = context.driver
+                                rect = BrowserHelper.get_canvas_rect(driver)
+                                if not rect:
+                                    return False
+                                
+                                # 點擊關閉按鈕座標
+                                BrowserHelper.click_canvas_position(
+                                    driver, rect,
+                                    Constants.AUTO_SKIP_CLICK_X_RATIO,
+                                    Constants.AUTO_SKIP_CLICK_Y_RATIO
+                                )
                                 return True
                             
-                            bt.execute_task(press_space_task, timeout=5)
+                            bt.execute_task(skip_click_task, timeout=5)
                         except Exception:
                             # 靜默處理錯誤，避免日誌過多
                             pass
