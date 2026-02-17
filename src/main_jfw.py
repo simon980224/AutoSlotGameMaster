@@ -13,10 +13,11 @@
 - 完善的錯誤處理與重試機制
 
 作者: 凡臻科技
-版本: 1.22.2
+版本: 1.23.0
 Python: 3.8+
 
 版本歷史:
+- v1.23.0: 優化登入安全問題流程（生肖/星座選擇改用 JS 點擊避免被遮擋；減少等待時間加快登入速度；新增視窗標題編號功能 [1], [2]... 方便識別瀏覽器；互動式管理階段自動更新視窗標題）
 - v1.22.2: 修復多執行緒環境下的輸出緩衝阻塞問題（新增 FlushingStreamHandler 每次輸出後自動刷新；設置 PYTHONUNBUFFERED 環境變數；將 stdout/stderr 設為行緩衝模式，確保 'r' 功能運行時日誌能即時顯示，無需按 Enter）
 - v1.22.1: 提高圖片匹配閾值（MATCH_THRESHOLD 從 0.8 提高至 0.9，提升 lobby_login、lobby_confirm 等圖片檢測準確度，減少誤判）
 - v1.22.0: 新增免費遊戲類別 3（不朽覺醒 immortal_awake）並更新座標配置（類別 1 座標更新為 0.4,1.15；類別 2 座標更新為 0.53,1.25；新增類別 3 座標為 0.7,1.15；'f' 命令和規則解析支援三種類別選擇）
@@ -166,8 +167,8 @@ class Constants:
     
     # URL 配置
     LOGIN_PAGE = "https://m.jfw-win.com/#/login?redirect=%2Fhome%2Fpage"
-    GAME_PAGE = "https://m.jfw-win.com/#/home/play-game?url=https%3A%2F%2Fplay.godeezone2.com%2Fegames%2F0d867f78041db6ae402cde213e5ebab12b8d6f98%2Fgame%2F%3Ft%3D01b9806d8b23405e9978cf5fed96e363%26gn%3Degyptian-mythology%26l%3Dzh-tw%26ct%3Dslot%26gt%3Dslot-erase-any-times-1%26socket_url%3Dsocket.godeezone2.com%26ts%3D1771030967941%26view_mode%3Dlandscape%26wv%3Dundefined%26gv%3D260120&factory_code=ATG&game_code=egyptian-mythology"
-    # GAME_PAGE = "https://m.jfw-win.com/#/home/play-game?url=https%3A%2F%2Fplay.godeezone2.com%2Fegames%2F2b4bc379f93f9c6c0dc2f9c09c95ea96b6b84372%2Fgame%2F%3Ft%3Dc9b17489f2b549ff9be68ff6422b34cc%26gn%3Dgolden-seth%26l%3Dzh-tw%26ct%3Dslot%26gt%3Dslot-erase-any-times-2%26socket_url%3Dsocket.godeezone2.com%26ts%3D1771031036431%26view_mode%3Dlandscape%26wv%3D2%26gv%3D260204&factory_code=ATG&game_code=golden-seth"
+    GAME_PAGE = "https://m.jfw-win.com/#/home/loding?game_code=egyptian-mythology&factory_code=ATG&state=true&name=%E6%88%B0%E7%A5%9E%E8%B3%BD%E7%89%B9"
+    # GAME_PAGE = "https://m.jfw-win.com/#/home/loding?game_code=golden-seth&factory_code=ATG&state=true&name=戰神賽特2%20覺醒之力"
 
     # LOGIN_PAGE = "https://www.sf-16888.com/#/login?redirect=%2Fhome%2Fpage"
     # GAME_PAGE = "https://www.sf-16888.com/#/home/loding?game_code=egyptian-mythology&factory_code=ATG&state=true&name=%E6%88%B0%E7%A5%9E%E8%B3%BD%E7%89%B9"
@@ -182,6 +183,21 @@ class Constants:
     SEARCH_BUTTON = "//button[contains(@class, 'search-btn')]"
     SEARCH_INPUT = "//input[@placeholder='按換行鍵搜索']"
     GAME_XPATH = "//div[contains(@class, 'game-card-container') and .//div[contains(@style, 'ATG-egyptian-mythology.png')]]"  # 賽特1（第二個大卡片-戰神埃及神話）
+    
+    # 安全問題彈窗選擇器
+    SECURITY_QUESTION_ZODIAC_TIP = "//div[@class='tips' and contains(text(),'生肖')]"
+    SECURITY_QUESTION_CONSTELLATION_TIP = "//div[@class='tips' and contains(text(),'星座')]"
+    SECURITY_ZODIAC_ITEM_TEMPLATE = "//div[contains(@class,'zodiac-item') and .//span[text()='{zodiac}']]"  # 生肖選項模板
+    SECURITY_CONSTELLATION_ITEM_TEMPLATE = "//div[contains(@class,'zodiac-item') and .//span[text()='{constellation}']]"  # 星座選項模板
+    SECURITY_NEXT_BUTTON = "/html/body/div[2]/main/div/div[3]/div/div[3]/div[7]/div/div[2]/div/div[3]/div/div/span"
+    USER_AGREEMENT_CONFIRM = "//div[contains(@class,'confirm-btn')]//span[text()='確認']/.."
+    SECURITY_POPUP_WAIT = 2  # 等待安全問題彈窗出現的時間（秒）
+    SECURITY_CLICK_WAIT = 0.5  # 點擊後等待時間（秒）
+    
+    # 可用的生肖選項
+    VALID_ZODIACS = ('鼠', '牛', '虎', '兔', '龍', '蛇', '馬', '羊', '猴', '雞', '狗', '豬')
+    # 可用的星座選項
+    VALID_CONSTELLATIONS = ('水瓶座', '雙魚座', '白羊座', '金牛座', '雙子座', '巨蟹座', '獅子座', '處女座', '天秤座', '天蠎座', '射手座', '摩羯座')
     
     # 圖片檢測配置
     IMAGE_DIR = "img"
@@ -476,10 +492,20 @@ def cv2_imread_unicode(file_path: Union[str, Path], flags: int = cv2.IMREAD_COLO
 
 @dataclass(frozen=True)
 class UserCredential:
-    """使用者憑證資料結構（不可變）。"""
+    """使用者憑證資料結構（不可變）。
+    
+    Attributes:
+        username: 帳號
+        password: 密碼
+        proxy: Proxy 資訊（格式: IP:port:user:password）
+        zodiac: 生肖選項（鼠/牛/虎/兔/龍/蛇/馬/羊/猴/雞/狗/豬）
+        constellation: 星座選項（水瓶座/雙魚座/白羊座/金牛座/雙子座/巨蟹座/獅子座/處女座/天秤座/天蠎座/射手座/摩羯座）
+    """
     username: str
     password: str
     proxy: Optional[str] = None
+    zodiac: str = '鼠'  # 預設生肖
+    constellation: str = '水瓶座'  # 預設星座
     
     def __post_init__(self) -> None:
         """驗證資料完整性"""
@@ -921,8 +947,10 @@ class ConfigReader:
     ) -> List[UserCredential]:
         """讀取使用者憑證檔案。
         
-        檔案格式: 帳號,密碼,IP:port:user:password (首行為標題)
-        第三欄為 proxy 資訊，格式為 host:port:username:password
+        檔案格式: 帳號,密碼,IP:port:user:password,生肖,星座 (首行為標題)
+        - 第三欄為 proxy 資訊，格式為 host:port:username:password
+        - 第四欄為生肖（可選），預設為「鼠」
+        - 第五欄為星座（可選），預設為「水瓶座」
         
         Args:
             filename: 檔案名稱
@@ -950,10 +978,26 @@ class ConfigReader:
                 # 如果第三欄不存在或為空字串，則 proxy 為 None（不使用 proxy）
                 proxy = parts[2] if len(parts) >= 3 and parts[2].strip() else None
                 
+                # 第四欄是生肖，預設為「鼠」
+                zodiac = parts[3] if len(parts) >= 4 and parts[3].strip() else '鼠'
+                # 驗證生肖是否有效
+                if zodiac not in Constants.VALID_ZODIACS:
+                    self.logger.warning(f"第 {line_number} 行生肖「{zodiac}」無效，使用預設值「鼠」")
+                    zodiac = '鼠'
+                
+                # 第五欄是星座，預設為「水瓶座」
+                constellation = parts[4] if len(parts) >= 5 and parts[4].strip() else '水瓶座'
+                # 驗證星座是否有效
+                if constellation not in Constants.VALID_CONSTELLATIONS:
+                    self.logger.warning(f"第 {line_number} 行星座「{constellation}」無效，使用預設值「水瓶座」")
+                    constellation = '水瓶座'
+                
                 credentials.append(UserCredential(
                     username=username,
                     password=password,
-                    proxy=proxy
+                    proxy=proxy,
+                    zodiac=zodiac,
+                    constellation=constellation
                 ))  
                 
             except ValueError as e:
@@ -1953,6 +1997,68 @@ class SyncBrowserOperator:
             login_button = driver.find_element(By.XPATH, Constants.LOGIN_BUTTON)
             login_button.click()
             
+            # 等待安全問題彈窗出現
+            self.logger.info(f"瀏覽器 {index}/{total}: 開始處理登入流程...")
+            time.sleep(Constants.SECURITY_POPUP_WAIT)
+            
+            # 處理安全問題彈窗（生肖或星座）
+            # 使用每個帳號個別設定的生肖和星座
+            user_zodiac = credential.zodiac
+            user_constellation = credential.constellation
+            
+            try:
+                # 處理用戶協議彈窗（使用較短的超時）
+                try:
+                    confirm_button = WebDriverWait(driver, 2).until(
+                        EC.element_to_be_clickable((By.XPATH, Constants.USER_AGREEMENT_CONFIRM))
+                    )
+                    confirm_button.click()
+                    self.logger.info(f"瀏覽器 {index}/{total}: 點擊用戶協議「確認」")
+                    time.sleep(Constants.SECURITY_CLICK_WAIT)
+                except:
+                    pass
+
+                # 檢測是否為生肖問題
+                try:
+                    zodiac_tip = driver.find_element(By.XPATH, Constants.SECURITY_QUESTION_ZODIAC_TIP)
+                    if zodiac_tip:
+                        # 選擇用戶設定的生肖
+                        self.logger.info(f"瀏覽器 {index}/{total}: 檢測到生肖問題，選擇「{user_zodiac}」")
+                        zodiac_xpath = Constants.SECURITY_ZODIAC_ITEM_TEMPLATE.format(zodiac=user_zodiac)
+                        zodiac_option = driver.find_element(By.XPATH, zodiac_xpath)
+                        zodiac_option.click()
+                        # 使用 JS 點擊下一步（避免被遮擋）
+                        time.sleep(3)
+                        next_button = driver.find_element(By.XPATH, Constants.SECURITY_NEXT_BUTTON)
+                        driver.execute_script("arguments[0].click();", next_button)
+                        self.logger.info(f"瀏覽器 {index}/{total}: 生肖選擇完成，點擊「下一步」")
+                        time.sleep(Constants.SECURITY_CLICK_WAIT)
+                except Exception as e:
+                    if "檢測到生肖問題" in str(e) or "下一步" in str(e):
+                        self.logger.warning(f"瀏覽器 {index}/{total}: 生肖處理異常 - {e}")
+                
+                # 檢測是否為星座問題
+                try:
+                    constellation_tip = driver.find_element(By.XPATH, Constants.SECURITY_QUESTION_CONSTELLATION_TIP)
+                    if constellation_tip:
+                        # 選擇用戶設定的星座
+                        self.logger.info(f"瀏覽器 {index}/{total}: 檢測到星座問題，選擇「{user_constellation}」")
+                        constellation_xpath = Constants.SECURITY_CONSTELLATION_ITEM_TEMPLATE.format(constellation=user_constellation)
+                        constellation_option = driver.find_element(By.XPATH, constellation_xpath)
+                        constellation_option.click()
+                        # 使用 JS 點擊下一步（避免被遮擋）
+                        time.sleep(3)
+                        next_button = driver.find_element(By.XPATH, Constants.SECURITY_NEXT_BUTTON)
+                        driver.execute_script("arguments[0].click();", next_button)
+                        self.logger.info(f"瀏覽器 {index}/{total}: 星座選擇完成，點擊「下一步」")
+                        time.sleep(Constants.SECURITY_CLICK_WAIT)
+                except Exception as e:
+                    if "檢測到星座問題" in str(e) or "下一步" in str(e):
+                        self.logger.warning(f"瀏覽器 {index}/{total}: 星座處理異常 - {e}")
+                
+            except Exception as e:
+                self.logger.warning(f"瀏覽器 {index}/{total}: 處理安全問題彈窗時發生異常 - {e}")
+            
             time.sleep(Constants.LOGIN_WAIT_TIME)  # 等待登入完成
             return True
         
@@ -2186,6 +2292,36 @@ class SyncBrowserOperator:
             browser_contexts,
             resize_and_position_operation,
             f"調整視窗大小為 {width}x{height} 並進行 {columns}列排列",
+            timeout=timeout
+        )
+    
+    def update_window_titles_all(
+        self,
+        browser_contexts: List[BrowserContext],
+        timeout: Optional[float] = None
+    ) -> List[OperationResult]:
+        """更新所有瀏覽器視窗標題，加入編號方便識別。
+        
+        Args:
+            browser_contexts: 瀏覽器上下文列表
+            timeout: 超時時間
+            
+        Returns:
+            操作結果列表
+        """
+        def update_title_operation(context: BrowserContext, index: int, total: int) -> bool:
+            # 等待頁面載入完成
+            WebDriverWait(context.driver, 10).until(
+                lambda d: d.execute_script("return document.readyState") == "complete"
+            )
+            # 在視窗標題前加上編號
+            context.driver.execute_script(f"document.title = '[{index}] ' + document.title.replace(/^\\[\\d+\\] /, '');")
+            return True
+        
+        return self.execute_sync(
+            browser_contexts,
+            update_title_operation,
+            "更新視窗標題",
             timeout=timeout
         )
     
@@ -6137,6 +6273,118 @@ class AutoSlotGameApp:
         self.logger.info("")
         return contexts
     
+    def _interactive_browser_management(self) -> None:
+        """互動式瀏覽器管理。
+        
+        允許用戶選擇關閉特定瀏覽器或按 Enter 繼續下一步。
+        輸入 'q 編號' 關閉指定瀏覽器（如 'q 1' 或 'q 1,2,3'）。
+        直接按 Enter 繼續執行下一步。
+        """
+        # 先更新視窗標題，加入編號方便識別
+        self.browser_operator.update_window_titles_all(self.browser_contexts)
+        
+        self.logger.info("")
+        self.logger.info("=" * 60)
+        self.logger.info("【互動式瀏覽器管理】")
+        self.logger.info("=" * 60)
+        self.logger.info("")
+        self.logger.info("目前開啟的瀏覽器:")
+        for i, context in enumerate(self.browser_contexts, 1):
+            status = "運行中" if self._is_browser_alive(context.driver) else "已關閉"
+            self.logger.info(f"  瀏覽器 {i}: {context.credential.username} ({status})")
+        self.logger.info("")
+        self.logger.info("操作說明:")
+        self.logger.info("  q 編號   - 關閉指定瀏覽器（如: q 1 或 q 1,2,3）")
+        self.logger.info("  Enter    - 繼續執行下一步")
+        self.logger.info("")
+        
+        while True:
+            try:
+                print("請輸入指令: ", end="", flush=True)
+                user_input = input().strip()
+                
+                # 按 Enter 繼續下一步
+                if not user_input:
+                    self.logger.info("[繼續] 執行下一步...")
+                    self.logger.info("")
+                    break
+                
+                # 處理 'q' 指令關閉瀏覽器
+                if user_input.lower().startswith('q'):
+                    parts = user_input.split(maxsplit=1)
+                    if len(parts) < 2:
+                        self.logger.warning("[警告] 請指定要關閉的瀏覽器編號（如: q 1 或 q 1,2,3）")
+                        continue
+                    
+                    # 解析瀏覽器編號
+                    browser_nums_str = parts[1].replace(' ', '')
+                    try:
+                        browser_nums = [int(n.strip()) for n in browser_nums_str.split(',') if n.strip()]
+                    except ValueError:
+                        self.logger.warning("[警告] 無效的瀏覽器編號，請輸入數字")
+                        continue
+                    
+                    # 驗證並關閉瀏覽器
+                    closed_count = 0
+                    for num in browser_nums:
+                        if num < 1 or num > len(self.browser_contexts):
+                            self.logger.warning(f"[警告] 瀏覽器 {num} 不存在")
+                            continue
+                        
+                        context = self.browser_contexts[num - 1]
+                        if self._is_browser_alive(context.driver):
+                            try:
+                                context.driver.quit()
+                                self.logger.info(f"[成功] 瀏覽器 {num} ({context.credential.username}) 已關閉")
+                                closed_count += 1
+                            except Exception as e:
+                                self.logger.error(f"[錯誤] 關閉瀏覽器 {num} 失敗: {e}")
+                        else:
+                            self.logger.info(f"[提示] 瀏覽器 {num} 已經關閉")
+                    
+                    # 從列表中移除已關閉的瀏覽器
+                    self.browser_contexts = [
+                        ctx for ctx in self.browser_contexts 
+                        if self._is_browser_alive(ctx.driver)
+                    ]
+                    
+                    if closed_count > 0:
+                        self.logger.info(f"[資訊] 剩餘 {len(self.browser_contexts)} 個瀏覽器")
+                    
+                    # 如果沒有瀏覽器了，提示並結束
+                    if not self.browser_contexts:
+                        self.logger.warning("[警告] 所有瀏覽器都已關閉，程式將結束")
+                        raise BrowserCreationError("沒有可用的瀏覽器")
+                    
+                    self.logger.info("")
+                    continue
+                
+                else:
+                    self.logger.warning(f"[警告] 未知指令: {user_input}")
+                    self.logger.info("  輸入 'q 編號' 關閉瀏覽器，或按 Enter 繼續")
+                    
+            except EOFError:
+                self.logger.info("[繼續] 執行下一步...")
+                break
+            except KeyboardInterrupt:
+                self.logger.warning("\n[警告] 使用者中斷")
+                raise
+    
+    def _is_browser_alive(self, driver: WebDriver) -> bool:
+        """檢查瀏覽器是否仍然存活。
+        
+        Args:
+            driver: WebDriver 實例
+            
+        Returns:
+            瀏覽器是否存活
+        """
+        try:
+            _ = driver.current_url
+            return True
+        except Exception:
+            return False
+    
     def run(self) -> None:
         """執行主程式流程。
         
@@ -6169,15 +6417,18 @@ class AutoSlotGameApp:
             self.logger.info("")
             time.sleep(Constants.DEFAULT_WAIT_SECONDS)
             
-            # 步驟 5.5: 處理 Cloudflare 驗證（如有）
-            self.logger.info("【步驟 5.5/8】處理 Cloudflare 驗證")
-            self.logger.info("")
-            cloudflare_results = self.browser_operator.handle_cloudflare_all(
-                self.browser_contexts
-            )
-            self.logger.info("[成功] Cloudflare 驗證處理完成")
-            self.logger.info("")
-            time.sleep(Constants.DEFAULT_WAIT_SECONDS)
+            # # 步驟 5.5: 處理 Cloudflare 驗證（如有）
+            # self.logger.info("【步驟 5.5/8】處理 Cloudflare 驗證")
+            # self.logger.info("")
+            # cloudflare_results = self.browser_operator.handle_cloudflare_all(
+            #     self.browser_contexts
+            # )
+            # self.logger.info("[成功] Cloudflare 驗證處理完成")
+            # self.logger.info("")
+            # time.sleep(Constants.DEFAULT_WAIT_SECONDS)
+            
+            # 互動式瀏覽器管理（可關閉瀏覽器或繼續下一步）
+            self._interactive_browser_management()
             
             # 步驟 6: 執行登入操作（同步）
             self.logger.info("【步驟 6/8】執行登入操作")
@@ -6210,6 +6461,9 @@ class AutoSlotGameApp:
             )
             self.logger.info("[成功] 視窗排列完成")
             self.logger.info("")
+            
+            # 更新視窗標題（因導航後標題會被重置，需再次更新）
+            self.browser_operator.update_window_titles_all(self.browser_contexts)
             time.sleep(Constants.DEFAULT_WAIT_SECONDS)
             
             # 圖片檢測與遊戲流程
