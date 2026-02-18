@@ -23,7 +23,7 @@
         $ python main_refactor.py
 
 版本資訊:
-    版本: 2.0.5
+    版本: 2.0.6
     作者: 凡臻科技
     授權: MIT License
 
@@ -110,7 +110,7 @@ class Constants:
     # =========================================================================
     # 版本資訊
     # =========================================================================
-    VERSION: str = "2.0.5"
+    VERSION: str = "2.0.6"
     SYSTEM_NAME: str = "戰神賽特自動化系統"
     
     # =========================================================================
@@ -2909,9 +2909,6 @@ class GameControlCenter:
         # 自動啟動控制
         self._auto_start_timer: Optional[threading.Timer] = None
         self._user_has_input: bool = False
-        
-        # 自動跳過點擊暫停控制（金額調整期間暫停）
-        self._skip_click_paused: bool = False
 
     # -------------------------------------------------------------------------
     # 通用輔助方法
@@ -3129,10 +3126,6 @@ class GameControlCenter:
                 if current_time - last_skip_click_time >= Constants.AUTO_CLICK_INTERVAL:
                     last_skip_click_time = current_time
                     skip_click_count += 1
-                    
-                    # 如果正在調整金額，跳過自動點擊
-                    if self._skip_click_paused:
-                        continue
                     
                     # 對所有活躍瀏覽器執行點擊關閉按鈕（排除正在恢復中的）
                     for bt in active_browsers:
@@ -4382,32 +4375,25 @@ class GameControlCenter:
             self.logger.error("沒有可用的瀏覽器")
             return False
         
-        # 暫停自動跳過點擊，避免在調整金額期間觸發下注
-        self._skip_click_paused = True
-        
         # 使用 ThreadPoolExecutor 同步並行調整所有瀏覽器
         results = {}
-        try:
-            with ThreadPoolExecutor(max_workers=len(active_browsers)) as executor:
-                futures = {
-                    executor.submit(
-                        self._image_detector.adjust_betsize,
-                        bt.context.driver,
-                        target_amount,
-                        self._stop_event  # 傳入停止事件
-                    ): bt for bt in active_browsers
-                }
-                
-                for future in futures:
-                    bt = futures[future]
-                    try:
-                        results[bt.index] = future.result()
-                    except Exception as e:
-                        self.logger.error(f"瀏覽器 {bt.index} 調整金額失敗: {e}")
-                        results[bt.index] = False
-        finally:
-            # 恢復自動跳過點擊
-            self._skip_click_paused = False
+        with ThreadPoolExecutor(max_workers=len(active_browsers)) as executor:
+            futures = {
+                executor.submit(
+                    self._image_detector.adjust_betsize,
+                    bt.context.driver,
+                    target_amount,
+                    self._stop_event  # 傳入停止事件
+                ): bt for bt in active_browsers
+            }
+            
+            for future in futures:
+                bt = futures[future]
+                try:
+                    results[bt.index] = future.result()
+                except Exception as e:
+                    self.logger.error(f"瀏覽器 {bt.index} 調整金額失敗: {e}")
+                    results[bt.index] = False
         
         # 統計結果
         success_count = sum(1 for v in results.values() if v)
