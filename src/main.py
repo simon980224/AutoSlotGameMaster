@@ -23,7 +23,7 @@
         $ python main_refactor.py
 
 版本資訊:
-    版本: 2.0.3
+    版本: 2.0.5
     作者: 凡臻科技
     授權: MIT License
 
@@ -110,7 +110,7 @@ class Constants:
     # =========================================================================
     # 版本資訊
     # =========================================================================
-    VERSION: str = "2.0.4"
+    VERSION: str = "2.0.5"
     SYSTEM_NAME: str = "戰神賽特自動化系統"
     
     # =========================================================================
@@ -257,8 +257,12 @@ class Constants:
     
     # 自動跳過點擊座標比例（關閉按鈕）
     AUTO_SKIP_CLICK_X_RATIO: float = 0.5
-    AUTO_SKIP_CLICK_Y_RATIO: float = 0.72
+    AUTO_SKIP_CLICK_Y_RATIO: float = 0.38
     
+    # 自動關閉點擊座標比例
+    AUTO_CLOSE_CLICK_X_RATIO: float = 0.5
+    AUTO_CLOSE_CLICK_Y_RATIO: float = 0.72
+
     # =========================================================================
     # 自動旋轉按鈕座標比例
     # =========================================================================
@@ -305,7 +309,7 @@ class Constants:
     # =========================================================================
     # 控制面板配置
     # =========================================================================
-    AUTO_SKIP_CLICK_INTERVAL: int = 30
+    AUTO_CLICK_INTERVAL: int = 30
     ERROR_MONITOR_INTERVAL: float = 3.0  # 錯誤訊息監控間隔（秒）
     BLACKSCREEN_CONSECUTIVE_THRESHOLD: int = 5  # 黑屏連續檢測次數閾值（達到後導航到登入頁）
     
@@ -2900,6 +2904,7 @@ class GameControlCenter:
         # 規則執行時間控制
         self._rule_execution_start_time: Optional[float] = None
         self._rule_execution_max_hours: Optional[float] = None
+        self._time_monitor_thread: Optional[threading.Thread] = None
         
         # 自動啟動控制
         self._auto_start_timer: Optional[threading.Timer] = None
@@ -2987,7 +2992,7 @@ class GameControlCenter:
         在背景持續運行，每隔固定時間同步檢測所有瀏覽器：
         - 黑屏（BLACK_SCREEN）: 連續檢測到 BLACKSCREEN_CONSECUTIVE_THRESHOLD 次 → 導航到 LOGIN_PAGE
         - 錯誤訊息（ERROR_REMIND）: 檢測到 1 次 → 點擊 ERROR_CONFIRM 按鈕
-        - 自動跳過點擊：每隔 AUTO_SKIP_CLICK_INTERVAL 秒，對所有瀏覽器執行跳過點擊
+        - 自動跳過點擊：每隔 AUTO_CLICK_INTERVAL 秒，對所有瀏覽器執行跳過點擊
         
         檢測流程同步並行，恢復操作在獨立執行緒中非同步執行（不阻塞監控）。
         """
@@ -3119,9 +3124,9 @@ class GameControlCenter:
                         # 非同步啟動點擊執行緒
                         self._start_recovery_thread(bt, "error")
                 
-                # ===== 自動跳過點擊（每隔 AUTO_SKIP_CLICK_INTERVAL 秒執行一次）=====
+                # ===== 自動跳過點擊（每隔 AUTO_CLICK_INTERVAL 秒執行一次）=====
                 current_time = time.time()
-                if current_time - last_skip_click_time >= Constants.AUTO_SKIP_CLICK_INTERVAL:
+                if current_time - last_skip_click_time >= Constants.AUTO_CLICK_INTERVAL:
                     last_skip_click_time = current_time
                     skip_click_count += 1
                     
@@ -3144,11 +3149,17 @@ class GameControlCenter:
                                 if not rect:
                                     return False
                                 
-                                # 點擊關閉按鈕座標
+                                # 點擊跳過按鈕座標
                                 BrowserHelper.click_canvas_position(
                                     driver, rect,
                                     Constants.AUTO_SKIP_CLICK_X_RATIO,
                                     Constants.AUTO_SKIP_CLICK_Y_RATIO
+                                )
+                                # 點擊自動關閉座標
+                                BrowserHelper.click_canvas_position(
+                                    driver, rect,
+                                    Constants.AUTO_CLOSE_CLICK_X_RATIO,
+                                    Constants.AUTO_CLOSE_CLICK_Y_RATIO
                                 )
                                 return True
                             
@@ -3917,6 +3928,15 @@ class GameControlCenter:
         )
         self._rule_thread.start()
         self.rule_running = True
+        
+        # 如果設置了時間限制，啟動時間監控線程
+        if max_hours is not None:
+            self._time_monitor_thread = threading.Thread(
+                target=self._time_limit_monitor_loop,
+                daemon=True,
+                name="TimeLimitMonitorThread"
+            )
+            self._time_monitor_thread.start()
 
     def _stop_rule_execution(self) -> None:
         """停止規則執行。"""
@@ -3954,6 +3974,11 @@ class GameControlCenter:
         
         self.rule_running = False
         self._rule_thread = None
+        
+        # 停止時間監控線程
+        if self._time_monitor_thread and self._time_monitor_thread.is_alive():
+            self._time_monitor_thread.join(timeout=2.0)
+        self._time_monitor_thread = None
         
         # 清理時間控制狀態
         self._rule_execution_start_time = None
@@ -4067,6 +4092,11 @@ class GameControlCenter:
         self.logger.info("規則執行已停止")
         self.rule_running = False
         
+        # 停止時間監控線程
+        if self._time_monitor_thread and self._time_monitor_thread.is_alive():
+            self._time_monitor_thread.join(timeout=2.0)
+        self._time_monitor_thread = None
+        
         # 清理時間控制狀態
         self._rule_execution_start_time = None
         self._rule_execution_max_hours = None
@@ -4087,9 +4117,24 @@ class GameControlCenter:
         
         if elapsed_hours >= self._rule_execution_max_hours:
             self.logger.info(f"已達到執行時間上限 ({self._rule_execution_max_hours} 小時)，停止執行")
+            # 設置停止事件，讓所有正在執行的操作（如金額調整、自動按鍵）立即停止
+            self._stop_event.set()
             return True
         
         return False
+
+    def _time_limit_monitor_loop(self) -> None:
+        """時間限制監控循環（在獨立執行緒中運行）。
+        
+        定期檢查時間限制，確保即使在長時間等待中（如金額調整）
+        也能在時間到達時立即停止。
+        """
+        while self.rule_running and not self._stop_event.is_set():
+            # 檢查時間限制（會自動設置 _stop_event）
+            if self._check_time_limit():
+                break
+            # 每秒檢查一次
+            time.sleep(1.0)
 
     def _get_free_game_type_name(self, free_game_type: Optional[int]) -> str:
         """取得免費遊戲類別名稱。"""
@@ -4140,8 +4185,8 @@ class GameControlCenter:
         self.logger.info(Constants.LOG_SEPARATOR)
         self.logger.info("")
         
-        # 檢查停止信號
-        if self._stop_event.is_set():
+        # 檢查停止信號或時間限制
+        if self._stop_event.is_set() or self._check_time_limit():
             self.logger.info("[中斷] 收到停止信號，跳過當前規則")
             return
         
@@ -4150,8 +4195,8 @@ class GameControlCenter:
         if not self._adjust_all_browsers_betsize(rule.amount):
             return
         
-        # 檢查停止信號
-        if self._stop_event.is_set():
+        # 檢查停止信號或時間限制
+        if self._stop_event.is_set() or self._check_time_limit():
             self.logger.info("[中斷] 收到停止信號")
             return
         
@@ -4195,8 +4240,8 @@ class GameControlCenter:
         self.logger.info(Constants.LOG_SEPARATOR)
         self.logger.info("")
         
-        # 檢查停止信號
-        if self._stop_event.is_set():
+        # 檢查停止信號或時間限制
+        if self._stop_event.is_set() or self._check_time_limit():
             self.logger.info("[中斷] 收到停止信號，跳過當前規則")
             return
         
@@ -4205,8 +4250,8 @@ class GameControlCenter:
         if not self._adjust_all_browsers_betsize(rule.amount):
             return
         
-        # 檢查停止信號
-        if self._stop_event.is_set():
+        # 檢查停止信號或時間限制
+        if self._stop_event.is_set() or self._check_time_limit():
             self.logger.info("[中斷] 收到停止信號")
             return
         
@@ -4248,6 +4293,10 @@ class GameControlCenter:
             if self._stop_event.wait(timeout=check_interval):
                 break
             elapsed_time += check_interval
+            
+            # 檢查時間限制（會自動設置 _stop_event）
+            if self._check_time_limit():
+                break
             
             # 每 60 秒顯示一次剩餘時間
             if int(elapsed_time) % Constants.RULE_PROGRESS_INTERVAL == 0 and elapsed_time > 0:
@@ -4292,8 +4341,8 @@ class GameControlCenter:
         self.logger.info(Constants.LOG_SEPARATOR)
         self.logger.info("")
         
-        # 檢查停止信號
-        if self._stop_event.is_set():
+        # 檢查停止信號或時間限制
+        if self._stop_event.is_set() or self._check_time_limit():
             self.logger.info("[中斷] 收到停止信號，跳過當前規則")
             return
         
@@ -4302,8 +4351,8 @@ class GameControlCenter:
         if not self._adjust_all_browsers_betsize(rule.amount):
             return
         
-        # 檢查停止信號
-        if self._stop_event.is_set():
+        # 檢查停止信號或時間限制
+        if self._stop_event.is_set() or self._check_time_limit():
             self.logger.info("[中斷] 收到停止信號")
             return
         
