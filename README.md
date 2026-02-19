@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <a href="#"><img src="https://img.shields.io/badge/version-2.1.0-brightgreen.svg" alt="Version"></a>
+  <a href="#"><img src="https://img.shields.io/badge/version-2.2.0-brightgreen.svg" alt="Version"></a>
   <a href="#"><img src="https://img.shields.io/badge/python-3.8%2B-blue.svg" alt="Python"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License"></a>
   <a href="#"><img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg" alt="Platform"></a>
@@ -208,6 +208,14 @@ GAME_LOGIN_BUTTON_Y_RATIO: float = 0.9   # 相對於 canvas 高度
 ---
 
 ## 📜 版本歷程
+
+### 2.2.0 (2026-02-20)
+
+- 新增: 錯誤訊息處理後自動檢查 Canvas 是否存在
+- 新增: 若點擊錯誤確認後回到大廳，自動執行重新進入遊戲流程
+- 新增: `_check_canvas_exists` 方法 - 檢查 iframe 和 Canvas 元素存在性
+- 新增: `_handle_error_return_to_game` 方法 - 錯誤後回到大廳的恢復流程
+- 改進: `_handle_error_click_confirm` 現在會判斷是否需要重新進入遊戲
 
 ### 2.1.0 (2026-02-20)
 

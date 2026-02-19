@@ -23,7 +23,7 @@
         $ python main_refactor.py
 
 版本資訊:
-    版本: 2.1.0
+    版本: 2.2.0
     作者: 凡臻科技
     授權: MIT License
 
@@ -110,7 +110,7 @@ class Constants:
     # =========================================================================
     # 版本資訊
     # =========================================================================
-    VERSION: str = "2.1.0"
+    VERSION: str = "2.2.0"
     SYSTEM_NAME: str = "戰神賽特自動化系統"
     
     # =========================================================================
@@ -3215,21 +3215,26 @@ class GameControlCenter:
         thread.start()
     
     def _handle_error_click_confirm(self, bt: 'BrowserThread') -> None:
-        """處理錯誤訊息：點擊確認按鈕。
+        """處理錯誤訊息：點擊確認按鈕，並檢查是否回到大廳。
         
         當偵測到「錯誤訊息.png」時，切換到 iframe 並點擊確認按鈕座標。
+        點擊後檢查 Canvas 是否仍存在：
+        - 存在：繼續正常監控
+        - 不存在：表示已回到大廳，執行重新進入遊戲流程
+        
         包含網路容錯機制，失敗時自動重試。
         
         參數:
             bt: 發生錯誤的 BrowserThread 實例
         """
         username = bt.context.credential.username if bt.context else "Unknown"
+        browser_index = bt.index
         
         # 最多重試 MAX_RETRY_ATTEMPTS 次
         for attempt in range(Constants.MAX_RETRY_ATTEMPTS):
             try:
                 if attempt > 0:
-                    self.logger.debug(f"瀏覽器 {bt.index} 恢復流程重試第 {attempt + 1} 次...")
+                    self.logger.debug(f"瀏覽器 {browser_index} 恢復流程重試第 {attempt + 1} 次...")
                     time.sleep(Constants.RETRY_INTERVAL)
                 
                 def click_error_confirm_task(context: BrowserContext) -> bool:
@@ -3263,19 +3268,106 @@ class GameControlCenter:
                 
                 if result:
                     self.logger.info(
-                        f"瀏覽器 {bt.index} ({username}) 已點擊錯誤訊息確認按鈕"
+                        f"瀏覽器 {browser_index} ({username}) 已點擊錯誤訊息確認按鈕"
                     )
-                    return  # 成功，退出重試循環
+                    
+                    # 等待畫面切換後檢查 Canvas 是否仍存在
+                    time.sleep(Constants.SCREEN_SWITCH_WAIT)
+                    
+                    canvas_exists = self._check_canvas_exists(bt)
+                    
+                    if canvas_exists:
+                        self.logger.info(
+                            f"瀏覽器 {browser_index} ({username}) Canvas 仍存在，繼續監控"
+                        )
+                        return  # 正常結束，繼續監控
+                    else:
+                        self.logger.warning(
+                            f"瀏覽器 {browser_index} ({username}) Canvas 不存在，判斷已回到大廳，啟動重新進入遊戲流程..."
+                        )
+                        # 執行重新進入遊戲流程
+                        self._handle_error_return_to_game(bt)
+                        return
                 else:
-                    self.logger.warning(f"瀏覽器 {bt.index} ({username}) 無法找到 Canvas 元素")
+                    self.logger.warning(f"瀏覽器 {browser_index} ({username}) 無法找到 Canvas 元素")
                     
             except Exception as e:
                 if attempt < Constants.MAX_RETRY_ATTEMPTS - 1 and is_network_error(e):
-                    self.logger.warning(f"瀏覽器 {bt.index} ({username}) 點擊確認流程超時，準備重試...")
+                    self.logger.warning(f"瀏覽器 {browser_index} ({username}) 點擊確認流程超時，準備重試...")
                     continue
                 else:
-                    self.logger.error(f"瀏覽器 {bt.index} ({username}) 點擊確認流程失敗: {e}")
+                    self.logger.error(f"瀏覽器 {browser_index} ({username}) 點擊確認流程失敗: {e}")
                     return
+    
+    def _check_canvas_exists(self, bt: 'BrowserThread') -> bool:
+        """檢查 Canvas 元素是否存在。
+        
+        參數:
+            bt: BrowserThread 實例
+            
+        回傳:
+            Canvas 存在返回 True，否則返回 False
+        """
+        try:
+            def task(context: BrowserContext) -> bool:
+                driver = context.driver
+                
+                # 先嘗試切換到 iframe
+                try:
+                    driver.switch_to.default_content()
+                    iframe = WebDriverWait(driver, Constants.SHORT_WAIT).until(
+                        EC.presence_of_element_located((By.XPATH, Constants.GAME_IFRAME))
+                    )
+                    driver.switch_to.frame(iframe)
+                except Exception:
+                    # iframe 不存在，表示已回到大廳
+                    return False
+                
+                # 檢查 Canvas 是否存在
+                try:
+                    canvas_exists = driver.execute_script(
+                        f"return document.getElementById('{Constants.GAME_CANVAS}') !== null;"
+                    )
+                    return canvas_exists
+                except Exception:
+                    return False
+            
+            return bt.execute_task(task, timeout=5)
+        except Exception:
+            return False
+    
+    def _handle_error_return_to_game(self, bt: 'BrowserThread') -> None:
+        """處理錯誤訊息後回到大廳的情況：重新進入遊戲。
+        
+        執行流程：
+        1. 導航進入遊戲 (_recovery_navigate_to_game)
+        2. 執行圖片檢測流程 (_recovery_image_detection_flow)
+        
+        參數:
+            bt: BrowserThread 實例
+        """
+        username = bt.context.credential.username if bt.context else "Unknown"
+        browser_index = bt.index
+        
+        self.logger.info(f"瀏覽器 {browser_index} ({username}) 開始執行重新進入遊戲流程...")
+        
+        try:
+            # ===== 步驟 1: 進入遊戲 =====
+            self.logger.info(f"瀏覽器 {browser_index} 步驟 1/2: 進入遊戲")
+            if not self._recovery_navigate_to_game(bt):
+                self.logger.error(f"瀏覽器 {browser_index} ({username}) 進入遊戲失敗")
+                return
+            
+            # ===== 步驟 2: 執行圖片檢測流程 =====
+            self.logger.info(f"瀏覽器 {browser_index} 步驟 2/2: 執行圖片檢測流程")
+            if not self._recovery_image_detection_flow(bt):
+                self.logger.error(f"瀏覽器 {browser_index} ({username}) 圖片檢測流程失敗")
+                return
+            
+            self.logger.info(f"瀏覽器 {browser_index} ({username}) 重新進入遊戲完成")
+            
+        except Exception as e:
+            self.logger.error(f"瀏覽器 {browser_index} ({username}) 重新進入遊戲發生異常: {e}")
     
     def _handle_blackscreen_recovery(self, bt: 'BrowserThread') -> None:
         """處理黑屏恢復：完整的重新連線流程。
