@@ -23,7 +23,7 @@
         $ python main_refactor.py
 
 版本資訊:
-    版本: 2.0.6
+    版本: 2.1.0
     作者: 凡臻科技
     授權: MIT License
 
@@ -110,7 +110,7 @@ class Constants:
     # =========================================================================
     # 版本資訊
     # =========================================================================
-    VERSION: str = "2.0.6"
+    VERSION: str = "2.1.0"
     SYSTEM_NAME: str = "戰神賽特自動化系統"
     
     # =========================================================================
@@ -151,6 +151,7 @@ class Constants:
     # 自動啟動配置
     AUTO_START_DELAY: float = 60.0  # 自動啟動延遲時間（秒）= 1 分鐘
     AUTO_START_COMMAND: str = "r 4"  # 自動啟動命令（執行 4 小時規則）
+    AUTO_CLOSE_COUNTDOWN_SECONDS: float = 60.0  # 規則執行完畢後自動關閉倒數時間（秒）
     
     # =========================================================================
     # 網路容錯配置
@@ -2909,6 +2910,10 @@ class GameControlCenter:
         # 自動啟動控制
         self._auto_start_timer: Optional[threading.Timer] = None
         self._user_has_input: bool = False
+        
+        # 自動關閉倒數控制
+        self._auto_close_timer: Optional[threading.Timer] = None
+        self._time_limit_reached: bool = False
 
     # -------------------------------------------------------------------------
     # 通用輔助方法
@@ -4091,8 +4096,14 @@ class GameControlCenter:
         self._time_monitor_thread = None
         
         # 清理時間控制狀態
+        max_hours_was_set = self._rule_execution_max_hours is not None
         self._rule_execution_start_time = None
         self._rule_execution_max_hours = None
+        
+        # 如果是因為時間限制而結束，啟動自動關閉倒數計時
+        if self._time_limit_reached and max_hours_was_set:
+            self._time_limit_reached = False  # 重置標誌
+            self._start_auto_close_countdown()
 
     def _check_time_limit(self) -> bool:
         """檢查是否超過時間限制。
@@ -4112,6 +4123,8 @@ class GameControlCenter:
             self.logger.info(f"已達到執行時間上限 ({self._rule_execution_max_hours} 小時)，停止執行")
             # 設置停止事件，讓所有正在執行的操作（如金額調整、自動按鍵）立即停止
             self._stop_event.set()
+            # 標記是因為時間限制而結束
+            self._time_limit_reached = True
             return True
         
         return False
@@ -4128,6 +4141,46 @@ class GameControlCenter:
                 break
             # 每秒檢查一次
             time.sleep(1.0)
+
+    def _start_auto_close_countdown(self) -> None:
+        """啟動自動關閉倒數計時。
+        
+        當規則執行因時間限制結束後，開始倒數計時。
+        如果在倒數期間用戶沒有輸入任何命令，則自動關閉所有瀏覽器並退出。
+        """
+        # 取消之前的計時器（如果有）
+        self._cancel_auto_close_countdown()
+        
+        countdown_seconds = Constants.AUTO_CLOSE_COUNTDOWN_SECONDS
+        
+        self.logger.info("")
+        self.logger.info(Constants.LOG_SEPARATOR)
+        self.logger.info(f"⏰ 規則執行已完成，將在 {int(countdown_seconds)} 秒後自動關閉所有瀏覽器")
+        self.logger.info("   如需取消，請輸入任意命令")
+        self.logger.info(Constants.LOG_SEPARATOR)
+        self.logger.info("")
+        
+        def auto_close_browsers() -> None:
+            """自動關閉所有瀏覽器。"""
+            if self.running:
+                self.logger.info("")
+                self.logger.info(f"⏰ {int(countdown_seconds)} 秒已到，自動關閉所有瀏覽器...")
+                self.logger.info("")
+                # 調用關閉所有瀏覽器的邏輯
+                self._handle_quit_command('0')
+                # 停止控制面板
+                self.running = False
+        
+        self._auto_close_timer = threading.Timer(countdown_seconds, auto_close_browsers)
+        self._auto_close_timer.daemon = True
+        self._auto_close_timer.start()
+
+    def _cancel_auto_close_countdown(self) -> None:
+        """取消自動關閉倒數計時。"""
+        if self._auto_close_timer and self._auto_close_timer.is_alive():
+            self._auto_close_timer.cancel()
+            self._auto_close_timer = None
+            self.logger.info("[提示] 已取消自動關閉倒數計時")
 
     def _get_free_game_type_name(self, free_game_type: Optional[int]) -> str:
         """取得免費遊戲類別名稱。"""
@@ -5360,6 +5413,9 @@ class GameControlCenter:
                             self._auto_start_timer.cancel()
                             self.logger.info(f"[提示] 已取消自動執行 '{Constants.AUTO_START_COMMAND}' 命令")
                     
+                    # 取消自動關閉倒數計時（如果有）
+                    self._cancel_auto_close_countdown()
+                    
                     if command:
                         if not self.process_command(command):
                             break
@@ -5380,6 +5436,10 @@ class GameControlCenter:
             # 取消自動執行計時器
             if self._auto_start_timer and self._auto_start_timer.is_alive():
                 self._auto_start_timer.cancel()
+            
+            # 取消自動關閉倒數計時器
+            if self._auto_close_timer and self._auto_close_timer.is_alive():
+                self._auto_close_timer.cancel()
             
             # 確保停止所有自動操作
             if self.auto_press_running:
