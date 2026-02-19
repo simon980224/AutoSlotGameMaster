@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <a href="#"><img src="https://img.shields.io/badge/version-2.0.6-brightgreen.svg" alt="Version"></a>
+  <a href="#"><img src="https://img.shields.io/badge/version-2.1.0-brightgreen.svg" alt="Version"></a>
   <a href="#"><img src="https://img.shields.io/badge/python-3.8%2B-blue.svg" alt="Python"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License"></a>
   <a href="#"><img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg" alt="Platform"></a>
@@ -208,6 +208,12 @@ GAME_LOGIN_BUTTON_Y_RATIO: float = 0.9   # 相對於 canvas 高度
 ---
 
 ## 📜 版本歷程
+
+### 2.1.0 (2026-02-20)
+
+- 新增: 規則執行時間到達後，自動倒數 60 秒關閉所有瀏覽器
+- 新增: AUTO_CLOSE_COUNTDOWN_SECONDS 常量（預設 60 秒）
+- 改進: 倒數期間用戶輸入任何命令可取消自動關閉
 
 ### 2.0.6 (2026-02-18)
 
