@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <a href="#"><img src="https://img.shields.io/badge/version-2.2.0-brightgreen.svg" alt="Version"></a>
+  <a href="#"><img src="https://img.shields.io/badge/version-2.3.0-brightgreen.svg" alt="Version"></a>
   <a href="#"><img src="https://img.shields.io/badge/python-3.8%2B-blue.svg" alt="Python"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License"></a>
   <a href="#"><img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg" alt="Platform"></a>
@@ -208,6 +208,23 @@ GAME_LOGIN_BUTTON_Y_RATIO: float = 0.9   # 相對於 canvas 高度
 ---
 
 ## 📜 版本歷程
+
+### 2.3.0 (2026-02-25)
+
+- 重構: 自動跳過點擊從錯誤監控循環中抽出為獨立執行緒 `AutoSkipClickThread`，使用 `Event.wait` 精準計時，不受監控邏輯影響
+- 重構: 所有瀏覽器操作改為直接存取 driver，移除全部 `execute_task` 任務佇列呼叫，消除排隊等待和超時跳過問題
+- 改進: 自動跳過點擊不再排除恢復中的瀏覽器，確保所有視窗都會被點擊
+- 改進: 自動按鍵（按空白鍵）改為直接操作 driver，不再排隊
+- 改進: 錯誤監控檢測（黑屏/錯誤訊息）改為直接操作 driver，提升檢測即時性
+- 改進: 恢復流程（導航、進入遊戲、圖片檢測、點擊按鈕）全部改為直接操作 driver
+- 改進: 免費遊戲購買/結算、關閉瀏覽器導航均改為直接操作 driver
+
+### 2.2.1 (2026-02-24)
+
+- 修復: `_execute_auto_spin_rule` 缺少 `_ensure_auto_press_stopped()`，規則從 s 型切換到 a 型時可能以錯誤金額下注
+- 修復: 恢復流程點擊 game_confirm 後未等待圖片消失，導致卡在遊戲開始畫面
+- 新增: `_recovery_wait_for_image_disappear` 方法 - 單一瀏覽器等待圖片消失（含自動重新點擊機制）
+- 改進: 恢復流程的圖片檢測流程現在與初始登入流程一致
 
 ### 2.2.0 (2026-02-20)
 
