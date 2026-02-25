@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <a href="#"><img src="https://img.shields.io/badge/version-2.3.0-brightgreen.svg" alt="Version"></a>
+  <a href="#"><img src="https://img.shields.io/badge/version-2.3.1-brightgreen.svg" alt="Version"></a>
   <a href="#"><img src="https://img.shields.io/badge/python-3.8%2B-blue.svg" alt="Python"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License"></a>
   <a href="#"><img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg" alt="Platform"></a>
@@ -208,6 +208,15 @@ GAME_LOGIN_BUTTON_Y_RATIO: float = 0.9   # 相對於 canvas 高度
 ---
 
 ## 📜 版本歷程
+
+### 2.3.1 (2026-02-25)
+
+- 修復: 多瀏覽器並行啟動時登入表單輸入帳密偶發 WebDriverException 崩潰（`Symbols not available`），改用 JavaScript 填入帳密取代 `send_keys()`
+- 修復: ChromeDriver 瞬態錯誤（空 Message）未被識別為可重試錯誤，導致本可重試成功的登入直接失敗
+- 改進: `is_retryable_error()` 取代原 `is_network_error()`，同時支援例外類型判斷與關鍵字匹配
+- 改進: 登入表單彈窗出現後增加動畫穩定等待，避免元素交互時 DOM 仍在渲染
+- 改進: 登入重試前自動刷新頁面，確保 DOM 狀態乾淨
+- 新增: `RETRYABLE_EXCEPTIONS` 常量 - 可重試的 Selenium 例外類型集合
 
 ### 2.3.0 (2026-02-25)
 
