@@ -81,6 +81,12 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.webdriver import WebDriver
 from selenium.webdriver.common.by import By
+from selenium.common.exceptions import (
+    WebDriverException,
+    StaleElementReferenceException,
+    ElementNotInteractableException,
+    NoSuchElementException,
+)
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from webdriver_manager.chrome import ChromeDriverManager
@@ -402,11 +408,22 @@ class Constants:
     BETSIZE_READ_MAX_RETRIES: int = 2          # 讀取金額最大重試次數
     
     # =========================================================================
-    # 網路錯誤關鍵字（用於判斷是否可重試）
+    # 可重試錯誤關鍵字（網路錯誤 + WebDriver 瞬態錯誤）
     # =========================================================================
     NETWORK_ERROR_KEYWORDS: Tuple[str, ...] = (
         'timeout', 'timed out', 'connection', 'network', 'err_',
-        'loading', 'stale'
+        'loading', 'stale', 'symbols not available',
+        'unresolved backtrace', 'element is not reachable',
+        'element click intercepted', 'not interactable',
+        'no such element', 'chrome not reachable',
+        'disconnected', 'session deleted', 'invalid session',
+    )
+    # 可重試的 Selenium 例外類型
+    RETRYABLE_EXCEPTIONS: Tuple[type, ...] = (
+        WebDriverException,
+        StaleElementReferenceException,
+        ElementNotInteractableException,
+        NoSuchElementException,
     )
     
     # -------------------------------------------------------------------------
@@ -1214,26 +1231,28 @@ def get_resource_path(relative_path: str = "") -> Path:
     return base_path
 
 
-def is_network_error(error: Exception) -> bool:
-    """判斷是否為網路相關錯誤（可重試）。
+def is_retryable_error(error: Exception) -> bool:
+    """判斷是否為可重試的錯誤（網路錯誤 + WebDriver 瞬態錯誤）。
 
-    檢查錯誤訊息中是否包含網路相關關鍵字，用於決定是否應該重試操作。
+    除了檢查錯誤訊息中的關鍵字外，也檢查例外類型。
+    WebDriverException（含空 Message）在多瀏覽器並行時常見，屬於可重試錯誤。
 
     參數:
         error: 發生的例外。
 
     回傳:
-        如果是網路相關錯誤則返回 True。
-
-    範例:
-        >>> try:
-        ...     do_something()
-        ... except Exception as e:
-        ...     if is_network_error(e):
-        ...         retry()
+        如果是可重試的錯誤則返回 True。
     """
+    # 1. 檢查例外類型（WebDriverException 及其子類皆可重試）
+    if isinstance(error, Constants.RETRYABLE_EXCEPTIONS):
+        return True
+    # 2. 關鍵字匹配
     error_msg = str(error).lower()
     return any(kw in error_msg for kw in Constants.NETWORK_ERROR_KEYWORDS)
+
+
+# 保留向後相容的別名
+is_network_error = is_retryable_error
 
 
 def cv2_imread_unicode(file_path: Union[str, Path], flags: int = cv2.IMREAD_COLOR) -> Optional[np.ndarray]:
@@ -6063,26 +6082,34 @@ class AutoSlotGameAppStarter:
                     driver.execute_script("arguments[0].click();", initial_login_btn)
                     time.sleep(Constants.PAGE_LOAD_WAIT)  # 等待彈窗動畫
                     
-                    # 3. 等待登入表單顯示（使用較長超時）
+                    # 3. 等待登入表單顯示並確保動畫完成
                     WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
                         EC.visibility_of_element_located((By.CSS_SELECTOR, ".popup-wrap, .popup-account-container"))
                     )
-                    
-                    # 4. 輸入帳號（使用較長超時）
-                    username_input = WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
-                        EC.element_to_be_clickable((By.XPATH, Constants.USERNAME_INPUT))
-                    )
-                    username_input.clear()
-                    time.sleep(Constants.SHORT_WAIT)
-                    username_input.send_keys(credential.username)
-                    
-                    # 5. 輸入密碼
-                    password_input = WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
-                        EC.element_to_be_clickable((By.XPATH, Constants.PASSWORD_INPUT))
-                    )
-                    password_input.clear()
+                    # 額外等待彈窗 CSS 動畫穩定，避免元素交互時 ChromeDriver 崩潰
                     time.sleep(Constants.NORMAL_WAIT)
-                    password_input.send_keys(credential.password)
+                    
+                    # 4. 輸入帳號（使用 JS 填入作為主要方式，更穩定）
+                    username_input = WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
+                        EC.presence_of_element_located((By.XPATH, Constants.USERNAME_INPUT))
+                    )
+                    driver.execute_script(
+                        "arguments[0].focus(); arguments[0].value = ''; arguments[0].value = arguments[1];"
+                        "arguments[0].dispatchEvent(new Event('input', {bubbles: true}));",
+                        username_input, credential.username
+                    )
+                    time.sleep(Constants.SHORT_WAIT)
+                    
+                    # 5. 輸入密碼（使用 JS 填入作為主要方式，更穩定）
+                    password_input = WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
+                        EC.presence_of_element_located((By.XPATH, Constants.PASSWORD_INPUT))
+                    )
+                    driver.execute_script(
+                        "arguments[0].focus(); arguments[0].value = ''; arguments[0].value = arguments[1];"
+                        "arguments[0].dispatchEvent(new Event('input', {bubbles: true}));",
+                        password_input, credential.password
+                    )
+                    time.sleep(Constants.SHORT_WAIT)
                     
                     # 6. 點擊登入按鈕
                     login_button = WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
@@ -6097,8 +6124,16 @@ class AutoSlotGameAppStarter:
                     return True
                     
                 except Exception as e:
-                    if attempt < Constants.MAX_RETRY_ATTEMPTS - 1 and is_network_error(e):
-                        self.logger.warning(f"瀏覽器 {context.index} 登入超時，準備重試...")
+                    if attempt < Constants.MAX_RETRY_ATTEMPTS - 1 and is_retryable_error(e):
+                        self.logger.warning(
+                            f"瀏覽器 {context.index} 登入失敗 ({type(e).__name__})，準備重試..."
+                        )
+                        # 重試前重新載入頁面，確保 DOM 乾淨
+                        try:
+                            driver.refresh()
+                            time.sleep(Constants.PAGE_LOAD_WAIT)
+                        except Exception:
+                            pass
                         continue
                     else:
                         self.logger.warning(f"瀏覽器 {context.index} 登入失敗: {e}")
@@ -6138,8 +6173,10 @@ class AutoSlotGameAppStarter:
                     return BrowserHelper.enter_game_from_lobby(driver)
                     
                 except Exception as e:
-                    if attempt < Constants.MAX_RETRY_ATTEMPTS - 1 and is_network_error(e):
-                        self.logger.warning(f"瀏覽器 {context.index} 進入遊戲超時，準備重試...")
+                    if attempt < Constants.MAX_RETRY_ATTEMPTS - 1 and is_retryable_error(e):
+                        self.logger.warning(
+                            f"瀏覽器 {context.index} 進入遊戲失敗 ({type(e).__name__})，準備重試..."
+                        )
                         continue
                     else:
                         self.logger.warning(f"瀏覽器 {context.index} 進入遊戲失敗: {e}")
