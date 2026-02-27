@@ -196,9 +196,7 @@ class Constants:
     # =========================================================================
     # 代理商配置
     # =========================================================================
-    # TODO: 更新為不同代理商網址
-    LOGIN_PAGE: str = "https://www.fin88.app/"
-    # LOGIN_PAGE: str = "https://richpanda.vip"  # --- IGNORE ---
+    LOGIN_PAGE: str = "https://ogw88.com"
 
     # =========================================================================
     # 遊戲配置
@@ -207,40 +205,36 @@ class Constants:
     IS_SETTE_1: bool = True
     # IS_SETTE_1: bool = False  # --- IGNORE ---
     
-    # 遊戲識別碼（根據版本自動設定）
-    GAME_PATTERN_SETTE_1: str = "ATG-egyptian-mythology"
-    GAME_PATTERN_SETTE_2_FIN88: str = "feb91c659e820a0405aabc1520c24d12"
-    GAME_PATTERN_SETTE_2_RICHPANDA: str = "af48d779dc07d08d07a526d0076db801"
+    # 遊戲識別碼（根據版本自動設定，用於匹配 <img> src 中的關鍵字）
+    GAME_PATTERN_SETTE_1: str = "egyptian-mythology"
+    GAME_PATTERN_SETTE_2: str = "golden-seth"
     
     @classmethod
     def get_game_pattern(cls) -> str:
         """取得當前遊戲種類的識別碼。"""
         if cls.IS_SETTE_1:
             return cls.GAME_PATTERN_SETTE_1
-        else:
-            # 根據 LOGIN_PAGE 決定 sett2 的識別碼
-            if "richpanda" in cls.LOGIN_PAGE.lower():
-                return cls.GAME_PATTERN_SETTE_2_RICHPANDA
-            return cls.GAME_PATTERN_SETTE_2_FIN88
+        return cls.GAME_PATTERN_SETTE_2
     
     # =========================================================================
     # 登入相關 XPath
     # =========================================================================
     INITIAL_LOGIN_BUTTON: str = (
-        "//button[contains(@class, 'btn') and contains(@class, 'login') "
-        "and contains(@class, 'pc') and text()='登入']"
+        "//div[contains(@class, 'ml-d-20')]//button[contains(@class, 'primary-btn') and text()='登入']"
     )
-    USERNAME_INPUT: str = "//input[@placeholder='請輸入帳號/手機號']"
-    PASSWORD_INPUT: str = "//input[@placeholder='請輸入您的登入密碼']"
+    USERNAME_INPUT: str = "//input[@placeholder='用戶名']"
+    PASSWORD_INPUT: str = "//input[@placeholder='密碼']"
     LOGIN_BUTTON: str = (
-        "//button[contains(@class, 'custom-button') and @type='submit' "
-        "and (text()='登入遊戲' or .//span[text()='登入遊戲'])]"
+        "//button[contains(@class, 'primary-btn') and text()='登入']"
+    )
+    USER_AGREEMENT_BUTTON: str = (
+        "//button[contains(@class, 'primary-btn') and text()='確定']"
     )
     
     # =========================================================================
     # 遊戲頁面相關 XPath
     # =========================================================================
-    GAME_IFRAME: str = "//iframe[contains(@src, 'egyptian-mythology') or contains(@class, 'iframe-item') or contains(@class, 'h-full')]"
+    GAME_IFRAME: str = "//iframe[contains(@src, 'egyptian-mythology') or contains(@src, 'golden-seth') or contains(@class, 'iframe-item') or contains(@class, 'h-full')]"
     GAME_CANVAS: str = "GameCanvas"
     
     # =========================================================================
@@ -437,10 +431,12 @@ class Constants:
     # 遊戲金額配置（tuple 支援 in 檢查和索引計算）
     # -------------------------------------------------------------------------
     GAME_BETSIZE: Tuple[int, ...] = (
-        1,2,3,4,5,6,7,8,9,10,
-        12,14,16,18,20,24,28,30,32,36,
-        40,42,48,54,56,60,64,72,80,96,
-        100
+        2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40,
+        48, 56, 60, 64, 72, 80, 96, 100, 120, 140, 160, 180, 200,
+        240, 280, 300, 320, 360, 400, 420, 480, 500, 540, 560, 600,
+        640, 700, 720, 800, 840, 900, 960, 980, 1000, 1080, 1120,
+        1200, 1260, 1280, 1400, 1440, 1500, 1600, 1800, 2000, 2100,
+        2400, 2700, 3000
     )
 
 
@@ -1957,7 +1953,7 @@ class BrowserHelper:
     
     # JavaScript 程式碼常數（避免重複定義）
     JS_CLOSE_POPUPS: str = """
-        const popups = document.querySelectorAll('.popup-container, .popup-wrap, .popup-account-container, .ads-pop-container');
+        const popups = document.querySelectorAll('.popup-container, .popup-wrap, .modal, .dialog, [class*="popup"], [class*="notice"]');
         popups.forEach(popup => {
             popup.style.display = 'none';
             popup.style.visibility = 'hidden';
@@ -2085,7 +2081,7 @@ class BrowserHelper:
     def enter_game_from_lobby(driver: WebDriver) -> bool:
         """從大廳頁面搜尋遊戲並進入。
         
-        共用流程：關閉彈窗 → 找遊戲卡片 → 點擊 → 切換 iframe → 驗證 Canvas。
+        共用流程：關閉彈窗 → 點擊熱門遊戲 → 找遊戲卡片 → 點擊 → 切換 iframe → 驗證 Canvas。
         
         參數:
             driver: WebDriver 實例
@@ -2100,9 +2096,16 @@ class BrowserHelper:
         except Exception:
             pass
         
-        # 2. 用背景圖片找遊戲卡片並點擊
+        # 2. 點擊「熱門遊戲」分類標籤，展開遊戲列表
+        hot_game_tab = WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
+            EC.element_to_be_clickable((By.XPATH, "//p[text()='熱門遊戲']"))
+        )
+        driver.execute_script("arguments[0].click();", hot_game_tab)
+        time.sleep(Constants.PAGE_LOAD_WAIT)
+        
+        # 3. 用 img src 找遊戲卡片並點擊
         game_pattern = Constants.get_game_pattern()
-        game_selector = f"//div[contains(@class, 'game-img') and contains(@style, '{game_pattern}')]"
+        game_selector = f"//img[contains(@src, '{game_pattern}')]"
         game_element = WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
             EC.presence_of_element_located((By.XPATH, game_selector))
         )
@@ -2111,14 +2114,14 @@ class BrowserHelper:
         driver.execute_script("arguments[0].click();", game_element)
         time.sleep(Constants.PAGE_LOAD_WAIT_LONG)
         
-        # 3. 切換到 iframe
+        # 4. 切換到 iframe
         time.sleep(Constants.PAGE_LOAD_WAIT)
         iframe = WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT_LONG).until(
             EC.presence_of_element_located((By.XPATH, Constants.GAME_IFRAME))
         )
         driver.switch_to.frame(iframe)
         
-        # 4. 驗證 Canvas 存在
+        # 5. 驗證 Canvas 存在
         WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
             lambda d: d.execute_script(f"return document.getElementById('{Constants.GAME_CANVAS}') !== null;")
         )
@@ -2740,6 +2743,7 @@ class BrowserManager:
             chrome_options.add_argument(f"--proxy-server={proxy_address}")
         
         # 基本設定
+        chrome_options.add_argument("--start-maximized")
         chrome_options.add_argument("--disable-blink-features=AutomationControlled")
         chrome_options.add_argument("--disable-popup-blocking")
         chrome_options.add_argument("--disable-dev-shm-usage")
@@ -6313,10 +6317,14 @@ class AutoSlotGameAppStarter:
     def perform_login(self) -> None:
         """步驟 6: 執行登入操作
         
+        ogw88.com 登入流程：
+        1. 點擊首頁「登入」按鈕導向登入頁面
+        2. 輸入帳號密碼並提交
+        3. 處理用戶協議彈窗
+        
         包含網路容錯機制：
-        - 延長元素等待超時時間
-        - Loading 遮罩等待時間增加
         - 關鍵步驟失敗時自動重試
+        - 重試前導航回首頁確保 DOM 乾淨
         """
         self.logger.info(Constants.LOG_SEPARATOR)
         self.logger.info("【步驟 6】執行登入操作")
@@ -6333,31 +6341,24 @@ class AutoSlotGameAppStarter:
                         self.logger.info(f"瀏覽器 {context.index} 登入第 {attempt + 1} 次嘗試...")
                         time.sleep(Constants.RETRY_INTERVAL)
                     
-                    # 1. 等待 loading 遮罩層消失（使用 JavaScript 檢測，避免多次 WebDriver 調用）
-                    WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
-                        lambda d: d.execute_script("""
-                            const loading = document.querySelector('.loading-container');
-                            return !loading || loading.style.display === 'none' || 
-                                   getComputedStyle(loading).display === 'none' ||
-                                   getComputedStyle(loading).visibility === 'hidden';
-                        """)
+                    # 1. 等待頁面完全載入
+                    WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT_LONG).until(
+                        lambda d: d.execute_script("return document.readyState") == "complete"
                     )
 
-                    # 2. 點擊初始登入按鈕
+                    # 2. 點擊首頁登入按鈕（導向登入頁面）
                     initial_login_btn = WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
                         EC.element_to_be_clickable((By.XPATH, Constants.INITIAL_LOGIN_BUTTON))
                     )
                     driver.execute_script("arguments[0].click();", initial_login_btn)
-                    time.sleep(Constants.PAGE_LOAD_WAIT)  # 等待彈窗動畫
                     
-                    # 3. 等待登入表單顯示並確保動畫完成
-                    WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
-                        EC.visibility_of_element_located((By.CSS_SELECTOR, ".popup-wrap, .popup-account-container"))
+                    # 3. 等待導向登入頁面完成（新頁面載入）
+                    WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT_LONG).until(
+                        lambda d: d.execute_script("return document.readyState") == "complete"
                     )
-                    # 額外等待彈窗 CSS 動畫穩定，避免元素交互時 ChromeDriver 崩潰
-                    time.sleep(Constants.NORMAL_WAIT)
+                    time.sleep(Constants.PAGE_LOAD_WAIT)
                     
-                    # 4. 輸入帳號（使用 JS 填入作為主要方式，更穩定）
+                    # 4. 輸入帳號（使用 JS 填入，更穩定）
                     username_input = WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
                         EC.presence_of_element_located((By.XPATH, Constants.USERNAME_INPUT))
                     )
@@ -6368,7 +6369,7 @@ class AutoSlotGameAppStarter:
                     )
                     time.sleep(Constants.SHORT_WAIT)
                     
-                    # 5. 輸入密碼（使用 JS 填入作為主要方式，更穩定）
+                    # 5. 輸入密碼（使用 JS 填入，更穩定）
                     password_input = WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
                         EC.presence_of_element_located((By.XPATH, Constants.PASSWORD_INPUT))
                     )
@@ -6386,8 +6387,16 @@ class AutoSlotGameAppStarter:
                     driver.execute_script("arguments[0].click();", login_button)
                     time.sleep(Constants.PAGE_LOAD_WAIT)  # 等待登入完成
                     
-                    # 7. 關閉所有彈窗
-                    BrowserHelper.close_popups(driver)
+                    # 7. 處理用戶協議彈窗（點擊「確定」）
+                    try:
+                        agreement_btn = WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
+                            EC.element_to_be_clickable((By.XPATH, Constants.USER_AGREEMENT_BUTTON))
+                        )
+                        driver.execute_script("arguments[0].click();", agreement_btn)
+                        time.sleep(Constants.PAGE_LOAD_WAIT)
+                    except Exception:
+                        # 用戶協議可能不每次都出現，忽略超時
+                        pass
                     
                     return True
                     
@@ -6396,9 +6405,9 @@ class AutoSlotGameAppStarter:
                         self.logger.warning(
                             f"瀏覽器 {context.index} 登入失敗 ({type(e).__name__})，準備重試..."
                         )
-                        # 重試前重新載入頁面，確保 DOM 乾淨
+                        # 重試前導航回首頁，確保 DOM 乾淨
                         try:
-                            driver.refresh()
+                            driver.get(Constants.LOGIN_PAGE)
                             time.sleep(Constants.PAGE_LOAD_WAIT)
                         except Exception:
                             pass
