@@ -4301,6 +4301,9 @@ class GameControlCenter:
         
         self.auto_press_threads.clear()
         self.auto_press_running = False
+        
+        # 重置停止事件，確保後續手動指令（如 b、a、f）可以正常執行
+        self._stop_event.clear()
 
     def _ensure_auto_press_stopped(self) -> None:
         """確保自動按鍵已完全停止（規則切換時使用）。
