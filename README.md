@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <a href="#"><img src="https://img.shields.io/badge/version-2.3.1-brightgreen.svg" alt="Version"></a>
+  <a href="#"><img src="https://img.shields.io/badge/version-2.4.0-brightgreen.svg" alt="Version"></a>
   <a href="#"><img src="https://img.shields.io/badge/python-3.8%2B-blue.svg" alt="Python"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License"></a>
   <a href="#"><img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg" alt="Platform"></a>
@@ -208,6 +208,18 @@ GAME_LOGIN_BUTTON_Y_RATIO: float = 0.9   # 相對於 canvas 高度
 ---
 
 ## 📜 版本歷程
+
+### 2.4.0 (2026-02-27)
+
+- 新增: 規則執行時間監控倒數提示，定期顯示剩餘執行時間（≤ 0.5 小時每分鐘、> 0.5 小時每 5 分鐘）
+- 新增: `MAX_RECOVERY_ATTEMPTS` 常量（預設 5）—— 單一瀏覽器累計恢復次數上限，超過後自動關閉該瀏覽器（複用 q 命令邏輯）
+- 新增: 返回大廳畫面偵測與自動恢復流程（點擊返回大廳 → 重新進入遊戲 → 圖片檢測流程）
+- 新增: `LOBBY_RETURN_BUTTON_X_RATIO` / `LOBBY_RETURN_BUTTON_Y_RATIO` 常量
+- 新增: `RULE_EXECUTION_TIME_CHECK_INTERVAL` 常量（規則執行時間檢查間隔 10 秒）
+- 新增: `_handle_lobby_return_recovery` / `_recovery_click_lobby_return` 方法
+- 新增: `_close_browser_for_recovery` 方法，恢復超過上限時自動關閉瀏覽器
+- 改進: 錯誤監控循環擴展為同時偵測黑屏、錯誤訊息與返回大廳三種狀態
+- 改進: 恢復成功後自動重置恢復計數器
 
 ### 2.3.1 (2026-02-25)
 

@@ -23,7 +23,7 @@
         $ python main.py
 
 版本資訊:
-    版本: 2.3.1
+    版本: 2.4.0
     作者: 凡臻科技
     授權: MIT License
 
@@ -117,7 +117,7 @@ class Constants:
     # =========================================================================
     # 版本資訊
     # =========================================================================
-    VERSION: str = "2.3.1"
+    VERSION: str = "2.4.0"
     SYSTEM_NAME: str = "戰神賽特自動化系統"
     
     # =========================================================================
@@ -166,6 +166,8 @@ class Constants:
     ELEMENT_WAIT_TIMEOUT_LONG: int = 60
     # 操作重試次數
     MAX_RETRY_ATTEMPTS: int = 5
+    # 單一瀏覽器最大恢復次數（超過後自動關閉該瀏覽器）
+    MAX_RECOVERY_ATTEMPTS: int = 9
     # 重試間隔（秒）
     RETRY_INTERVAL: float = 3.0
     # 頁面載入等待時間（網路慢時需要更長）
@@ -319,6 +321,7 @@ class Constants:
     RULE_SWITCH_WAIT: float = 1.0              # 規則切換等待時間（秒）
     RULE_PROGRESS_INTERVAL: int = 60           # 規則進度顯示間隔（秒）
     AUTO_PRESS_THREAD_JOIN_TIMEOUT: float = 2.0  # 自動按鍵執行緒結束等待時間
+    RULE_EXECUTION_TIME_CHECK_INTERVAL: int = 10  # 規則執行時間檢查間隔（秒）
     
     # -------------------------------------------------------------------------
     # 金額模板配置
@@ -354,6 +357,10 @@ class Constants:
     # 大廳返回模板配置
     # =========================================================================
     LOBBY_RETURN: str = "返回大廳.png"
+    
+    # 返回大廳按鈕座標比例
+    LOBBY_RETURN_BUTTON_X_RATIO: float = 0.5      # 返回大廳按鈕 X 座標比例
+    LOBBY_RETURN_BUTTON_Y_RATIO: float = 0.72     # 返回大廳按鈕 Y 座標比例
     
     # =========================================================================
     # 模板顯示名稱對應表
@@ -2939,6 +2946,8 @@ class GameControlCenter:
         # 正在恢復中的瀏覽器（避免重複觸發恢復）
         self._recovering_browsers: Set[int] = set()
         self._recovering_lock = threading.Lock()
+        # 每個瀏覽器的累計恢復次數（超過上限自動關閉）
+        self._recovery_counts: Dict[int, int] = {}
 
         # 圖片檢測器
         self._image_detector = ImageDetector(self.logger)
@@ -3095,16 +3104,17 @@ class GameControlCenter:
     # -------------------------------------------------------------------------
 
     def _error_monitor_loop(self) -> None:
-        """錯誤訊息與黑屏監控循環。
+        """錯誤訊息、黑屏與返回大廳監控循環。
         
         在背景持續運行，每隔固定時間同步檢測所有瀏覽器：
-        - 黑屏（BLACK_SCREEN）: 連續檢測到 BLACKSCREEN_CONSECUTIVE_THRESHOLD 次 → 導航到 LOGIN_PAGE
+        - 黑屏（BLACK_SCREEN）: 連續檢測到 BLACKSCREEN_CONSECUTIVE_THRESHOLD 次 → 完整重連流程
         - 錯誤訊息（ERROR_REMIND）: 檢測到 1 次 → 點擊 ERROR_CONFIRM 按鈕
+        - 返回大廳（LOBBY_RETURN）: 檢測到 1 次 → 點擊返回大廳 → 重新進入遊戲
         
         檢測流程同步並行，恢復操作在獨立執行緒中非同步執行（不阻塞監控）。
         注意：自動跳過點擊已移至獨立執行緒 _auto_skip_click_loop，不受此循環影響。
         """
-        self.logger.info("錯誤訊息與黑屏監控已啟動")
+        self.logger.info("錯誤訊息、黑屏與返回大廳監控已啟動")
         
         # 黑屏連續檢測計數器（每個瀏覽器獨立計數）
         blackscreen_counts: Dict[int, int] = {}
@@ -3112,6 +3122,7 @@ class GameControlCenter:
         # 檢查模板是否存在
         blackscreen_template_exists = self._image_detector.template_exists(Constants.BLACK_SCREEN)
         error_template_exists = self._image_detector.template_exists(Constants.ERROR_REMIND)
+        lobby_return_template_exists = self._image_detector.template_exists(Constants.LOBBY_RETURN)
         
         if not blackscreen_template_exists:
             self.logger.warning(f"黑屏模板 '{Constants.BLACK_SCREEN}' 不存在")
@@ -3120,6 +3131,10 @@ class GameControlCenter:
         if not error_template_exists:
             self.logger.warning(f"錯誤訊息模板 '{Constants.ERROR_REMIND}' 不存在")
             self.logger.info("請使用 'e' 命令截取錯誤訊息模板")
+        
+        if not lobby_return_template_exists:
+            self.logger.warning(f"返回大廳模板 '{Constants.LOBBY_RETURN}' 不存在")
+            self.logger.info("請使用 'l' 命令截取返回大廳模板")
         
         while not self._error_monitor_stop_event.is_set():
             try:
@@ -3137,27 +3152,30 @@ class GameControlCenter:
                 # 每次循環更新模板存在狀態（支援動態建立模板）
                 blackscreen_template_exists = self._image_detector.template_exists(Constants.BLACK_SCREEN)
                 error_template_exists = self._image_detector.template_exists(Constants.ERROR_REMIND)
+                lobby_return_template_exists = self._image_detector.template_exists(Constants.LOBBY_RETURN)
                 
-                # 如果兩個模板都不存在，等待後繼續
-                if not blackscreen_template_exists and not error_template_exists:
+                # 如果所有模板都不存在，等待後繼續
+                if not blackscreen_template_exists and not error_template_exists and not lobby_return_template_exists:
                     self._error_monitor_stop_event.wait(timeout=Constants.ERROR_MONITOR_INTERVAL)
                     continue
                 
-                # ===== 同時檢測所有瀏覽器的黑屏和錯誤訊息 =====
+                # ===== 同時檢測所有瀏覽器的黑屏、錯誤訊息與返回大廳 =====
                 blackscreen_detected: Dict[int, bool] = {}
                 error_detected: Dict[int, bool] = {}
+                lobby_return_detected: Dict[int, bool] = {}
                 
-                def detect_for_browser(bt: 'BrowserThread') -> Tuple[int, bool, bool]:
-                    """同時檢測單個瀏覽器的黑屏和錯誤訊息（直接操作 driver）。
+                def detect_for_browser(bt: 'BrowserThread') -> Tuple[int, bool, bool, bool]:
+                    """同時檢測單個瀏覽器的黑屏、錯誤訊息與返回大廳（直接操作 driver）。
                     
-                    回傳: (browser_index, 是否黑屏, 是否錯誤訊息)
+                    回傳: (browser_index, 是否黑屏, 是否錯誤訊息, 是否返回大廳)
                     """
                     if not bt.is_browser_alive() or not bt.context:
-                        return (bt.index, False, False)
+                        return (bt.index, False, False, False)
                     try:
                         driver = bt.context.driver
                         is_blackscreen = False
                         is_error = False
+                        is_lobby_return = False
                         
                         # 檢測黑屏
                         if blackscreen_template_exists:
@@ -3173,18 +3191,26 @@ class GameControlCenter:
                             )
                             is_error = result is not None
                         
-                        return (bt.index, is_blackscreen, is_error)
+                        # 檢測返回大廳
+                        if lobby_return_template_exists:
+                            result = self._image_detector.detect_in_browser(
+                                driver, Constants.LOBBY_RETURN
+                            )
+                            is_lobby_return = result is not None
+                        
+                        return (bt.index, is_blackscreen, is_error, is_lobby_return)
                     except Exception:
-                        return (bt.index, False, False)
+                        return (bt.index, False, False, False)
                 
                 # 並行檢測所有瀏覽器
                 with ThreadPoolExecutor(max_workers=len(active_browsers)) as executor:
                     futures = [executor.submit(detect_for_browser, bt) for bt in active_browsers]
                     for future in futures:
                         try:
-                            browser_index, is_blackscreen, is_error = future.result(timeout=10)
+                            browser_index, is_blackscreen, is_error, is_lobby_return = future.result(timeout=10)
                             blackscreen_detected[browser_index] = is_blackscreen
                             error_detected[browser_index] = is_error
+                            lobby_return_detected[browser_index] = is_lobby_return
                         except Exception:
                             pass
                 
@@ -3224,6 +3250,14 @@ class GameControlCenter:
                         )
                         # 非同步啟動點擊執行緒
                         self._start_recovery_thread(bt, "error")
+                    
+                    # 處理返回大廳
+                    if lobby_return_detected.get(browser_index, False):
+                        self.logger.warning(
+                            f"瀏覽器 {browser_index} ({username}) 偵測到返回大廳，啟動恢復流程..."
+                        )
+                        # 非同步啟動返回大廳恢復執行緒
+                        self._start_recovery_thread(bt, "lobby_return")
                 
                 # 等待下一次檢測
                 self._error_monitor_stop_event.wait(timeout=Constants.ERROR_MONITOR_INTERVAL)
@@ -3232,16 +3266,45 @@ class GameControlCenter:
                 self.logger.error(f"監控循環發生錯誤: {e}")
                 self._error_monitor_stop_event.wait(timeout=Constants.ERROR_MONITOR_INTERVAL)
         
-        self.logger.info("錯誤訊息與黑屏監控已停止")
+        self.logger.info("錯誤訊息、黑屏與返回大廳監控已停止")
     
     def _start_recovery_thread(self, bt: 'BrowserThread', recovery_type: str) -> None:
         """啟動非同步恢復執行緒。
         
+        每次觸發恢復時累計計數，當某個瀏覽器的恢復次數超過
+        MAX_RECOVERY_ATTEMPTS 時，自動關閉該瀏覽器。
+        
         參數:
             bt: 需要恢復的 BrowserThread 實例
-            recovery_type: 恢復類型 ("blackscreen" 或 "error")
+            recovery_type: 恢復類型 ("blackscreen"、"error" 或 "lobby_return")
         """
         browser_index = bt.index
+        username = bt.context.credential.username if bt.context else "Unknown"
+        
+        # 累計恢復次數並檢查是否超過上限
+        current_count = self._recovery_counts.get(browser_index, 0) + 1
+        self._recovery_counts[browser_index] = current_count
+        
+        if current_count > Constants.MAX_RECOVERY_ATTEMPTS:
+            self.logger.warning(
+                f"瀏覽器 {browser_index} ({username}) "
+                f"恢復次數已達上限 ({current_count - 1}/{Constants.MAX_RECOVERY_ATTEMPTS})，"
+                f"自動關閉該瀏覽器..."
+            )
+            # 在獨立執行緒中關閉瀏覽器，避免阻塞監控循環
+            close_thread = threading.Thread(
+                target=self._close_browser_for_recovery,
+                args=(bt,),
+                daemon=True,
+                name=f"AutoClose-{browser_index}"
+            )
+            close_thread.start()
+            return
+        
+        self.logger.info(
+            f"瀏覽器 {browser_index} ({username}) "
+            f"第 {current_count}/{Constants.MAX_RECOVERY_ATTEMPTS} 次恢復 ({recovery_type})"
+        )
         
         # 標記為恢復中
         with self._recovering_lock:
@@ -3256,6 +3319,8 @@ class GameControlCenter:
                     self._handle_blackscreen_recovery(bt)
                 elif recovery_type == "error":
                     self._handle_error_click_confirm(bt)
+                elif recovery_type == "lobby_return":
+                    self._handle_lobby_return_recovery(bt)
             finally:
                 # 恢復完成，移除標記
                 with self._recovering_lock:
@@ -3268,6 +3333,54 @@ class GameControlCenter:
             name=f"Recovery-{browser_index}-{recovery_type}"
         )
         thread.start()
+
+    def _close_browser_for_recovery(self, bt: 'BrowserThread') -> None:
+        """恢復次數超過上限時自動關閉瀏覽器（複用 q 命令邏輯）。
+        
+        執行流程：
+        1. 導航到登入頁面
+        2. 等待 QUIT_WAIT_TIME 秒
+        3. 呼叫 bt.stop() 關閉瀏覽器
+        4. 檢查剩餘瀏覽器數量
+        
+        參數:
+            bt: 要關閉的 BrowserThread 實例
+        """
+        browser_index = bt.index
+        username = bt.context.credential.username if bt.context else "Unknown"
+        
+        try:
+            # 導航到登入頁面
+            if bt.is_browser_alive() and bt.context:
+                try:
+                    driver = bt.context.driver
+                    driver.switch_to.default_content()
+                    driver.get(Constants.LOGIN_PAGE)
+                except Exception as e:
+                    self.logger.warning(
+                        f"瀏覽器 {browser_index} ({username}) 導航到登入頁面失敗: {e}"
+                    )
+            
+            # 等待後關閉
+            self.logger.info(f"瀏覽器 {browser_index} ({username}) 等待 {int(Constants.QUIT_WAIT_TIME)} 秒後關閉...")
+            time.sleep(Constants.QUIT_WAIT_TIME)
+            
+            bt.stop()
+            self.logger.info(f"已自動關閉瀏覽器 {browser_index} ({username})（恢復次數超過上限）")
+            
+            # 清理恢復計數
+            self._recovery_counts.pop(browser_index, None)
+            
+            # 檢查剩餘瀏覽器
+            remaining = len(self._get_active_browsers())
+            if remaining == 0:
+                self.logger.info("所有瀏覽器已關閉，退出控制面板")
+                self.running = False
+            else:
+                self.logger.info(f"剩餘 {remaining} 個瀏覽器仍在運行")
+                
+        except Exception as e:
+            self.logger.error(f"自動關閉瀏覽器 {browser_index} ({username}) 失敗: {e}")
     
     def _handle_error_click_confirm(self, bt: 'BrowserThread') -> None:
         """處理錯誤訊息：點擊確認按鈕，並檢查是否回到大廳。
@@ -3331,6 +3444,8 @@ class GameControlCenter:
                         self.logger.info(
                             f"瀏覽器 {browser_index} ({username}) Canvas 仍存在，繼續監控"
                         )
+                        # 恢復成功，重置該瀏覽器的恢復計數
+                        self._recovery_counts[browser_index] = 0
                         return  # 正常結束，繼續監控
                     else:
                         self.logger.warning(
@@ -3413,6 +3528,8 @@ class GameControlCenter:
                 return
             
             self.logger.info(f"瀏覽器 {browser_index} ({username}) 重新進入遊戲完成")
+            # 恢復成功，重置該瀏覽器的恢復計數
+            self._recovery_counts[browser_index] = 0
             
         except Exception as e:
             self.logger.error(f"瀏覽器 {browser_index} ({username}) 重新進入遊戲發生異常: {e}")
@@ -3455,10 +3572,115 @@ class GameControlCenter:
                 return
             
             self.logger.info(f"瀏覽器 {browser_index} ({username}) 黑屏恢復完成")
+            # 恢復成功，重置該瀏覽器的恢復計數
+            self._recovery_counts[browser_index] = 0
             
         except Exception as e:
             self.logger.error(f"瀏覽器 {browser_index} ({username}) 黑屏恢復發生異常: {e}")
     
+    def _handle_lobby_return_recovery(self, bt: 'BrowserThread') -> None:
+        """處理返回大廳恢復：完整的重新進入遊戲流程。
+        
+        當偵測到「返回大廳」畫面時，執行完整恢復流程：
+        1. 點擊返回大廳按鈕（回到大廳）
+        2. 重新進入遊戲（搜尋遊戲並進入）
+        3. 執行圖片檢測流程（遊戲登入 → 遊戲開始/錯誤訊息）
+        
+        包含網路容錯機制，失敗時自動重試。
+        
+        參數:
+            bt: 偵測到返回大廳的 BrowserThread 實例
+        """
+        username = bt.context.credential.username if bt.context else "Unknown"
+        browser_index = bt.index
+        
+        self.logger.info(f"瀏覽器 {browser_index} ({username}) 開始執行返回大廳恢復流程...")
+        
+        try:
+            # ===== 步驟 1: 點擊返回大廳按鈕 =====
+            self.logger.info(f"瀏覽器 {browser_index} 步驟 1/3: 點擊返回大廳按鈕")
+            if not self._recovery_click_lobby_return(bt):
+                self.logger.error(f"瀏覽器 {browser_index} ({username}) 點擊返回大廳按鈕失敗")
+                return
+            
+            # 等待畫面切換到大廳
+            time.sleep(Constants.PAGE_LOAD_WAIT)
+            
+            # ===== 步驟 2: 重新進入遊戲 =====
+            self.logger.info(f"瀏覽器 {browser_index} 步驟 2/3: 重新進入遊戲")
+            if not self._recovery_navigate_to_game(bt):
+                self.logger.error(f"瀏覽器 {browser_index} ({username}) 重新進入遊戲失敗")
+                return
+            
+            # ===== 步驟 3: 執行圖片檢測流程 =====
+            self.logger.info(f"瀏覽器 {browser_index} 步驟 3/3: 執行圖片檢測流程")
+            if not self._recovery_image_detection_flow(bt):
+                self.logger.error(f"瀏覽器 {browser_index} ({username}) 圖片檢測流程失敗")
+                return
+            
+            self.logger.info(f"瀏覽器 {browser_index} ({username}) 返回大廳恢復完成")
+            # 恢復成功，重置該瀏覽器的恢復計數
+            self._recovery_counts[browser_index] = 0
+            
+        except Exception as e:
+            self.logger.error(f"瀏覽器 {browser_index} ({username}) 返回大廳恢復發生異常: {e}")
+    
+    def _recovery_click_lobby_return(self, bt: 'BrowserThread') -> bool:
+        """恢復流程：點擊返回大廳按鈕（直接操作 driver）。
+        
+        切換到 iframe 後，在 Canvas 上點擊返回大廳按鈕座標。
+        
+        參數:
+            bt: BrowserThread 實例
+            
+        回傳:
+            點擊成功返回 True
+        """
+        for attempt in range(Constants.MAX_RETRY_ATTEMPTS):
+            try:
+                if attempt > 0:
+                    time.sleep(Constants.RETRY_INTERVAL)
+                
+                driver = bt.context.driver
+                
+                # 切換到 iframe
+                driver.switch_to.default_content()
+                iframe = WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
+                    EC.presence_of_element_located((By.XPATH, Constants.GAME_IFRAME))
+                )
+                driver.switch_to.frame(iframe)
+                time.sleep(Constants.NORMAL_WAIT)
+                
+                # 取得 Canvas 區域並點擊返回大廳按鈕
+                rect = BrowserHelper.get_canvas_rect(driver)
+                if not rect:
+                    if attempt < Constants.MAX_RETRY_ATTEMPTS - 1:
+                        continue
+                    return False
+                
+                BrowserHelper.click_canvas_position(
+                    driver, rect,
+                    Constants.LOBBY_RETURN_BUTTON_X_RATIO,
+                    Constants.LOBBY_RETURN_BUTTON_Y_RATIO
+                )
+                
+                username = bt.context.credential.username if bt.context else "Unknown"
+                self.logger.info(
+                    f"瀏覽器 {bt.index} ({username}) 已點擊返回大廳按鈕"
+                )
+                
+                # 等待畫面切換
+                time.sleep(Constants.SCREEN_SWITCH_WAIT)
+                
+                # 切換回主頁面
+                driver.switch_to.default_content()
+                return True
+                
+            except Exception as e:
+                if attempt == Constants.MAX_RETRY_ATTEMPTS - 1:
+                    self.logger.debug(f"點擊返回大廳按鈕失敗: {e}")
+        return False
+
     def _recovery_navigate_to_login(self, bt: 'BrowserThread') -> bool:
         """恢復流程：導航到登入頁面（直接操作 driver）。"""
         for attempt in range(Constants.MAX_RETRY_ATTEMPTS):
@@ -4385,13 +4607,58 @@ class GameControlCenter:
         
         定期檢查時間限制，確保即使在長時間等待中（如金額調整）
         也能在時間到達時立即停止。
+        同時定期顯示剩餘執行時間，方便用戶掌握進度。
         """
+        if self._rule_execution_start_time is None or self._rule_execution_max_hours is None:
+            return
+        
+        self.logger.info(
+            f"[啟動] 規則執行時間監控已啟動"
+            f"（將在 {self._rule_execution_max_hours} 小時後自動停止）"
+        )
+        
+        check_count = 0
+        
         while self.rule_running and not self._stop_event.is_set():
             # 檢查時間限制（會自動設置 _stop_event）
             if self._check_time_limit():
                 break
-            # 每秒檢查一次
-            time.sleep(1.0)
+            
+            # 等待檢查間隔
+            time.sleep(Constants.RULE_EXECUTION_TIME_CHECK_INTERVAL)
+            check_count += 1
+            
+            # 計算剩餘時間
+            if (self._rule_execution_start_time is None 
+                    or self._rule_execution_max_hours is None):
+                break
+            
+            end_time = self._rule_execution_start_time + (
+                self._rule_execution_max_hours * 3600
+            )
+            current_time = time.time()
+            remaining_seconds = end_time - current_time
+            remaining_hours = remaining_seconds / 3600
+            
+            # 根據總執行時間決定顯示頻率
+            # 總時間 <= 0.5 小時: 每分鐘顯示一次（6 次檢查 × 10 秒）
+            # 總時間 > 0.5 小時: 每 5 分鐘顯示一次（30 次檢查 × 10 秒）
+            display_interval = (
+                6 if self._rule_execution_max_hours <= 0.5 else 30
+            )
+            
+            if check_count % display_interval == 0 and remaining_seconds > 0:
+                remaining_minutes = remaining_seconds / 60
+                if remaining_hours >= 1:
+                    self.logger.info(
+                        f"[時間監控] 剩餘執行時間: {remaining_hours:.2f} 小時"
+                    )
+                else:
+                    self.logger.info(
+                        f"[時間監控] 剩餘執行時間: {remaining_minutes:.1f} 分鐘"
+                    )
+        
+        self.logger.info("[停止] 規則執行時間監控已停止")
 
     def _start_auto_close_countdown(self) -> None:
         """啟動自動關閉倒數計時。
