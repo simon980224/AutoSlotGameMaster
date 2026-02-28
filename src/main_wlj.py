@@ -427,6 +427,86 @@ class Constants:
         NoSuchElementException,
     )
     
+    # =========================================================================
+    # 點擊區域定義（用於 x 指令擷取點擊範圍截圖）
+    # =========================================================================
+    CLICK_AREA_DEFINITIONS: Dict[str, Dict[str, Any]] = {
+        "1": {
+            "name": "遊戲登入按鈕",
+            "x_ratio": GAME_LOGIN_BUTTON_X_RATIO,
+            "y_ratio": GAME_LOGIN_BUTTON_Y_RATIO,
+        },
+        "2": {
+            "name": "遊戲確認按鈕",
+            "x_ratio": GAME_CONFIRM_BUTTON_X_RATIO,
+            "y_ratio": GAME_CONFIRM_BUTTON_Y_RATIO,
+        },
+        "3": {
+            "name": "自動跳過點擊（關閉按鈕）",
+            "x_ratio": AUTO_SKIP_CLICK_X_RATIO,
+            "y_ratio": AUTO_SKIP_CLICK_Y_RATIO,
+        },
+        "4": {
+            "name": "自動關閉點擊",
+            "x_ratio": AUTO_CLOSE_CLICK_X_RATIO,
+            "y_ratio": AUTO_CLOSE_CLICK_Y_RATIO,
+        },
+        "5": {
+            "name": "自動旋轉按鈕",
+            "x_ratio": AUTO_SPIN_BUTTON_X_RATIO,
+            "y_ratio": AUTO_SPIN_BUTTON_Y_RATIO,
+        },
+        "6": {
+            "name": "免費遊戲區域按鈕",
+            "x_ratio": BUY_FREE_GAME_BUTTON_X_RATIO,
+            "y_ratio": BUY_FREE_GAME_BUTTON_Y_RATIO,
+        },
+        "7": {
+            "name": "免費遊戲確認（賽特一）",
+            "x_ratio": BUY_FREE_GAME_CONFIRM_X_RATIO,
+            "y_ratio": BUY_FREE_GAME_CONFIRM_Y_RATIO,
+        },
+        "8": {
+            "name": "免費遊戲（賽特二）",
+            "x_ratio": BUY_FREE_GAME_ONLY_FREEGAME_X_RATIO,
+            "y_ratio": BUY_FREE_GAME_ONLY_FREEGAME_Y_RATIO,
+        },
+        "9": {
+            "name": "覺醒之力（賽特二）",
+            "x_ratio": BUY_FREE_GAME_AWAKE_POWER_X_RATIO,
+            "y_ratio": BUY_FREE_GAME_AWAKE_POWER_Y_RATIO,
+        },
+        "10": {
+            "name": "不朽覺醒（賽特二）",
+            "x_ratio": BUY_FREE_GAME_IMMORTAL_AWAKE_X_RATIO,
+            "y_ratio": BUY_FREE_GAME_IMMORTAL_AWAKE_Y_RATIO,
+        },
+        "11": {
+            "name": "錯誤訊息確認按鈕",
+            "x_ratio": ERROR_CONFIRM_BUTTON_X_RATIO,
+            "y_ratio": ERROR_CONFIRM_BUTTON_Y_RATIO,
+        },
+        "12": {
+            "name": "返回大廳按鈕",
+            "x_ratio": LOBBY_RETURN_BUTTON_X_RATIO,
+            "y_ratio": LOBBY_RETURN_BUTTON_Y_RATIO,
+        },
+        "13": {
+            "name": "增加金額按鈕",
+            "x_ratio": BETSIZE_INCREASE_BUTTON_X,
+            "y_ratio": BETSIZE_INCREASE_BUTTON_Y,
+        },
+        "14": {
+            "name": "減少金額按鈕",
+            "x_ratio": BETSIZE_DECREASE_BUTTON_X,
+            "y_ratio": BETSIZE_DECREASE_BUTTON_Y,
+        },
+    }
+    # 點擊區域截圖標記設定
+    CLICK_AREA_MARKER_RADIUS: int = 15         # 十字標記半徑（像素）
+    CLICK_AREA_MARKER_COLOR: Tuple[int, int, int] = (0, 0, 255)  # 標記顏色 (BGR: 紅色)
+    CLICK_AREA_MARKER_THICKNESS: int = 2       # 標記線條粗細
+
     # -------------------------------------------------------------------------
     # 遊戲金額配置（tuple 支援 in 檢查和索引計算）
     # -------------------------------------------------------------------------
@@ -2505,6 +2585,119 @@ class ImageDetector:
             filename=Constants.ERROR_REMIND
         )
 
+    def capture_click_area_screenshot(
+        self,
+        driver: WebDriver,
+        area_name: str,
+        x_ratio: float,
+        y_ratio: float
+    ) -> bool:
+        """擷取點擊區域截圖，在 Canvas 截圖上標記點擊位置。
+
+        在截圖上繪製十字線和圓圈標記，顯示點擊座標的精確位置，
+        方便開發者驗證座標比例是否正確。
+
+        參數:
+            driver: WebDriver 實例
+            area_name: 區域名稱（用於檔名和日誌）
+            x_ratio: X 座標比例
+            y_ratio: Y 座標比例
+
+        回傳:
+            截取成功返回 True
+        """
+        try:
+            # 取得 Canvas 區域
+            rect = BrowserHelper.get_canvas_rect(driver)
+            if not rect:
+                self.logger.warning("無法取得 Canvas 區域")
+                return False
+
+            # 取得完整截圖
+            full_screenshot = self.capture_screenshot(driver)
+            img_height, img_width = full_screenshot.shape[:2]
+
+            # 計算 Canvas 區域在截圖中的位置
+            canvas_x = int(rect['x'])
+            canvas_y = int(rect['y'])
+            canvas_w = int(rect['w'])
+            canvas_h = int(rect['h'])
+
+            # 計算點擊的絕對座標（相對於截圖）
+            click_x = int(canvas_x + canvas_w * x_ratio)
+            click_y = int(canvas_y + canvas_h * y_ratio)
+
+            # 確保座標在截圖範圍內
+            click_x = max(0, min(click_x, img_width - 1))
+            click_y = max(0, min(click_y, img_height - 1))
+
+            # 繪製標記
+            marker_color = Constants.CLICK_AREA_MARKER_COLOR
+            marker_radius = Constants.CLICK_AREA_MARKER_RADIUS
+            thickness = Constants.CLICK_AREA_MARKER_THICKNESS
+
+            # 繪製十字線（貫穿整個截圖）
+            cv2.line(full_screenshot, (click_x, 0), (click_x, img_height), marker_color, 1)
+            cv2.line(full_screenshot, (0, click_y), (img_width, click_y), marker_color, 1)
+
+            # 繪製圓圈標記
+            cv2.circle(full_screenshot, (click_x, click_y), marker_radius, marker_color, thickness)
+
+            # 繪製中心實心小圓點
+            cv2.circle(full_screenshot, (click_x, click_y), 3, marker_color, -1)
+
+            # 繪製 Canvas 邊界框（綠色虛線效果）
+            canvas_color = (0, 255, 0)  # 綠色
+            cv2.rectangle(
+                full_screenshot,
+                (canvas_x, canvas_y),
+                (canvas_x + canvas_w, canvas_y + canvas_h),
+                canvas_color, 1
+            )
+
+            # 在標記旁加上座標文字
+            label = f"({x_ratio:.2f}, {y_ratio:.2f})"
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            font_scale = 0.5
+            text_x = click_x + marker_radius + 5
+            text_y = click_y - marker_radius - 5
+            # 確保文字不超出邊界
+            if text_x + 150 > img_width:
+                text_x = click_x - 160
+            if text_y < 15:
+                text_y = click_y + marker_radius + 20
+            # 文字背景（黑色）
+            cv2.putText(full_screenshot, label, (text_x + 1, text_y + 1),
+                        font, font_scale, (0, 0, 0), 2)
+            # 文字前景（白色）
+            cv2.putText(full_screenshot, label, (text_x, text_y),
+                        font, font_scale, (255, 255, 255), 1)
+
+            # 儲存圖片
+            img_dir = get_resource_path("img")
+            img_dir.mkdir(parents=True, exist_ok=True)
+
+            # 清理檔名中的特殊字元
+            safe_name = area_name.replace('（', '_').replace('）', '_').replace(' ', '_')
+            output_path = img_dir / f"點擊區域_{safe_name}.png"
+
+            is_success, buffer = cv2.imencode('.png', full_screenshot)
+            if is_success:
+                with open(output_path, 'wb') as f:
+                    f.write(buffer.tobytes())
+                self.logger.info(f"點擊區域截圖已儲存: {output_path}")
+                self.logger.info(f"       區域: {area_name}")
+                self.logger.info(f"       比例: ({x_ratio:.2f}, {y_ratio:.2f})")
+                self.logger.info(f"       像素: ({click_x}, {click_y})")
+                return True
+            else:
+                self.logger.error("圖片編碼失敗")
+                return False
+
+        except Exception as e:
+            self.logger.error(f"點擊區域截圖失敗: {e}")
+            return False
+
     def capture_lobby_return_template(self, driver: WebDriver) -> bool:
         """截取大廳返回提示模板。
         
@@ -4197,6 +4390,7 @@ class GameControlCenter:
   d                   截取黑屏提示模板
   e                   截取錯誤訊息模板
   l                   截取返回大廳模板
+  x                   擷取點擊區域截圖（驗證座標位置）
 
 【系統指令】
   h                   顯示此幫助信息
@@ -5146,6 +5340,10 @@ class GameControlCenter:
                 # 截取大廳返回提示模板 (lobby)
                 self._handle_capture_lobby_return_command()
             
+            elif cmd == 'x':
+                # 擷取點擊區域截圖 (x-ray)
+                self._handle_capture_click_area_command()
+            
             else:
                 self.logger.warning(f"未知指令: {cmd}")
                 self.logger.info("   輸入 'h' 查看指令說明")
@@ -5767,6 +5965,83 @@ class GameControlCenter:
             Constants.LOBBY_RETURN,
             "capture_lobby_return_template"
         )
+    
+    def _handle_capture_click_area_command(self) -> None:
+        """處理擷取點擊區域截圖指令。
+        
+        顯示所有可用的點擊區域清單，讓使用者選擇要擷取的區域，
+        在截圖上標記點擊位置並儲存。
+        """
+        self.logger.info("")
+        self.logger.info(Constants.LOG_SEPARATOR)
+        self.logger.info("【擷取點擊區域截圖】")
+        self.logger.info(Constants.LOG_SEPARATOR)
+        self.logger.info("")
+        
+        # 顯示所有可選的點擊區域
+        self.logger.info("請選擇要擷取的點擊區域:")
+        self.logger.info("")
+        for key, area in Constants.CLICK_AREA_DEFINITIONS.items():
+            self.logger.info(
+                f"  {key:>2}  - {area['name']}"
+                f"  ({area['x_ratio']:.2f}, {area['y_ratio']:.2f})"
+            )
+        self.logger.info("")
+        self.logger.info("   0  - 擷取全部區域")
+        self.logger.info("   q  - 取消")
+        self.logger.info("")
+        
+        try:
+            print("請輸入編號: ", end="", flush=True)
+            sys.stdout.flush()
+            user_input = input().strip().lower()
+            
+            if user_input == 'q':
+                self.logger.info("使用者取消擷取")
+                return
+            
+            # 決定要擷取的區域
+            if user_input == '0':
+                selected_areas = list(Constants.CLICK_AREA_DEFINITIONS.items())
+            elif user_input in Constants.CLICK_AREA_DEFINITIONS:
+                selected_areas = [(user_input, Constants.CLICK_AREA_DEFINITIONS[user_input])]
+            else:
+                self.logger.warning(f"無效的編號: {user_input}")
+                return
+            
+            # 選擇瀏覽器
+            selected_browser = self._select_browser_for_capture("點擊區域")
+            if selected_browser is None:
+                return
+            
+            if not selected_browser.is_browser_alive() or not selected_browser.context:
+                self.logger.error("選中的瀏覽器已關閉")
+                return
+            
+            # 擷取截圖
+            success_count = 0
+            for key, area in selected_areas:
+                try:
+                    if self._image_detector.capture_click_area_screenshot(
+                        selected_browser.context.driver,
+                        area['name'],
+                        area['x_ratio'],
+                        area['y_ratio']
+                    ):
+                        success_count += 1
+                except Exception as e:
+                    self.logger.error(f"擷取 {area['name']} 失敗: {e}")
+            
+            self.logger.info("")
+            self.logger.info(f"擷取完成: {success_count}/{len(selected_areas)} 個區域成功")
+            self.logger.info(f"截圖儲存於 img/ 目錄，檔名前綴為 '點擊區域_'")
+            self.logger.info("")
+                        
+        except (EOFError, KeyboardInterrupt):
+            self.logger.info("")
+            self.logger.info("使用者取消擷取")
+        except Exception as e:
+            self.logger.error(f"擷取點擊區域失敗: {e}")
     
     def start(self) -> None:
         """啟動控制面板。"""
