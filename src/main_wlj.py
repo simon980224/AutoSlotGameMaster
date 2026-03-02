@@ -202,7 +202,7 @@ class Constants:
     # 遊戲配置
     # =========================================================================
     # TODO: 遊戲種類選擇：True = 賽特一, False = 賽特二
-    IS_SETTE_1: bool = True
+    IS_SETTE_1: bool = False
     # IS_SETTE_1: bool = False  # --- IGNORE ---
     
     # 遊戲識別碼（根據版本自動設定，用於匹配 <img> src 中的關鍵字）
@@ -253,9 +253,9 @@ class Constants:
     # Canvas 點擊座標比例
     # =========================================================================
     GAME_LOGIN_BUTTON_X_RATIO: float = 0.5
-    GAME_LOGIN_BUTTON_Y_RATIO: float = 0.9
-    GAME_CONFIRM_BUTTON_X_RATIO: float = 0.74
-    GAME_CONFIRM_BUTTON_Y_RATIO: float = 0.85
+    GAME_LOGIN_BUTTON_Y_RATIO: float = 1.23
+    GAME_CONFIRM_BUTTON_X_RATIO: float = 0.68
+    GAME_CONFIRM_BUTTON_Y_RATIO: float = 1.12
     
     # 自動跳過點擊座標比例（關閉按鈕）
     AUTO_SKIP_CLICK_X_RATIO: float = 0.5
@@ -263,13 +263,19 @@ class Constants:
     
     # 自動關閉點擊座標比例
     AUTO_CLOSE_CLICK_X_RATIO: float = 0.5
-    AUTO_CLOSE_CLICK_Y_RATIO: float = 0.72
+    AUTO_CLOSE_CLICK_Y_RATIO: float = 1.0
 
     # =========================================================================
     # 自動旋轉按鈕座標比例
     # =========================================================================
-    AUTO_SPIN_BUTTON_X_RATIO: float = 0.8     # 自動轉按鈕 X 座標比例
-    AUTO_SPIN_BUTTON_Y_RATIO: float = 0.77    # 自動轉按鈕 Y 座標比例
+    AUTO_SPIN_BUTTON_X_RATIO: float = 0.55     # 自動轉按鈕 X 座標比例
+    AUTO_SPIN_BUTTON_Y_RATIO: float = 0.78    # 自動轉按鈕 Y 座標比例
+    AUTO_SPIN_BUTTON_10_X_RATIO: float = 0.45 
+    AUTO_SPIN_BUTTON_10_Y_RATIO: float = 0.78
+    AUTO_SPIN_BUTTON_50_X_RATIO: float = 0.5 
+    AUTO_SPIN_BUTTON_50_Y_RATIO: float = 0.78
+    AUTO_SPIN_BUTTON_100_X_RATIO: float = 0.55 
+    AUTO_SPIN_BUTTON_100_Y_RATIO: float = 0.78
     AUTO_SPIN_MENU_WAIT: float = 1.0          # 自動旋轉選單等待時間（秒）
     AUTO_SPIN_VALID_COUNTS: Tuple[int, ...] = (10, 50, 100)  # 有效的自動旋轉次數
     
@@ -277,22 +283,22 @@ class Constants:
     # 購買免費遊戲按鈕座標比例
     # =========================================================================
     # 賽特一專用：只有一個免費遊戲按鈕
-    BUY_FREE_GAME_BUTTON_X_RATIO: float = 0.15    # 免費遊戲區域按鈕 X 座標比例
-    BUY_FREE_GAME_BUTTON_Y_RATIO: float = 0.75    # 免費遊戲區域按鈕 Y 座標比例
-    BUY_FREE_GAME_CONFIRM_X_RATIO: float = 0.65   # 免費遊戲確認按鈕 X 座標比例（賽特一）
-    BUY_FREE_GAME_CONFIRM_Y_RATIO: float = 0.9    # 免費遊戲確認按鈕 Y 座標比例（賽特一）
+    BUY_FREE_GAME_BUTTON_X_RATIO: float = 0.2    # 免費遊戲區域按鈕 X 座標比例
+    BUY_FREE_GAME_BUTTON_Y_RATIO: float = 1    # 免費遊戲區域按鈕 Y 座標比例
+    BUY_FREE_GAME_CONFIRM_X_RATIO: float = 0.6   # 免費遊戲確認按鈕 X 座標比例（賽特一）
+    BUY_FREE_GAME_CONFIRM_Y_RATIO: float = 1.15    # 免費遊戲確認按鈕 Y 座標比例（賽特一）
     
     # 賽特二專用：免費遊戲類別座標 - only_freegame (類別 1)
-    BUY_FREE_GAME_ONLY_FREEGAME_X_RATIO: float = 0.3    # 免費遊戲確認按鈕 X 座標比例
-    BUY_FREE_GAME_ONLY_FREEGAME_Y_RATIO: float = 0.85   # 免費遊戲確認按鈕 Y 座標比例
+    BUY_FREE_GAME_ONLY_FREEGAME_X_RATIO: float = 0.35    # 免費遊戲確認按鈕 X 座標比例
+    BUY_FREE_GAME_ONLY_FREEGAME_Y_RATIO: float = 1.12   # 免費遊戲確認按鈕 Y 座標比例
     
     # 賽特二專用：免費遊戲類別座標 - awake_power (類別 2)
     BUY_FREE_GAME_AWAKE_POWER_X_RATIO: float = 0.5      # 覺醒之力確認按鈕 X 座標比例
-    BUY_FREE_GAME_AWAKE_POWER_Y_RATIO: float = 0.95     # 覺醒之力確認按鈕 Y 座標比例
+    BUY_FREE_GAME_AWAKE_POWER_Y_RATIO: float = 1.2     # 覺醒之力確認按鈕 Y 座標比例
     
     # 賽特二專用：免費遊戲類別座標 - immortal_awake (類別 3)
-    BUY_FREE_GAME_IMMORTAL_AWAKE_X_RATIO: float = 0.7   # 不朽覺醒確認按鈕 X 座標比例
-    BUY_FREE_GAME_IMMORTAL_AWAKE_Y_RATIO: float = 0.85  # 不朽覺醒確認按鈕 Y 座標比例
+    BUY_FREE_GAME_IMMORTAL_AWAKE_X_RATIO: float = 0.65   # 不朽覺醒確認按鈕 X 座標比例
+    BUY_FREE_GAME_IMMORTAL_AWAKE_Y_RATIO: float = 1.12  # 不朽覺醒確認按鈕 Y 座標比例
     FREE_GAME_VALID_TYPES: Tuple[int, ...] = (1, 2, 3)  # 有效的免費遊戲類別
     
     # 購買後等待與結算配置
@@ -320,8 +326,8 @@ class Constants:
     # -------------------------------------------------------------------------
     # 金額模板配置
     # -------------------------------------------------------------------------
-    BETSIZE_DISPLAY_X: float = 0.72
-    BETSIZE_DISPLAY_Y: float = 0.89
+    BETSIZE_DISPLAY_X: float = 0.67
+    BETSIZE_DISPLAY_Y: float = 1.15
     BETSIZE_CROP_MARGIN_X: int = 40
     BETSIZE_CROP_MARGIN_Y: int = 10
     
@@ -345,7 +351,7 @@ class Constants:
     
     # 錯誤訊息確認按鈕座標比例
     ERROR_CONFIRM_BUTTON_X_RATIO: float = 0.5
-    ERROR_CONFIRM_BUTTON_Y_RATIO: float = 0.53
+    ERROR_CONFIRM_BUTTON_Y_RATIO: float = 0.8
     
     # =========================================================================
     # 大廳返回模板配置
@@ -398,10 +404,10 @@ class Constants:
     # =========================================================================
     # 金額調整按鈕配置
     # =========================================================================
-    BETSIZE_INCREASE_BUTTON_X: float = 0.8     # 增加金額按鈕 X 座標比例
-    BETSIZE_INCREASE_BUTTON_Y: float = 0.89    # 增加金額按鈕 Y 座標比例
-    BETSIZE_DECREASE_BUTTON_X: float = 0.63    # 減少金額按鈕 X 座標比例
-    BETSIZE_DECREASE_BUTTON_Y: float = 0.89    # 減少金額按鈕 Y 座標比例
+    BETSIZE_INCREASE_BUTTON_X: float = 0.74     # 增加金額按鈕 X 座標比例
+    BETSIZE_INCREASE_BUTTON_Y: float = 1.15    # 增加金額按鈕 Y 座標比例
+    BETSIZE_DECREASE_BUTTON_X: float = 0.6    # 減少金額按鈕 X 座標比例
+    BETSIZE_DECREASE_BUTTON_Y: float = 1.15    # 減少金額按鈕 Y 座標比例
     BETSIZE_MATCH_THRESHOLD: float = 0.85      # 金額識別匹配閾值
     BETSIZE_ADJUST_STEP_WAIT: float = 1.0      # 調整金額每步等待時間
     BETSIZE_ADJUST_RETRY_WAIT: float = 1.0     # 調整金額重試等待時間
@@ -511,7 +517,7 @@ class Constants:
     # 遊戲金額配置（tuple 支援 in 檢查和索引計算）
     # -------------------------------------------------------------------------
     GAME_BETSIZE: Tuple[int, ...] = (
-        2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40,
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40,
         48, 56, 60, 64, 72, 80, 96, 100, 120, 140, 160, 180, 200,
         240, 280, 300, 320, 360, 400, 420, 480, 500, 540, 560, 600,
         640, 700, 720, 800, 840, 900, 960, 980, 1000, 1080, 1120,
