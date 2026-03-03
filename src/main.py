@@ -2439,6 +2439,9 @@ class ImageDetector:
     def capture_betsize_template(self, driver: WebDriver, amount: float) -> bool:
         """截取下注金額模板。
         
+        金額顯示區域位於 Canvas 下方（比例 > 1.0），
+        因此需要透過 Canvas rect 將 Canvas 相對座標轉換為截圖像素座標。
+        
         參數:
             driver: WebDriver 實例
             amount: 下注金額
@@ -2452,15 +2455,57 @@ class ImageDetector:
         else:
             filename = f"{amount}.png"
         
-        return self._capture_cropped_template(
-            driver=driver,
-            center_x_ratio=Constants.BETSIZE_DISPLAY_X,
-            center_y_ratio=Constants.BETSIZE_DISPLAY_Y,
-            margin_x=Constants.BETSIZE_CROP_MARGIN_X,
-            margin_y=Constants.BETSIZE_CROP_MARGIN_Y,
-            filename=filename,
-            output_dir=get_resource_path("img") / "bet_size"
-        )
+        try:
+            # 截取整個瀏覽器畫面
+            screenshot = driver.get_screenshot_as_png()
+            screenshot_img = Image.open(io.BytesIO(screenshot))
+            image_width, image_height = screenshot_img.size
+            
+            # 取得 Canvas 區域，用於將 Canvas 相對座標轉換為截圖座標
+            canvas_rect = BrowserHelper.get_canvas_rect(driver)
+            if canvas_rect is None:
+                self.logger.error("無法取得 Canvas 區域")
+                return False
+            
+            # 計算設備像素比（截圖像素 / 視窗 CSS 像素）
+            viewport_width = driver.execute_script("return window.innerWidth")
+            viewport_height = driver.execute_script("return window.innerHeight")
+            dpr_x = image_width / viewport_width if viewport_width > 0 else 1.0
+            dpr_y = image_height / viewport_height if viewport_height > 0 else 1.0
+            
+            # Canvas 相對座標 → CSS 像素 → 截圖像素
+            css_x = canvas_rect["x"] + canvas_rect["w"] * Constants.BETSIZE_DISPLAY_X
+            css_y = canvas_rect["y"] + canvas_rect["h"] * Constants.BETSIZE_DISPLAY_Y
+            center_x = int(css_x * dpr_x)
+            center_y = int(css_y * dpr_y)
+            
+            # 確保座標在截圖範圍內
+            center_x = max(0, min(center_x, image_width - 1))
+            center_y = max(0, min(center_y, image_height - 1))
+            
+            # 計算裁切範圍
+            margin_x = Constants.BETSIZE_CROP_MARGIN_X
+            margin_y = Constants.BETSIZE_CROP_MARGIN_Y
+            crop_left = max(0, center_x - margin_x)
+            crop_top = max(0, center_y - margin_y)
+            crop_right = min(image_width, center_x + margin_x)
+            crop_bottom = min(image_height, center_y + margin_y)
+            
+            # 裁切圖片
+            cropped_img = screenshot_img.crop((crop_left, crop_top, crop_right, crop_bottom))
+            
+            # 儲存
+            output_dir = get_resource_path("img") / "bet_size"
+            output_dir.mkdir(parents=True, exist_ok=True)
+            output_path = output_dir / filename
+            cropped_img.save(output_path)
+            
+            self.logger.info(f"模板已儲存: {filename}")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"截取模板失敗: {e}")
+            return False
 
     def capture_blackscreen_template(self, driver: WebDriver) -> bool:
         """截取黑屏區域模板。
@@ -2661,14 +2706,21 @@ class ImageDetector:
             return None, 0.0
 
     def click_betsize_button(self, driver: WebDriver, x_ratio: float, y_ratio: float) -> None:
-        """點擊下注金額調整按鈕。"""
-        # 取得畫面尺寸
-        screenshot = driver.get_screenshot_as_png()
-        w, h = Image.open(io.BytesIO(screenshot)).size
-        x, y = int(w * x_ratio), int(h * y_ratio)
+        """點擊下注金額調整按鈕。
         
-        # 使用標準 CDP 點擊
-        BrowserHelper.execute_cdp_click(driver, x, y)
+        使用 Canvas rect 將 Canvas 相對座標轉換為正確的視窗座標。
+        金額按鈕位於 Canvas 下方（y_ratio > 1.0），
+        不能直接用截圖尺寸乘以比例，需透過 Canvas 位置計算。
+        """
+        canvas_rect = BrowserHelper.get_canvas_rect(driver)
+        if canvas_rect:
+            BrowserHelper.click_canvas_position(driver, canvas_rect, x_ratio, y_ratio)
+        else:
+            # Fallback: 使用截圖尺寸（僅在 Canvas 無法取得時）
+            screenshot = driver.get_screenshot_as_png()
+            w, h = Image.open(io.BytesIO(screenshot)).size
+            x, y = int(w * x_ratio), int(h * y_ratio)
+            BrowserHelper.execute_cdp_click(driver, x, y)
 
     def adjust_betsize(
         self,
