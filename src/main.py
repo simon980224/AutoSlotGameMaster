@@ -23,7 +23,7 @@
         $ python main.py
 
 版本資訊:
-    版本: 2.4.0
+    版本: 2.5.0
     作者: 凡臻科技
     授權: MIT License
 
@@ -117,7 +117,7 @@ class Constants:
     # =========================================================================
     # 版本資訊
     # =========================================================================
-    VERSION: str = "2.4.0"
+    VERSION: str = "2.5.0"
     SYSTEM_NAME: str = "戰神賽特自動化系統"
     
     # =========================================================================
@@ -2436,11 +2436,70 @@ class ImageDetector:
             self.logger.error(f"截取模板失敗: {e}")
             return False
     
+    def _get_betsize_crop_region(
+        self,
+        driver: WebDriver,
+        screenshot_img: Image.Image,
+        margin_multiplier: float = 1.0
+    ) -> Optional[Tuple[int, int, int, int]]:
+        """計算金額顯示區域在截圖上的裁切範圍。
+        
+        使用 Canvas rect + DPR 將 Canvas 相對座標轉換為截圖像素座標。
+        此方法供 capture_betsize_template（擷取模板）和
+        get_current_betsize（識別金額）共用，確保座標計算一致。
+        
+        參數:
+            driver: WebDriver 實例
+            screenshot_img: PIL 截圖物件
+            margin_multiplier: 邊距倍數（識別時使用較大範圍以容納搜尋空間）
+        
+        回傳:
+            (left, top, right, bottom) 裁切範圍，失敗返回 None
+        """
+        try:
+            image_width, image_height = screenshot_img.size
+            
+            # 取得 Canvas 區域
+            canvas_rect = BrowserHelper.get_canvas_rect(driver)
+            if canvas_rect is None:
+                self.logger.error("無法取得 Canvas 區域")
+                return None
+            
+            # 計算設備像素比（截圖像素 / 視窗 CSS 像素）
+            viewport_width = driver.execute_script("return window.innerWidth")
+            viewport_height = driver.execute_script("return window.innerHeight")
+            dpr_x = image_width / viewport_width if viewport_width > 0 else 1.0
+            dpr_y = image_height / viewport_height if viewport_height > 0 else 1.0
+            
+            # Canvas 相對座標 → CSS 像素 → 截圖像素
+            css_x = canvas_rect["x"] + canvas_rect["w"] * Constants.BETSIZE_DISPLAY_X
+            css_y = canvas_rect["y"] + canvas_rect["h"] * Constants.BETSIZE_DISPLAY_Y
+            center_x = int(css_x * dpr_x)
+            center_y = int(css_y * dpr_y)
+            
+            # 確保座標在截圖範圍內
+            center_x = max(0, min(center_x, image_width - 1))
+            center_y = max(0, min(center_y, image_height - 1))
+            
+            # 計算裁切範圍（識別時使用較大邊距）
+            margin_x = int(Constants.BETSIZE_CROP_MARGIN_X * margin_multiplier)
+            margin_y = int(Constants.BETSIZE_CROP_MARGIN_Y * margin_multiplier)
+            crop_left = max(0, center_x - margin_x)
+            crop_top = max(0, center_y - margin_y)
+            crop_right = min(image_width, center_x + margin_x)
+            crop_bottom = min(image_height, center_y + margin_y)
+            
+            return (crop_left, crop_top, crop_right, crop_bottom)
+            
+        except Exception as e:
+            self.logger.error(f"計算金額區域座標失敗: {e}")
+            return None
+    
     def capture_betsize_template(self, driver: WebDriver, amount: float) -> bool:
         """截取下注金額模板。
         
-        金額顯示區域位於 Canvas 下方（比例 > 1.0），
-        因此需要透過 Canvas rect 將 Canvas 相對座標轉換為截圖像素座標。
+        使用 _get_betsize_crop_region 計算裁切範圍，
+        確保與 get_current_betsize 使用相同的座標計算邏輯。
         
         參數:
             driver: WebDriver 實例
@@ -2459,40 +2518,14 @@ class ImageDetector:
             # 截取整個瀏覽器畫面
             screenshot = driver.get_screenshot_as_png()
             screenshot_img = Image.open(io.BytesIO(screenshot))
-            image_width, image_height = screenshot_img.size
             
-            # 取得 Canvas 區域，用於將 Canvas 相對座標轉換為截圖座標
-            canvas_rect = BrowserHelper.get_canvas_rect(driver)
-            if canvas_rect is None:
-                self.logger.error("無法取得 Canvas 區域")
+            # 計算金額區域裁切範圍
+            crop_region = self._get_betsize_crop_region(driver, screenshot_img)
+            if crop_region is None:
                 return False
             
-            # 計算設備像素比（截圖像素 / 視窗 CSS 像素）
-            viewport_width = driver.execute_script("return window.innerWidth")
-            viewport_height = driver.execute_script("return window.innerHeight")
-            dpr_x = image_width / viewport_width if viewport_width > 0 else 1.0
-            dpr_y = image_height / viewport_height if viewport_height > 0 else 1.0
-            
-            # Canvas 相對座標 → CSS 像素 → 截圖像素
-            css_x = canvas_rect["x"] + canvas_rect["w"] * Constants.BETSIZE_DISPLAY_X
-            css_y = canvas_rect["y"] + canvas_rect["h"] * Constants.BETSIZE_DISPLAY_Y
-            center_x = int(css_x * dpr_x)
-            center_y = int(css_y * dpr_y)
-            
-            # 確保座標在截圖範圍內
-            center_x = max(0, min(center_x, image_width - 1))
-            center_y = max(0, min(center_y, image_height - 1))
-            
-            # 計算裁切範圍
-            margin_x = Constants.BETSIZE_CROP_MARGIN_X
-            margin_y = Constants.BETSIZE_CROP_MARGIN_Y
-            crop_left = max(0, center_x - margin_x)
-            crop_top = max(0, center_y - margin_y)
-            crop_right = min(image_width, center_x + margin_x)
-            crop_bottom = min(image_height, center_y + margin_y)
-            
             # 裁切圖片
-            cropped_img = screenshot_img.crop((crop_left, crop_top, crop_right, crop_bottom))
+            cropped_img = screenshot_img.crop(crop_region)
             
             # 儲存
             output_dir = get_resource_path("img") / "bet_size"
@@ -2595,7 +2628,9 @@ class ImageDetector:
     ) -> Optional[float]:
         """取得當前下注金額。
         
-        使用圖片比對方式識別目前遊戲畫面中顯示的金額。
+        先裁切金額顯示區域（使用 2 倍邊距作為搜尋範圍），
+        再對裁切區域進行模板比對，避免在整張截圖上誤匹配其他數字。
+        座標計算與 capture_betsize_template 共用 _get_betsize_crop_region。
         
         參數:
             driver: WebDriver 實例
@@ -2615,11 +2650,21 @@ class ImageDetector:
                 
                 # 截取整個瀏覽器截圖
                 screenshot = driver.get_screenshot_as_png()
-                screenshot_np = np.array(Image.open(io.BytesIO(screenshot)))
-                screenshot_gray = cv2.cvtColor(screenshot_np, cv2.COLOR_RGB2GRAY)
+                screenshot_img = Image.open(io.BytesIO(screenshot))
+                
+                # 裁切金額顯示區域（使用 2 倍邊距確保模板能被搜尋到）
+                crop_region = self._get_betsize_crop_region(driver, screenshot_img, margin_multiplier=2.0)
+                if crop_region is not None:
+                    cropped_img = screenshot_img.crop(crop_region)
+                    search_np = np.array(cropped_img)
+                else:
+                    # Fallback: 無法取得 Canvas 則使用全圖
+                    search_np = np.array(screenshot_img)
+                
+                search_gray = cv2.cvtColor(search_np, cv2.COLOR_RGB2GRAY)
                 
                 # 與資料夾中的圖片進行比對
-                matched_amount, confidence = self._compare_betsize_images(screenshot_gray)
+                matched_amount, confidence = self._compare_betsize_images(search_gray)
                 
                 if matched_amount:
                     try:
@@ -3553,8 +3598,9 @@ class GameControlCenter:
         """處理錯誤訊息後回到大廳的情況：重新進入遊戲。
         
         執行流程：
-        1. 導航進入遊戲 (_recovery_navigate_to_game)
-        2. 執行圖片檢測流程 (_recovery_image_detection_flow)
+        1. 導航到登入頁面 (_recovery_navigate_to_login)
+        2. 導航進入遊戲 (_recovery_navigate_to_game)
+        3. 執行圖片檢測流程 (_recovery_image_detection_flow)
         
         參數:
             bt: BrowserThread 實例
@@ -3565,14 +3611,20 @@ class GameControlCenter:
         self.logger.info(f"瀏覽器 {browser_index} ({username}) 開始執行重新進入遊戲流程...")
         
         try:
-            # ===== 步驟 1: 進入遊戲 =====
-            self.logger.info(f"瀏覽器 {browser_index} 步驟 1/2: 進入遊戲")
+            # ===== 步驟 1: 導航到登入頁面 =====
+            self.logger.info(f"瀏覽器 {browser_index} 步驟 1/3: 導航到登入頁面")
+            if not self._recovery_navigate_to_login(bt):
+                self.logger.error(f"瀏覽器 {browser_index} ({username}) 導航到登入頁面失敗")
+                return
+            
+            # ===== 步驟 2: 進入遊戲 =====
+            self.logger.info(f"瀏覽器 {browser_index} 步驟 2/3: 進入遊戲")
             if not self._recovery_navigate_to_game(bt):
                 self.logger.error(f"瀏覽器 {browser_index} ({username}) 進入遊戲失敗")
                 return
             
-            # ===== 步驟 2: 執行圖片檢測流程 =====
-            self.logger.info(f"瀏覽器 {browser_index} 步驟 2/2: 執行圖片檢測流程")
+            # ===== 步驟 3: 執行圖片檢測流程 =====
+            self.logger.info(f"瀏覽器 {browser_index} 步驟 3/3: 執行圖片檢測流程")
             if not self._recovery_image_detection_flow(bt):
                 self.logger.error(f"瀏覽器 {browser_index} ({username}) 圖片檢測流程失敗")
                 return
@@ -3648,22 +3700,28 @@ class GameControlCenter:
         
         try:
             # ===== 步驟 1: 點擊返回大廳按鈕 =====
-            self.logger.info(f"瀏覽器 {browser_index} 步驟 1/3: 點擊返回大廳按鈕")
+            self.logger.info(f"瀏覽器 {browser_index} 步驟 1/4: 點擊返回大廳按鈕")
             if not self._recovery_click_lobby_return(bt):
                 self.logger.error(f"瀏覽器 {browser_index} ({username}) 點擊返回大廳按鈕失敗")
                 return
             
-            # 等待畫面切換到大廳
+            # 等待畫面切換
             time.sleep(Constants.PAGE_LOAD_WAIT)
             
-            # ===== 步驟 2: 重新進入遊戲 =====
-            self.logger.info(f"瀏覽器 {browser_index} 步驟 2/3: 重新進入遊戲")
+            # ===== 步驟 2: 導航到登入頁面 =====
+            self.logger.info(f"瀏覽器 {browser_index} 步驟 2/4: 導航到登入頁面")
+            if not self._recovery_navigate_to_login(bt):
+                self.logger.error(f"瀏覽器 {browser_index} ({username}) 導航到登入頁面失敗")
+                return
+            
+            # ===== 步驟 3: 重新進入遊戲 =====
+            self.logger.info(f"瀏覽器 {browser_index} 步驟 3/4: 重新進入遊戲")
             if not self._recovery_navigate_to_game(bt):
                 self.logger.error(f"瀏覽器 {browser_index} ({username}) 重新進入遊戲失敗")
                 return
             
-            # ===== 步驟 3: 執行圖片檢測流程 =====
-            self.logger.info(f"瀏覽器 {browser_index} 步驟 3/3: 執行圖片檢測流程")
+            # ===== 步驟 4: 執行圖片檢測流程 =====
+            self.logger.info(f"瀏覽器 {browser_index} 步驟 4/4: 執行圖片檢測流程")
             if not self._recovery_image_detection_flow(bt):
                 self.logger.error(f"瀏覽器 {browser_index} ({username}) 圖片檢測流程失敗")
                 return
@@ -3753,18 +3811,50 @@ class GameControlCenter:
         return False    
 
     def _recovery_navigate_to_game(self, bt: 'BrowserThread') -> bool:
-        """恢復流程：搜尋遊戲並進入（直接操作 driver）。"""
+        """恢復流程：搜尋遊戲並進入（直接操作 driver）。
+        
+        啟動時瀏覽器是最大化狀態進入遊戲，之後才縮小排列。
+        恢復時視窗已縮小為 600x400，需先最大化才能找到遊戲卡片。
+        """
+        driver = bt.context.driver
+        
         for attempt in range(Constants.MAX_RETRY_ATTEMPTS):
             try:
                 if attempt > 0:
                     time.sleep(Constants.RETRY_INTERVAL)
                 
-                if BrowserHelper.enter_game_from_lobby(bt.context.driver):
+                # 最大化視窗（與啟動流程一致）
+                driver.maximize_window()
+                time.sleep(Constants.NORMAL_WAIT)
+                
+                if BrowserHelper.enter_game_from_lobby(driver):
+                    # 進入遊戲後恢復視窗大小（與 arrange_windows 一致）
+                    index = bt.index
+                    columns = Constants.DEFAULT_WINDOW_COLUMNS
+                    width = Constants.DEFAULT_WINDOW_WIDTH
+                    height = Constants.DEFAULT_WINDOW_HEIGHT
+                    row = (index - 1) // columns
+                    col = (index - 1) % columns
+                    driver.set_window_size(width, height)
+                    driver.set_window_position(col * width, row * height)
                     return True
                     
             except Exception as e:
                 if attempt == Constants.MAX_RETRY_ATTEMPTS - 1:
                     self.logger.debug(f"進入遊戲失敗: {e}")
+        
+        # 失敗時也恢復視窗大小
+        try:
+            index = bt.index
+            columns = Constants.DEFAULT_WINDOW_COLUMNS
+            width = Constants.DEFAULT_WINDOW_WIDTH
+            height = Constants.DEFAULT_WINDOW_HEIGHT
+            row = (index - 1) // columns
+            col = (index - 1) % columns
+            driver.set_window_size(width, height)
+            driver.set_window_position(col * width, row * height)
+        except Exception:
+            pass
         return False
     
     def _recovery_image_detection_flow(self, bt: 'BrowserThread') -> bool:
