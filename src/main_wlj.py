@@ -268,8 +268,8 @@ class Constants:
     # =========================================================================
     # 自動旋轉按鈕座標比例
     # =========================================================================
-    AUTO_SPIN_BUTTON_X_RATIO: float = 0.55     # 自動轉按鈕 X 座標比例
-    AUTO_SPIN_BUTTON_Y_RATIO: float = 0.78    # 自動轉按鈕 Y 座標比例
+    AUTO_SPIN_BUTTON_X_RATIO: float = 0.74     # 自動轉按鈕 X 座標比例
+    AUTO_SPIN_BUTTON_Y_RATIO: float = 1.0    # 自動轉按鈕 Y 座標比例
     AUTO_SPIN_BUTTON_10_X_RATIO: float = 0.45 
     AUTO_SPIN_BUTTON_10_Y_RATIO: float = 0.78
     AUTO_SPIN_BUTTON_50_X_RATIO: float = 0.5 
@@ -377,9 +377,9 @@ class Constants:
     # 自動旋轉次數座標映射
     # =========================================================================
     AUTO_SPIN_COUNT_RATIOS: Dict[int, Tuple[float, float]] = {
-        10: (0.4, 0.5),   # AUTO_SPIN_10
-        50: (0.5, 0.5),   # AUTO_SPIN_50
-        100: (0.57, 0.5),  # AUTO_SPIN_100
+        10: (AUTO_SPIN_BUTTON_10_X_RATIO, AUTO_SPIN_BUTTON_10_Y_RATIO),   # AUTO_SPIN_10
+        50: (AUTO_SPIN_BUTTON_50_X_RATIO, AUTO_SPIN_BUTTON_50_Y_RATIO),   # AUTO_SPIN_50
+        100: (AUTO_SPIN_BUTTON_100_X_RATIO, AUTO_SPIN_BUTTON_100_Y_RATIO),  # AUTO_SPIN_100
     }
     
     # =========================================================================
@@ -506,6 +506,26 @@ class Constants:
             "name": "減少金額按鈕",
             "x_ratio": BETSIZE_DECREASE_BUTTON_X,
             "y_ratio": BETSIZE_DECREASE_BUTTON_Y,
+        },
+        "15": {
+            "name": "自動旋轉 10 次",
+            "x_ratio": AUTO_SPIN_BUTTON_10_X_RATIO,
+            "y_ratio": AUTO_SPIN_BUTTON_10_Y_RATIO,
+        },
+        "16": {
+            "name": "自動旋轉 50 次",
+            "x_ratio": AUTO_SPIN_BUTTON_50_X_RATIO,
+            "y_ratio": AUTO_SPIN_BUTTON_50_Y_RATIO,
+        },
+        "17": {
+            "name": "自動旋轉 100 次",
+            "x_ratio": AUTO_SPIN_BUTTON_100_X_RATIO,
+            "y_ratio": AUTO_SPIN_BUTTON_100_Y_RATIO,
+        },
+        "18": {
+            "name": "金額顯示位置",
+            "x_ratio": BETSIZE_DISPLAY_X,
+            "y_ratio": BETSIZE_DISPLAY_Y,
         },
     }
     # 點擊區域截圖標記設定
