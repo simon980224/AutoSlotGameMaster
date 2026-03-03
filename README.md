@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <a href="#"><img src="https://img.shields.io/badge/version-2.4.0-brightgreen.svg" alt="Version"></a>
+  <a href="#"><img src="https://img.shields.io/badge/version-2.5.0-brightgreen.svg" alt="Version"></a>
   <a href="#"><img src="https://img.shields.io/badge/python-3.8%2B-blue.svg" alt="Python"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License"></a>
   <a href="#"><img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg" alt="Platform"></a>
@@ -208,6 +208,18 @@ GAME_LOGIN_BUTTON_Y_RATIO: float = 0.9   # 相對於 canvas 高度
 ---
 
 ## 📜 版本歷程
+
+### 2.5.0 (2026-02-28)
+
+- 修復: 下注金額模板擷取因 Canvas 外座標（比例 >1.0）導致 `Coordinate 'lower' is less than 'upper'` 崩潰，改用 Canvas rect + DPR 計算實際截圖像素座標
+- 修復: 下注金額辨識因模板裁切區域變更導致全螢幕匹配誤判，改為先裁切下注區域（2 倍邊距）再進行模板匹配
+- 修復: 錯誤訊息處理後回到大廳未導航至登入頁，導致找不到遊戲卡片無法重新進入遊戲
+- 修復: 返回大廳偵測恢復流程未導航至登入頁，導致恢復失敗
+- 修復: 恢復流程視窗過小（600×400）無法找到遊戲卡片，改為恢復前最大化視窗、進入遊戲後還原尺寸與位置
+- 新增: `_get_betsize_crop_region` 共用方法 - 計算下注金額顯示區域的裁切座標
+- 新增: `_recovery_navigate_to_login` 步驟加入 `_handle_error_return_to_game` 與 `_handle_lobby_return_recovery` 流程
+- 改進: `click_betsize_button` 改用 `BrowserHelper.click_canvas_position` 統一座標計算
+- 改進: 恢復流程新增視窗最大化/還原邏輯，確保遊戲卡片可見
 
 ### 2.4.0 (2026-02-27)
 
