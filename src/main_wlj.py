@@ -23,7 +23,7 @@
         $ python main.py
 
 版本資訊:
-    版本: 2.5.0
+    版本: 2.6.0
     作者: 凡臻科技
     授權: MIT License
 
@@ -117,7 +117,7 @@ class Constants:
     # =========================================================================
     # 版本資訊
     # =========================================================================
-    VERSION: str = "2.5.0"
+    VERSION: str = "2.6.0"
     SYSTEM_NAME: str = "戰神賽特自動化系統"
     
     # =========================================================================
@@ -284,7 +284,7 @@ class Constants:
     # =========================================================================
     # 賽特一專用：只有一個免費遊戲按鈕
     BUY_FREE_GAME_BUTTON_X_RATIO: float = 0.2    # 免費遊戲區域按鈕 X 座標比例
-    BUY_FREE_GAME_BUTTON_Y_RATIO: float = 1    # 免費遊戲區域按鈕 Y 座標比例
+    BUY_FREE_GAME_BUTTON_Y_RATIO: float = 1.025    # 免費遊戲區域按鈕 Y 座標比例
     BUY_FREE_GAME_CONFIRM_X_RATIO: float = 0.6   # 免費遊戲確認按鈕 X 座標比例（賽特一）
     BUY_FREE_GAME_CONFIRM_Y_RATIO: float = 1.15    # 免費遊戲確認按鈕 Y 座標比例（賽特一）
     
@@ -2185,7 +2185,7 @@ class BrowserHelper:
     def enter_game_from_lobby(driver: WebDriver) -> bool:
         """從大廳頁面搜尋遊戲並進入。
         
-        共用流程：關閉彈窗 → 點擊熱門遊戲 → 找遊戲卡片 → 點擊 → 切換 iframe → 驗證 Canvas。
+        共用流程：確認頁面載入 → 關閉彈窗 → 點擊熱門遊戲 → 確認頁面穩定 → 找遊戲卡片（確認可點擊）→ 點擊 → 確認頁面載入 → 切換 iframe → 驗證 Canvas。
         
         參數:
             driver: WebDriver 實例
@@ -2193,39 +2193,52 @@ class BrowserHelper:
         回傳:
             是否成功進入遊戲
         """
-        # 1. 關閉可能出現的公告彈窗
+        # 1. 確認頁面完全載入
+        WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT_LONG).until(
+            lambda d: d.execute_script("return document.readyState") == "complete"
+        )
+        
+        # 2. 關閉可能出現的公告彈窗
         try:
             BrowserHelper.close_popups(driver)
             time.sleep(Constants.NORMAL_WAIT)
         except Exception:
             pass
         
-        # 2. 點擊「熱門遊戲」分類標籤，展開遊戲列表
+        # 3. 點擊「熱門遊戲」分類標籤，展開遊戲列表
         hot_game_tab = WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
             EC.element_to_be_clickable((By.XPATH, "//p[text()='熱門遊戲']"))
         )
         driver.execute_script("arguments[0].click();", hot_game_tab)
         time.sleep(Constants.PAGE_LOAD_WAIT)
         
-        # 3. 用 img src 找遊戲卡片並點擊
+        # 4. 再次確認頁面穩定（遊戲列表載入完畢）
+        WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
+            lambda d: d.execute_script("return document.readyState") == "complete"
+        )
+        
+        # 5. 用 img src 找遊戲卡片並確認可點擊
         game_pattern = Constants.get_game_pattern()
         game_selector = f"//img[contains(@src, '{game_pattern}')]"
         game_element = WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
-            EC.presence_of_element_located((By.XPATH, game_selector))
+            EC.element_to_be_clickable((By.XPATH, game_selector))
         )
         driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", game_element)
-        time.sleep(Constants.NORMAL_WAIT)
+        time.sleep(Constants.PAGE_LOAD_WAIT)
         driver.execute_script("arguments[0].click();", game_element)
         time.sleep(Constants.PAGE_LOAD_WAIT_LONG)
         
-        # 4. 切換到 iframe
+        # 6. 等待遊戲頁面載入完成後切換到 iframe
         time.sleep(Constants.PAGE_LOAD_WAIT)
+        WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT_LONG).until(
+            lambda d: d.execute_script("return document.readyState") == "complete"
+        )
         iframe = WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT_LONG).until(
             EC.presence_of_element_located((By.XPATH, Constants.GAME_IFRAME))
         )
         driver.switch_to.frame(iframe)
         
-        # 5. 驗證 Canvas 存在
+        # 7. 驗證 Canvas 存在
         WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
             lambda d: d.execute_script(f"return document.getElementById('{Constants.GAME_CANVAS}') !== null;")
         )
@@ -5044,7 +5057,7 @@ class GameControlCenter:
         self.logger.info("")
         
         def auto_close_browsers() -> None:
-            """自動關閉所有瀏覽器。"""
+            """自動關閉所有瀏覽器並終止程序。"""
             if self.running:
                 self.logger.info("")
                 self.logger.info(f"[計時] {int(countdown_seconds)} 秒已到，自動關閉所有瀏覽器...")
@@ -5053,6 +5066,10 @@ class GameControlCenter:
                 self._handle_quit_command('0')
                 # 停止控制面板
                 self.running = False
+                # 等待瀏覽器完全關閉後終止程序（關閉終端 console）
+                self.logger.info("程序即將終止...")
+                time.sleep(2.0)
+                os._exit(0)
         
         self._auto_close_timer = threading.Timer(countdown_seconds, auto_close_browsers)
         self._auto_close_timer.daemon = True
