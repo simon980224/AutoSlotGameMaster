@@ -17,7 +17,7 @@
 Constants          → 所有常量集中管理（版本、URL、XPath、座標比例、超時）
 UserCredential     → 用戶帳密 + Proxy 資料結構 (dataclass, frozen=True)
 BetRule            → 下注規則：a(自動旋轉)、s(定時旋轉)、f(免費遊戲)
-ConfigReader       → 讀取 lib/用戶資料.txt 和 lib/用戶規則.txt
+ConfigReader       → 讀取 lib/用戶資料.txt、lib/用戶規則.txt 和 lib/用戶設定.txt
 LocalProxyServer   → 本地 Proxy 中繼伺服器（socket 實作）
 BrowserManager     → Chrome WebDriver 管理與多視窗排列
 ImageDetector      → OpenCV 模板匹配（cv2.matchTemplate）
@@ -42,6 +42,9 @@ GAME_LOGIN_BUTTON_Y_RATIO = 0.9   # 相對於 canvas 高度
 - **用戶規則** (`lib/用戶規則.txt`): 前綴 + 規則類型 + 參數
   - 前綴: 無=循環執行, `-`=執行一次, `#`=註釋
   - 類型: `s:金額:間隔:時間`, `a:金額:次數`, `f:金額[:類別]`
+- **用戶設定** (`lib/用戶設定.txt`): `參數名稱=值` 格式，用於覆蓋 Constants 預設值
+  - 目前開放: `AUTO_CLICK_INTERVAL`（自動跳過點擊間隔秒數）
+  - 檔案不存在時不報錯，直接使用預設值
 
 ### 圖片模板放置
 

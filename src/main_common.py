@@ -23,7 +23,7 @@
         $ python main.py
 
 版本資訊:
-    版本: 2.5.0
+    版本: 2.5.1
     作者: 凡臻科技
     授權: MIT License
 
@@ -117,7 +117,7 @@ class Constants:
     # =========================================================================
     # 版本資訊
     # =========================================================================
-    VERSION: str = "2.5.0"
+    VERSION: str = "2.5.1"
     SYSTEM_NAME: str = "戰神賽特自動化系統"
     
     # =========================================================================
@@ -132,6 +132,7 @@ class Constants:
     DEFAULT_LIB_PATH: str = "lib"
     DEFAULT_CREDENTIALS_FILE: str = "用戶資料.txt"
     DEFAULT_RULES_FILE: str = "用戶規則.txt"
+    DEFAULT_SETTINGS_FILE: str = "用戶設定.txt"
     
     # =========================================================================
     # 代理伺服器配置
@@ -417,6 +418,50 @@ class Constants:
     # =========================================================================
     # 可重試錯誤關鍵字（網路錯誤 + WebDriver 瞬態錯誤）
     # =========================================================================
+    # =========================================================================
+    # 用戶可自定義參數映射（參數名稱 → (Constants 屬性名, 型別轉換函式)）
+    # =========================================================================
+    CONFIGURABLE_SETTINGS: Dict[str, Tuple[str, type]] = {
+        'AUTO_CLICK_INTERVAL': ('AUTO_CLICK_INTERVAL', int),
+    }
+
+    @classmethod
+    def apply_user_settings(
+        cls,
+        settings: Dict[str, str],
+        logger: Optional[logging.Logger] = None
+    ) -> None:
+        """將用戶自定義設定覆蓋到 Constants 類別屬性。
+
+        參數:
+            settings: 從用戶設定檔讀取的鍵值對字典。
+            logger: 日誌記錄器（可選）。
+        """
+        applied_count = 0
+        for key, value_str in settings.items():
+            if key not in cls.CONFIGURABLE_SETTINGS:
+                if logger:
+                    logger.warning(f"未知的設定參數: {key}，已忽略")
+                continue
+
+            attr_name, type_converter = cls.CONFIGURABLE_SETTINGS[key]
+            try:
+                if type_converter == str:
+                    converted_value = value_str
+                else:
+                    converted_value = type_converter(value_str)
+                old_value = getattr(cls, attr_name)
+                setattr(cls, attr_name, converted_value)
+                if logger and converted_value != old_value:
+                    logger.info(f"  {key}: {old_value} → {converted_value}")
+                applied_count += 1
+            except (ValueError, TypeError) as e:
+                if logger:
+                    logger.warning(f"設定參數 {key} 的值無效: {value_str} ({e})")
+
+        if logger:
+            logger.info(f"已套用 {applied_count} 項用戶設定")
+
     NETWORK_ERROR_KEYWORDS: Tuple[str, ...] = (
         'timeout', 'timed out', 'connection', 'network', 'err_',
         'loading', 'stale', 'symbols not available',
@@ -1676,6 +1721,59 @@ class ConfigReader:
                 continue
         
         return rules
+
+    def read_user_settings(
+        self,
+        filename: str = Constants.DEFAULT_SETTINGS_FILE
+    ) -> Dict[str, str]:
+        """讀取用戶自定義設定檔案。
+
+        檔案格式: 參數名稱=值（以 # 開頭為註釋）
+
+        參數:
+            filename: 設定檔名稱（預設 用戶設定.txt）。
+
+        回傳:
+            設定鍵值對字典。若檔案不存在則回傳空字典。
+        """
+        file_path = self.lib_path / filename
+
+        if not file_path.exists():
+            self.logger.info(f"用戶設定檔不存在: {file_path}，使用預設值")
+            return {}
+
+        settings: Dict[str, str] = {}
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                for line_number, line in enumerate(f, start=1):
+                    stripped = line.strip()
+                    # 跳過空行和註釋行
+                    if not stripped or stripped.startswith('#'):
+                        continue
+
+                    if '=' not in stripped:
+                        self.logger.warning(
+                            f"用戶設定第 {line_number} 行格式錯誤（缺少 =）: {stripped}"
+                        )
+                        continue
+
+                    key, _, value = stripped.partition('=')
+                    key = key.strip()
+                    value = value.strip()
+
+                    if not key:
+                        self.logger.warning(
+                            f"用戶設定第 {line_number} 行參數名稱為空: {stripped}"
+                        )
+                        continue
+
+                    settings[key] = value
+
+        except (IOError, OSError) as e:
+            self.logger.warning(f"讀取用戶設定檔失敗: {e}，使用預設值")
+            return {}
+
+        return settings
 
 
 # =============================================================================
@@ -6392,7 +6490,8 @@ class AutoSlotGameAppStarter:
         """步驟 1: 載入配置檔案。
         
         從 lib/用戶資料.txt 讀取用戶帳號密碼，
-        從 lib/用戶規則.txt 讀取下注規則。
+        從 lib/用戶規則.txt 讀取下注規則，
+        從 lib/用戶設定.txt 讀取用戶自定義參數（可選）。
         
         異常:
             ConfigurationError: 配置檔案格式錯誤時拋出。
@@ -6410,6 +6509,14 @@ class AutoSlotGameAppStarter:
         # 讀取用戶規則
         self.rules = self.config_reader.read_bet_rules()
         self.logger.info(f"讀取到 {len(self.rules)} 條規則")
+        
+        # 讀取用戶設定並套用
+        user_settings = self.config_reader.read_user_settings()
+        if user_settings:
+            self.logger.info("套用用戶自定義設定:")
+            Constants.apply_user_settings(user_settings, logger=self.logger)
+        else:
+            self.logger.info("未偵測到用戶自定義設定，使用預設值")
         
         self.logger.info("")
     

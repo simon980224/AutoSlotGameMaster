@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <a href="#"><img src="https://img.shields.io/badge/version-2.5.0-brightgreen.svg" alt="Version"></a>
+  <a href="#"><img src="https://img.shields.io/badge/version-2.5.1-brightgreen.svg" alt="Version"></a>
   <a href="#"><img src="https://img.shields.io/badge/python-3.8%2B-blue.svg" alt="Python"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License"></a>
   <a href="#"><img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg" alt="Platform"></a>
@@ -71,7 +71,8 @@ AutoSlotGameMaster/
 │   └── main_jfw.py      # 金富翁自動化
 ├── lib/
 │   ├── 用戶資料.txt      # 帳號密碼與 Proxy 設定
-│   └── 用戶規則.txt      # 下注規則配置
+│   ├── 用戶規則.txt      # 下注規則配置
+│   └── 用戶設定.txt      # 用戶自定義參數設定
 ├── img/
 │   └── bet_size/        # 金額識別模板
 ├── build.py             # PyInstaller 打包腳本
@@ -99,6 +100,18 @@ user001,pass123,192.168.1.1:8080:proxyuser:proxypass
 | (無) | 循環執行     |
 | `-`  | 執行一次     |
 | `#`  | 註釋（跳過） |
+
+### 用戶設定 (`lib/用戶設定.txt`)
+
+用於自定義系統參數，格式：`參數名稱=值`，以 `#` 開頭為註釋。
+
+| 參數                  | 預設值 | 說明                         |
+| --------------------- | ------ | ---------------------------- |
+| `AUTO_CLICK_INTERVAL` | 30     | 自動跳過點擊間隔（秒）       |
+
+> 未設定的參數使用系統預設值，檔案不存在時也不會報錯。
+
+### 用戶規則格式
 
 | 規則類型     | 格式                                    | 範例        |
 | ------------ | --------------------------------------- | ----------- |
@@ -208,6 +221,14 @@ GAME_LOGIN_BUTTON_Y_RATIO: float = 0.9   # 相對於 canvas 高度
 ---
 
 ## 📜 版本歷程
+
+### 2.5.1 (2026-03-13)
+
+- 新增: `lib/用戶設定.txt` 用戶自定義參數配置檔，支援 `參數名稱=值` 格式
+- 新增: `AUTO_CLICK_INTERVAL` 參數開放用戶自定義（自動跳過點擊間隔秒數，預設 30）
+- 新增: `Constants.CONFIGURABLE_SETTINGS` 映射表與 `apply_user_settings()` 類別方法，支援動態覆蓋常量
+- 新增: `ConfigReader.read_user_settings()` 方法，解析用戶設定檔（檔案不存在時不報錯、使用預設值）
+- 改進: `_step_load_config()` 初始化流程新增用戶設定讀取與套用步驟，啟動時自動載入
 
 ### 2.5.0 (2026-02-28)
 
